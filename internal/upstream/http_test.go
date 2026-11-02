@@ -496,7 +496,7 @@ func TestHTTPContextTimeoutAndConcurrentClose(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	data, _ := json.Marshal(rpcRequest(12, "tools/call", nil))
-	if err := transport.post(ctx, data, wire.Raw(12), true, false, false); err == nil || !strings.Contains(err.Error(), "timed out") {
+	if err := transport.post(ctx, data, wire.Raw(12), true, false, false, false); err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("timeout not reported: %v", err)
 	}
 	var closers sync.WaitGroup
@@ -533,7 +533,7 @@ func TestHTTPGETBackpressureDoesNotSilentlyRotate(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	for i := 0; i < cap(transport.incoming); i++ {
-		transport.incoming <- wire.Notification("queued", nil)
+		transport.incoming <- routedMessage{message: wire.Notification("queued", nil)}
 	}
 	ctx, cancel := context.WithTimeout(transport.ctx, 40*time.Millisecond)
 	defer cancel()

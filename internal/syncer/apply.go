@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"agentmux/internal/config"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -52,6 +53,12 @@ func fileUnchanged(path string, before []byte, existed bool) error {
 }
 
 func (p *Plan) preflight() error {
+	if p.sourceConfigDigest != "" {
+		latest, err := config.Load(p.root)
+		if err != nil || digest(latest) != p.sourceConfigDigest {
+			return fmt.Errorf("canonical MCP or harness configuration changed since planning; refresh preview")
+		}
+	}
 	if err := ensureNoSymlinkParents(p.root, p.statePath); err != nil {
 		return err
 	}
@@ -67,6 +74,18 @@ func (p *Plan) preflight() error {
 }
 
 func (p *Plan) checkChange(change Change) error {
+	if change.source != "" {
+		if err := ensureNoSymlinkParents(p.root, change.source); err != nil {
+			return err
+		}
+		contents, exists, err := readOptional(change.source)
+		if err != nil {
+			return err
+		}
+		if exists != change.sourceExists || exists && rawDigest(contents) != change.sourceHash {
+			return fmt.Errorf("source instructions changed since planning: %s", change.source)
+		}
+	}
 	path := change.Path
 	if change.skill != nil {
 		path = filepath.Dir(path)
@@ -181,6 +200,22 @@ func (p *Plan) applyChange(change Change, backup string) (func() error, error) {
 		if err := atomicWrite(backup, change.before, 0o600); err != nil {
 			return nil, err
 		}
+	}
+	if change.remove {
+		if change.exists {
+			if err := os.Remove(change.Path); err != nil {
+				return nil, err
+			}
+		}
+		return func() error {
+			if err := fileUnchanged(change.Path, nil, false); err != nil {
+				return err
+			}
+			if change.exists {
+				return atomicWrite(change.Path, change.before, mode)
+			}
+			return nil
+		}, nil
 	}
 	if err := atomicWrite(change.Path, change.after, mode); err != nil {
 		return nil, err

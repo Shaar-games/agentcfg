@@ -13,6 +13,10 @@ import (
 
 const MaxFrameSize = 32 << 20
 
+// ModernProtocolVersion is the request-scoped MCP revision introduced in 2026.
+// It has no initialize handshake or transport-level HTTP session.
+const ModernProtocolVersion = "2026-07-28"
+
 // Message keeps unknown MCP fields intact when request IDs are rewritten.
 type Message map[string]json.RawMessage
 
@@ -41,6 +45,27 @@ func (m Message) Clone() Message {
 }
 
 func (m Message) HasID() bool { return len(m.ID()) != 0 && !bytes.Equal(m.ID(), []byte("null")) }
+
+// IsModernRequest identifies a well-formed stateless 2026 request envelope.
+// Preserve the original _meta when forwarding: it belongs to the originating
+// client, not to the shared broker process.
+func IsModernRequest(m Message) bool {
+	if m.Method() == "" || !m.HasID() {
+		return false
+	}
+	var params struct {
+		Meta map[string]json.RawMessage `json:"_meta"`
+	}
+	if json.Unmarshal(m["params"], &params) != nil || params.Meta == nil {
+		return false
+	}
+	var version string
+	if json.Unmarshal(params.Meta["io.modelcontextprotocol/protocolVersion"], &version) != nil || version != ModernProtocolVersion {
+		return false
+	}
+	var capabilities map[string]json.RawMessage
+	return json.Unmarshal(params.Meta["io.modelcontextprotocol/clientCapabilities"], &capabilities) == nil && capabilities != nil
+}
 
 func Error(id json.RawMessage, code int, message string) Message {
 	if len(id) == 0 {

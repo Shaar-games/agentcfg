@@ -31,6 +31,7 @@ func registry(base, scope string) []target {
 		{name: "codex", path: ".codex/config.toml", key: "mcp_servers", skills: ".agents/skills", toml: true},
 		{name: "opencode", path: opencode, key: "mcp", skills: ".opencode/skills"},
 		{name: "gemini", path: ".gemini/settings.json", key: "mcpServers", skills: ".gemini/skills"},
+		{name: "antigravity", path: ".gemini/config/mcp_config.json", key: "mcpServers", skills: ".gemini/config/skills"},
 		{name: "vscode", path: ".vscode/mcp.json", key: "servers", skills: ".github/skills"},
 	}
 	if scope == "user" {
@@ -53,7 +54,7 @@ func proxyEntry(t target, binary, root, name string) map[string]any {
 		return map[string]any{"type": "local", "command": append([]string{binary}, args...), "enabled": true}
 	}
 	entry := map[string]any{"command": binary, "args": args}
-	if t.name != "codex" && t.name != "gemini" {
+	if t.name != "codex" && t.name != "gemini" && t.name != "antigravity" {
 		entry["type"] = "stdio"
 	}
 	return entry

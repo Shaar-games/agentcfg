@@ -143,7 +143,13 @@ func spawn(root string, endpoint ipc.Endpoint) error {
 	command.Stdout, command.Stderr = log, log
 	ipc.Detach(command)
 	if err := command.Start(); err != nil {
-		return fmt.Errorf("start detached broker: %w", err)
+		if !ipc.RetryInInheritedJob(command, err) {
+			return fmt.Errorf("start detached broker: %w", err)
+		}
+		if retryErr := command.Start(); retryErr != nil {
+			return fmt.Errorf("start detached broker with inherited job fallback: %w (breakaway failure: %v)", retryErr, err)
+		}
+		_, _ = fmt.Fprintln(log, "warning: Windows Job Object denied breakaway; the broker may stop when the outer job closes")
 	}
 	return command.Process.Release()
 }

@@ -2,8 +2,8 @@
 
 ## Autorité
 
-Les fichiers canoniques `.agentmux/mcp.json`, `.agentmux/agentmux.json`, les plugins
-et les skills sont les seules sources d’autorité. `sync` prépare un plan en
+Les fichiers canoniques `~/.agentmux/mcp.json`, `~/.agentmux/agentmux.json`, les plugins
+et les skills sous `~/.agentmux/` sont les seules sources d’autorité. `sync` prépare un plan en
 lecture seule. `sync --apply` applique ce plan. Il n’existe ni import implicite,
 ni mode force, ni fusion bidirectionnelle dans cette version.
 
@@ -15,7 +15,7 @@ gérés et inchangés lors de la prochaine application.
 
 ## Éditions conservatrices
 
-Le manifeste de propriété `.agentmux/sync-project.json` ou `sync-user.json`
+Le manifeste de propriété `~/.agentmux/sync-user.json`
 conserve les chemins et empreintes des entrées générées. Il ne contient pas la
 configuration upstream ni ses secrets. Supprimer ce manifeste ne réinitialise
 pas magiquement les fichiers : les entrées restantes redeviennent inconnues et
@@ -34,7 +34,7 @@ revérifiés avant l’écriture. Les suppressions ne concernent que les éléme
 gérés restés inchangés.
 
 L’application utilise un verrou par portée, des écritures par fichier temporaire
-puis renommage, et des sauvegardes sous `.agentmux/backups/<date>/`. Une erreur
+puis renommage, et des sauvegardes sous `~/.agentmux/backups/<date>/`. Une erreur
 d’écriture déclenche une tentative de restauration des changements déjà faits.
 Ce n’est pas une transaction de système de fichiers globale : une coupure
 machine pendant l’application peut nécessiter une restauration depuis ces
@@ -49,12 +49,11 @@ le harness ou le système ne suit pas les liens. Aucune réécriture des noms du
 frontmatter n’est effectuée ; les collisions entre noms natifs doivent être
 résolues dans les sources.
 
-Un skill déjà situé à sa destination canonique, notamment `.agentmux/skills` pour
-Codex, est laissé en place et n’est jamais adopté comme copie gérée. Les copies
-de plugins matérialisées dans cet emplacement reçoivent
-`.agentmux-origin.json`, afin de ne pas être redécouvertes comme nouvelles
-sources. Les liens vers les skills des plugins sont également exclus de cette
-redécouverte.
+La source `~/.agentmux/skills/` est distincte des destinations natives, notamment
+`~/.agents/skills/` pour Codex. Le contenu de chaque fichier du skill source,
+dont `SKILL.md`, est conservé octet pour octet en mode copie. Aucun fichier de
+marquage n'est ajouté aux nouvelles copies. Les anciens marqueurs
+`.agentmux-origin.json` restent reconnus à la lecture pour compatibilité.
 
 Les liens internes dans un arbre de skill ne sont pas synchronisés dans cette
 version, même lorsqu’ils restent dans le plugin. Cela évite les copies ambiguës
@@ -62,21 +61,31 @@ ou les références qui s’échappent de la destination. Un dossier source comp
 peut en revanche être résolu avant création du lien de destination.
 
 Les filtres ne peuvent pas empêcher un harness de scanner de lui-même les
-sources `.agentmux/skills`. Ils ne constituent donc pas une ACL. Les sources ne
+destinations natives, par exemple `~/.agents/skills/`. Ils ne constituent donc pas une ACL. Les sources ne
 sont jamais effacées pour contourner le scanner natif d’un logiciel.
 
 ## Portée utilisateur
 
-`--scope user` écrit dans le home courant : Claude utilise `.claude.json`, Codex
+Les instructions canoniques `~/.agentmux/AGENTS.md` sont synchronisées en portée
+utilisateur vers `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md` et
+`~/.config/opencode/AGENTS.md`, sous réserve du filtre YAML `metadata.harness`.
+La source est préservée ; le frontmatter propre à agentmux est retiré des copies
+générées. Les fichiers natifs non gérés ne sont jamais écrasés, et une modification
+concurrente empêche l'application. Les autres harnesses reçoivent un avertissement
+tant qu'aucune destination d'instructions utilisateur n'est vérifiée.
+
+La CLI publique synchronise exclusivement les fichiers du home courant :
+Claude utilise `.claude.json`, Codex
 `.codex/config.toml`, Cursor `.cursor/mcp.json`, Gemini `.gemini/settings.json`
 et OpenCode `.config/opencode/opencode.json` (ou `.jsonc` existant). Les tests
 injectent systématiquement un faux home temporaire.
 
-Les emplacements personnalisés par profil ou variables propres au harness ne
-sont pas détectés. VS Code est limité au projet. La portée choisit la destination
-des configurations ; le partage des processus reste lié à `--root`. Deux racines
-qui ciblent les mêmes noms dans la portée utilisateur entrent en conflit, plutôt
-que de s’écraser mutuellement.
+Google Antigravity utilise `.gemini/config/mcp_config.json` et les skills sous
+`.gemini/config/skills/`. Les profils personnalisés ne sont pas détectés.
+L'adaptateur VS Code existant est limité au projet et n'est donc pas actif dans
+la CLI globale. `--root` et `--scope` ne sont pas exposés : le broker et la
+configuration canonique sont identifiés par le home courant, sans modifier
+les projets ouverts.
 
 ## Références de formats
 

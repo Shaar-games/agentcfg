@@ -17,19 +17,24 @@ import (
 type Options struct{ Root, Home, Binary, Scope, SkillMode string }
 
 type Change struct {
-	Path   string `json:"path"`
-	Action string `json:"action"`
-	before []byte
-	after  []byte
-	exists bool
-	skill  *skillChange
+	Path         string `json:"path"`
+	Action       string `json:"action"`
+	before       []byte
+	after        []byte
+	exists       bool
+	skill        *skillChange
+	remove       bool
+	source       string
+	sourceHash   string
+	sourceExists bool
 }
 
 type manifest struct {
-	Version int                          `json:"version"`
-	Configs map[string]map[string]string `json:"configs"`
-	Skills  map[string]skillRecord       `json:"skills"`
-	Blocks  map[string]string            `json:"tomlBlocks,omitempty"`
+	Version      int                          `json:"version"`
+	Configs      map[string]map[string]string `json:"configs"`
+	Skills       map[string]skillRecord       `json:"skills"`
+	Blocks       map[string]string            `json:"tomlBlocks,omitempty"`
+	Instructions map[string]string            `json:"instructions,omitempty"`
 }
 
 type Plan struct {
@@ -39,10 +44,11 @@ type Plan struct {
 	stateBefore           []byte
 	stateExists           bool
 	state                 manifest
+	sourceConfigDigest    string
 }
 
 func freshManifest() manifest {
-	return manifest{Version: 1, Configs: map[string]map[string]string{}, Skills: map[string]skillRecord{}, Blocks: map[string]string{}}
+	return manifest{Version: 1, Configs: map[string]map[string]string{}, Skills: map[string]skillRecord{}, Blocks: map[string]string{}, Instructions: map[string]string{}}
 }
 
 func readOptional(path string) ([]byte, bool, error) {
@@ -114,6 +120,12 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	}
 	p := &Plan{root: opts.Root, base: base, statePath: filepath.Join(opts.Root, ".agentmux", "sync-"+opts.Scope+".json"),
 		state: freshManifest(), Changes: []Change{}, Warnings: append([]string{}, c.Warnings...)}
+	// Protect the plan against changes to canonical MCP/harness settings between
+	// dry-run and apply. Test fixtures sometimes construct Config directly; in
+	// that case we cannot claim a matching on-disk snapshot and skip this guard.
+	if current, loadErr := config.Load(c.Root); loadErr == nil && digest(current) == digest(c) {
+		p.sourceConfigDigest = digest(c)
+	}
 	p.stateBefore, p.stateExists, err = readOptional(p.statePath)
 	if err != nil {
 		return nil, err
@@ -170,6 +182,9 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 		if !valid {
 			return nil, fmt.Errorf("ownership manifest contains an unexpected skill path %s", path)
 		}
+	}
+	if err := p.planInstructions(c, opts, selected, old); err != nil {
+		return nil, err
 	}
 	sort.Slice(p.Changes, func(i, j int) bool { return p.Changes[i].Path < p.Changes[j].Path })
 	return p, nil

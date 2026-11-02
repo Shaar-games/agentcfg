@@ -33,21 +33,28 @@ inactivité. Les réglages d’inactivité du broker sont lus à son démarrage.
 Un backend isolé est fermé dès la déconnexion de son client. Un backend partagé
 reste vivant pendant `idleTimeout` sans clients. Le broker entier ferme ses
 backends et quitte après sa propre inactivité. `stop` cible uniquement la racine
-indiquée, pas tous les projets.
+globale de l’utilisateur courant.
 
 Les processus stdio sont placés dans un Job Object kill-on-close sous Windows,
 avant la reprise de leur premier thread. Unix utilise un groupe de processus.
 Les transports ferment leurs pipes et attendent la fin des enfants. Le broker
-Windows se lance avec breakaway pour ne pas mourir avec le Job Object du premier
-harness ; si le parent interdit cette opération, le lancement échoue plutôt que
-de prétendre assurer une durée de vie indépendante.
+Windows tente le lancement breakaway pour ne pas mourir avec le Job Object du
+premier harness ; si le parent refuse le détachement, un démarrage de secours
+est tenté avec diagnostic explicite. Ce secours ne garantit pas la même
+indépendance vis-à-vis de la durée de vie du parent.
 
 ## Multiplexage partagé
 
-Chaque client fait son handshake stdio, mais le backend ne reçoit qu’une seule
-initialisation. Le résultat est conservé pour les clients suivants. Le backend
-représente agentmux, pas le premier harness : les capacités client ambiguës
-roots/sampling/elicitation ne sont pas annoncées.
+Les clients MCP 2025 utilisent l'ancien handshake stdio, mais le backend partagé
+ne reçoit qu’une seule initialisation. Le résultat est conservé pour les
+clients suivants. Le backend représente agentmux, pas le premier harness :
+les capacités client ambiguës roots/sampling/elicitation ne sont pas annoncées.
+
+Les clients MCP 2026-07-28 passent directement des requêtes autonomes avec
+`params._meta` et peuvent utiliser `server/discover`. Leurs identifiants sont
+remappés par client sans `initialize` global. Un backend partagé ne mélange pas
+les deux générations de protocole sur la même connexion stdio. Cela évite les
+collisions de transport, **pas** les conflits d'état applicatif d'un MCP.
 
 Pour chaque requête, le broker conserve le propriétaire et l’identifiant
 original, génère un identifiant upstream unique, puis restaure l’identifiant au

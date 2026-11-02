@@ -51,3 +51,5 @@ func Dial(ctx context.Context, endpoint Endpoint) (net.Conn, error) {
 func Detach(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
+
+func RetryInInheritedJob(_ *exec.Cmd, _ error) bool { return false }

@@ -20,6 +20,7 @@ type fakeTransport struct {
 	done            chan struct{}
 	once            sync.Once
 	initializes     atomic.Int32
+	discovers       atomic.Int32
 	initializeInput chan wire.Message
 }
 
@@ -37,6 +38,11 @@ func (f *fakeTransport) Read() (wire.Message, error) {
 }
 
 func (f *fakeTransport) Write(message wire.Message) error {
+	if message.Method() == "server/discover" {
+		f.discovers.Add(1)
+		f.reads <- wire.Result(message.ID(), map[string]any{"supportedVersions": []string{wire.ModernProtocolVersion}, "capabilities": map[string]any{"tools": map[string]any{}}})
+		return nil
+	}
 	if message.Method() == "initialize" {
 		f.initializes.Add(1)
 		f.initializeInput <- message.Clone()

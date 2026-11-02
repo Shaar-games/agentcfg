@@ -1,28 +1,35 @@
-name: check
+name: CI
 
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  go:
+  test:
+    name: Go tests (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
         with:
-          version: '2026.10.25'
+          go-version-file: go.mod
           cache: true
-      - run: go vet ./...
-      - run: go test -count=1 -timeout=120s ./...
-      - run: go build ./cmd/agentmux
+      - name: Static checks
+        run: go vet ./...
+      - name: Unit and integration tests
+        run: go test -count=1 -timeout=120s ./...
+      - name: CLI build
+        run: go build -o ${{ runner.temp }}/agentmux${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd/agentmux
       - name: Race detector
         if: runner.os == 'Linux'
         run: go test -race -count=1 -timeout=180s ./...

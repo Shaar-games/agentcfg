@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"time"
-	"unicode/utf8"
 
+	"agentmux/internal/auth"
 	"agentmux/internal/wire"
 )
 
@@ -28,64 +26,41 @@ func requestError(ctx context.Context) error {
 	}
 }
 
-func (t *httpTransport) post(ctx context.Context, data []byte, id json.RawMessage, request, initialize, initialized bool) error {
-	req, err := t.newRequest(ctx, http.MethodPost, data)
-	if err != nil {
-		return err
+func (t *httpTransport) post(ctx context.Context, data []byte, id json.RawMessage, request, initialize, initialized, discover bool) error {
+	var outgoing wire.Message
+	if json.Unmarshal(data, &outgoing) != nil {
+		return errors.New("invalid MCP HTTP message")
 	}
-	response, err := t.client.Do(req)
-	if err != nil {
-		return requestError(ctx)
-	}
-	defer response.Body.Close()
-	if response.StatusCode == http.StatusNotFound && req.Header.Get("Mcp-Session-Id") != "" {
-		return errSessionExpired
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("MCP HTTP request returned status %d; response details omitted", response.StatusCode)
-	}
-	if !request {
-		if response.StatusCode != http.StatusAccepted {
-			return errors.New("MCP HTTP notification/response requires status 202")
-		}
-		if initialized {
-			t.markReady()
-		}
-		return nil
-	}
-	if response.StatusCode == http.StatusAccepted || response.StatusCode == http.StatusNoContent {
-		return errors.New("MCP HTTP request was accepted without a JSON-RPC response")
-	}
-	if initialize {
-		// A callback can arrive on the initialization SSE stream before its
-		// InitializeResult; that callback's response already needs this session.
-		session := response.Header.Get("Mcp-Session-Id")
-		if session != "" && !visibleASCII(session, 4096) {
-			return errors.New("MCP HTTP initialize response has an invalid session ID")
-		}
-		t.mu.Lock()
-		t.session, t.protocol = session, t.offeredProtocol
-		t.mu.Unlock()
-	}
-	contentType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil {
-		return errors.New("MCP HTTP response has an invalid content type")
-	}
-	matched := false
+	modern := wire.IsModernRequest(outgoing)
+	retriedHeaders := false
+	var headerMismatch wire.Message
 	receive := func(message wire.Message) error {
 		if message.Method() == "" && message.HasID() && requestIDKey(message.ID()) == requestIDKey(id) {
-			if message["result"] == nil && message["error"] == nil {
-				return errors.New("MCP response lacks a result or error")
+			if modern && outgoing.Method() == "tools/call" && !retriedHeaders && rpcErrorCode(message) == -32020 {
+				headerMismatch = message
+				return errRefreshToolHeaders
 			}
 			if initialize {
-				if err := t.initializeResult(message, response.Header.Get("Mcp-Session-Id")); err != nil {
+				t.mu.Lock()
+				session := t.session
+				t.mu.Unlock()
+				if err := t.initializeResult(message, session); err != nil {
 					return err
 				}
 			}
-			matched = true
+			if discover && message["error"] != nil && !modernProtocolError(message) {
+				t.resetFailedDiscovery()
+			} else if modern {
+				t.mu.Lock()
+				t.modernEstablished = true
+				t.mu.Unlock()
+			}
+			if modern && outgoing.Method() == "tools/list" && message["result"] != nil {
+				t.captureToolDefinitions(message, outgoing)
+			}
 			t.completePending(id)
 			message["id"] = append(json.RawMessage(nil), id...)
-			if err := t.emit(ctx, message); err != nil {
+			if err := t.emit(ctx, message, id); err != nil {
 				return err
 			}
 			return errStreamComplete
@@ -93,40 +68,74 @@ func (t *httpTransport) post(ctx context.Context, data []byte, id json.RawMessag
 		if message.Method() == "" {
 			return errors.New("MCP HTTP response ID does not match its request")
 		}
-		return t.emit(ctx, message)
+		if modern && message.HasID() {
+			return errors.New("MCP 2026 server requests require multi-round-trip results")
+		}
+		return t.emit(ctx, message, id)
 	}
-	switch contentType {
-	case "application/json":
-		payload, err := io.ReadAll(io.LimitReader(response.Body, wire.MaxFrameSize+1))
-		if err != nil {
-			return requestError(ctx)
+	err := t.sdkExchange(ctx, outgoing, receive)
+	if errors.Is(err, errRefreshToolHeaders) {
+		// HeaderMismatch is a protocol rejection before execution. The spec
+		// prescribes refreshing tools/list and retrying once with new headers.
+		// No other tool failure causes an automatic replay.
+		retriedHeaders = true
+		if refreshErr := t.refreshToolHeaders(ctx, outgoing); refreshErr == nil {
+			err = t.sdkExchange(ctx, outgoing, receive)
+		} else if ctx.Err() == nil {
+			err = receive(headerMismatch)
+		} else {
+			err = ctx.Err()
 		}
-		if !utf8.Valid(payload) {
-			return errors.New("MCP HTTP message is not valid UTF-8")
-		}
-		message, err := wire.Decode(payload)
-		if err != nil {
-			return errors.New("invalid or oversized MCP HTTP JSON-RPC response")
-		}
-		err = receive(message)
-		if err != nil && !errors.Is(err, errStreamComplete) {
-			return err
-		}
-	case "text/event-stream":
-		err := readSSE(response.Body, receive)
-		if err != nil && !errors.Is(err, errStreamComplete) {
-			if ctx.Err() != nil {
-				return requestError(ctx)
-			}
-			return err
-		}
-	default:
-		return errors.New("MCP HTTP response must be application/json or text/event-stream")
 	}
-	if !matched {
-		return errors.New("MCP HTTP stream ended before its JSON-RPC response; the operation is not retried")
+	if errors.Is(err, errStreamComplete) {
+		return nil
 	}
-	return nil
+	if err == nil {
+		if initialized {
+			t.markReady()
+		}
+		return nil
+	}
+	if discover {
+		var failed *sdkExchangeError
+		if ctx.Err() != nil || errors.As(err, &failed) &&
+			(failed.status == 400 || failed.status == 404 || failed.status == 405 || failed.status == 501) {
+			t.resetFailedDiscovery()
+		}
+	}
+	if errors.Is(err, errSessionExpired) {
+		return errSessionExpired
+	}
+	if errors.Is(err, auth.ErrLoginRequired) {
+		return auth.ErrLoginRequired
+	}
+	// SDK errors may contain a URL, session ID, invalid response bytes or auth
+	// diagnostics. Only validated JSON-RPC errors are exposed verbatim above.
+	return requestError(ctx)
+}
+
+func modernProtocolError(message wire.Message) bool {
+	code := rpcErrorCode(message)
+	return code == -32020 || code == -32021 || code == -32022
+}
+
+func rpcErrorCode(message wire.Message) int {
+	var value struct{ Code int }
+	if json.Unmarshal(message["error"], &value) != nil {
+		return 0
+	}
+	return value.Code
+}
+
+// Modern capability probing is optional. A legacy server can reply with
+// MethodNotFound, after which clients may retry using initialize. Do not reset
+// an HTTP transport that already has other modern requests in flight.
+func (t *httpTransport) resetFailedDiscovery() {
+	t.mu.Lock()
+	if t.state == httpModern && !t.modernEstablished && len(t.pending) <= 1 {
+		t.state = httpNew
+	}
+	t.mu.Unlock()
 }
 
 func (t *httpTransport) completePending(id json.RawMessage) {

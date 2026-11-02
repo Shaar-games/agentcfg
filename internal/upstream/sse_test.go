@@ -93,8 +93,8 @@ func TestRequestIDKeysPreserveTypesAndPrecision(t *testing.T) {
 func TestHTTPReceiveBackpressureHonorsCancellation(t *testing.T) {
 	lifetime, stop := context.WithCancel(context.Background())
 	defer stop()
-	transport := &httpTransport{ctx: lifetime, cancel: stop, incoming: make(chan wire.Message, 1), pending: make(map[string]*httpPending)}
-	transport.incoming <- wire.Notification("full", nil)
+	transport := &httpTransport{ctx: lifetime, cancel: stop, incoming: make(chan routedMessage, 1), pending: make(map[string]*httpPending)}
+	transport.incoming <- routedMessage{message: wire.Notification("full", nil)}
 	ctx, cancel := context.WithCancel(lifetime)
 	done := make(chan error, 1)
 	go func() { done <- transport.emit(ctx, wire.Notification("blocked", nil)) }()
@@ -107,7 +107,7 @@ func TestHTTPReceiveBackpressureHonorsCancellation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("blocked delivery ignored cancellation")
 	}
-	transport.postFailure(wire.Raw("id"), true, false, context.Canceled, false)
+	transport.postFailure(wire.Raw("id"), true, false, false, context.Canceled, false)
 	if lifetime.Err() == nil {
 		t.Fatal("undeliverable completion should stop the transport")
 	}

@@ -125,17 +125,36 @@ func skillHarnesses(data []byte) ([]string, error) {
 	if err := yaml.Unmarshal(frontmatter, &document); err != nil {
 		return nil, err
 	}
+	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("skill frontmatter must be a mapping")
+	}
+	count := 0
+	if err := validateYAMLNode(&document, 0, &count); err != nil {
+		return nil, err
+	}
 	fields := yamlFields(document.Content[0])
 	metadata := fields["metadata"]
 	if metadata == nil {
 		return nil, nil
 	}
+	if metadata.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("skill metadata must be a string map")
+	}
 	value := yamlFields(metadata)["harness"]
 	if value == nil {
 		return nil, nil
 	}
+	if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+		return nil, fmt.Errorf("metadata.harness must be a string")
+	}
 	if strings.TrimSpace(value.Value) == "" {
 		return nil, fmt.Errorf("metadata.harness cannot be empty")
+	}
+	if strings.TrimSpace(value.Value) == "none" {
+		// An explicit empty set is distinct from an absent metadata.harness,
+		// which means all selected harnesses. This allows the TUI to disable
+		// a skill globally without removing its canonical source.
+		return []string{"none"}, nil
 	}
 	seen := map[string]bool{}
 	var result []string
@@ -144,8 +163,11 @@ func skillHarnesses(data []byte) ([]string, error) {
 		if item == "" {
 			return nil, fmt.Errorf("metadata.harness contains an empty harness")
 		}
+		if item == "none" {
+			return nil, fmt.Errorf("metadata.harness none must be used alone")
+		}
 		switch item {
-		case "claude-code", "codex", "cursor", "opencode", "gemini", "vscode":
+		case "claude-code", "codex", "cursor", "opencode", "gemini", "antigravity", "vscode":
 		default:
 			return nil, fmt.Errorf("unknown metadata.harness %q", item)
 		}

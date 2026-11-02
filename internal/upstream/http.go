@@ -3,6 +3,7 @@ package upstream
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,17 +13,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"agentmux/internal/auth"
 	"agentmux/internal/config"
 	"agentmux/internal/wire"
+
+	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 const (
-	httpRequestLimit   = 8
-	httpControlLimit   = 4
-	httpRequestTimeout = 2 * time.Minute
-	httpStreamLifetime = 5 * time.Minute
-	httpCloseTimeout   = 2 * time.Second
+	httpRequestLimit      = 8
+	httpControlLimit      = 4
+	httpSubscriptionLimit = 8
+	httpRequestTimeout    = 2 * time.Minute
+	httpStreamLifetime    = 5 * time.Minute
+	httpCloseTimeout      = 2 * time.Second
 )
 
 var ErrBusy = errors.New("MCP HTTP transport concurrency limit reached")
@@ -35,34 +41,47 @@ const (
 	httpNeedsInitialized
 	httpSendingInitialized
 	httpReady
+	httpModern // 2026-07-28: no session, handshake or unsolicited GET stream
 )
 
 type httpPending struct {
 	cancel     context.CancelFunc
 	initialize bool
+	discover   bool
+	done       chan struct{}
+}
+
+type routedMessage struct {
+	message wire.Message
+	parent  json.RawMessage
 }
 
 type httpTransport struct {
-	ctx             context.Context
-	cancel          context.CancelFunc
-	endpoint        string
-	headers         http.Header
-	client          *http.Client
-	network         *http.Transport
-	incoming        chan wire.Message
-	requests        chan struct{}
-	controls        chan struct{}
-	ready           chan struct{}
-	mu              sync.Mutex
-	state           httpState
-	session         string
-	protocol        string
-	offeredProtocol string
-	closed          bool
-	failure         error
-	pending         map[string]*httpPending
-	wg              sync.WaitGroup
-	closeOnce       sync.Once
+	ctx               context.Context
+	cancel            context.CancelFunc
+	endpoint          string
+	headers           http.Header
+	client            *http.Client
+	network           *http.Transport
+	incoming          chan routedMessage
+	requests          chan struct{}
+	controls          chan struct{}
+	subscriptions     chan struct{}
+	ready             chan struct{}
+	mu                sync.Mutex
+	state             httpState
+	modernEstablished bool
+	session           string
+	protocol          string
+	offeredProtocol   string
+	toolHeaders       map[string][]toolParameterHeader
+	toolCatalogs      map[string]*toolHeaderCatalog
+	closed            bool
+	failure           error
+	pending           map[string]*httpPending
+	wg                sync.WaitGroup
+	closeOnce         sync.Once
+	oauth             sdkauth.OAuthHandler
 }
 
 func startHTTP(parent context.Context, s config.Server) (Transport, error) {
@@ -91,20 +110,27 @@ func startHTTP(parent context.Context, s config.Server) (Transport, error) {
 		Proxy:                  http.ProxyFromEnvironment,
 		DialContext:            (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		ForceAttemptHTTP2:      true,
-		MaxConnsPerHost:        httpRequestLimit + httpControlLimit + 1,
-		MaxIdleConns:           httpRequestLimit + httpControlLimit + 1,
-		MaxIdleConnsPerHost:    httpRequestLimit + httpControlLimit + 1,
+		MaxConnsPerHost:        httpRequestLimit + httpControlLimit + httpSubscriptionLimit + 1,
+		MaxIdleConns:           httpRequestLimit + httpControlLimit + httpSubscriptionLimit + 1,
+		MaxIdleConnsPerHost:    httpRequestLimit + httpControlLimit + httpSubscriptionLimit + 1,
 		IdleConnTimeout:        30 * time.Second,
 		TLSHandshakeTimeout:    10 * time.Second,
 		ResponseHeaderTimeout:  httpRequestTimeout,
 		MaxResponseHeaderBytes: 64 << 10,
 	}
 	t := &httpTransport{ctx: ctx, cancel: cancel, endpoint: u.String(), headers: headers,
-		network: network, incoming: make(chan wire.Message, 8), requests: make(chan struct{}, httpRequestLimit),
-		controls: make(chan struct{}, httpControlLimit), ready: make(chan struct{}), pending: make(map[string]*httpPending)}
+		network: network, incoming: make(chan routedMessage, 8), requests: make(chan struct{}, httpRequestLimit),
+		controls: make(chan struct{}, httpControlLimit), subscriptions: make(chan struct{}, httpSubscriptionLimit),
+		ready: make(chan struct{}), pending: make(map[string]*httpPending)}
 	t.client = &http.Client{Transport: network, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
+	t.oauth, err = auth.NewHandler(ctx, s, auth.Options{})
+	if err != nil {
+		cancel()
+		network.CloseIdleConnections()
+		return nil, err
+	}
 	go func() { <-ctx.Done(); _ = t.Close() }()
 	return t, nil
 }
@@ -112,27 +138,32 @@ func startHTTP(parent context.Context, s config.Server) (Transport, error) {
 func (t *httpTransport) PID() int { return 0 }
 
 func (t *httpTransport) Read() (wire.Message, error) {
+	message, _, err := t.ReadRouted()
+	return message, err
+}
+
+func (t *httpTransport) ReadRouted() (wire.Message, json.RawMessage, error) {
 	select {
 	case message := <-t.incoming:
-		return message, nil
+		return message.message, message.parent, nil
 	default:
 	}
 	select {
 	case message := <-t.incoming:
-		return message, nil
+		return message.message, message.parent, nil
 	case <-t.ctx.Done():
 		select {
 		case message := <-t.incoming:
-			return message, nil
+			return message.message, message.parent, nil
 		default:
 		}
 		t.mu.Lock()
 		err := t.failure
 		t.mu.Unlock()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return nil, io.EOF
+		return nil, nil, io.EOF
 	}
 }
 
@@ -143,6 +174,8 @@ func (t *httpTransport) Write(message wire.Message) error {
 	request := isRequest(message)
 	initialize := method == "initialize" && request
 	initialized := method == "notifications/initialized" && !message.HasID()
+	discover := method == "server/discover" && request
+	modern := discover || wire.IsModernRequest(message)
 	var offered struct {
 		ProtocolVersion string `json:"protocolVersion"`
 	}
@@ -153,12 +186,34 @@ func (t *httpTransport) Write(message wire.Message) error {
 	lane := t.requests
 	if control {
 		lane = t.controls
+	} else if modern && method == "subscriptions/listen" {
+		lane = t.subscriptions
 	}
 
 	t.mu.Lock()
 	if t.closed || t.ctx.Err() != nil {
 		t.mu.Unlock()
 		return ErrClosed
+	}
+	// In the stateless protocol cancellation is the closing of this POST's
+	// response stream; there is no cancellation notification POST.
+	if method == "notifications/cancelled" && t.state == httpModern {
+		pending := t.cancelNotificationLocked(message)
+		t.mu.Unlock()
+		if pending != nil && pending.discover {
+			// Finish cancelling the optional probe before a legacy initialize
+			// can race the old POST and its state transition.
+			<-pending.done
+		}
+		return nil
+	}
+	if modern && t.state != httpNew && t.state != httpModern {
+		t.mu.Unlock()
+		return errors.New("MCP 2026 request cannot use a legacy HTTP session; configure sharing=isolated")
+	}
+	if t.state == httpModern && !modern {
+		t.mu.Unlock()
+		return errors.New("legacy MCP request cannot use a stateless 2026 HTTP transport")
 	}
 	if initialize && t.state != httpNew {
 		t.mu.Unlock()
@@ -168,9 +223,13 @@ func (t *httpTransport) Write(message wire.Message) error {
 		t.mu.Unlock()
 		return errors.New("MCP HTTP initialize result must precede notifications/initialized")
 	}
+	if discover && !wire.IsModernRequest(message) {
+		t.mu.Unlock()
+		return errors.New("MCP 2026 server/discover requires per-request protocol version and client capabilities")
+	}
 	// Callback responses must remain writable even during initialize, and must
 	// not compete for slots held by SSE requests waiting for those callbacks.
-	if !initialize && !initialized && method != "" && t.state < httpSendingInitialized {
+	if !modern && !initialize && !initialized && method != "" && t.state < httpSendingInitialized {
 		t.mu.Unlock()
 		return errors.New("MCP HTTP initialize/initialized handshake is incomplete")
 	}
@@ -191,6 +250,14 @@ func (t *httpTransport) Write(message wire.Message) error {
 		t.mu.Unlock()
 		return errors.New("invalid MCP HTTP message or frame exceeds 32 MiB")
 	}
+	if _, err := decodeSDKMessage(message); err != nil {
+		<-lane
+		t.mu.Unlock()
+		return err
+	}
+	if modern && t.state == httpNew {
+		t.state = httpModern
+	}
 	if initialize {
 		t.state = httpInitializing
 		t.offeredProtocol = offered.ProtocolVersion
@@ -198,22 +265,21 @@ func (t *httpTransport) Write(message wire.Message) error {
 	if initialized {
 		t.state = httpSendingInitialized
 	}
-	ctx, cancel := context.WithTimeout(t.ctx, httpRequestTimeout)
-	pending := &httpPending{cancel: cancel, initialize: initialize}
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if modern && method == "subscriptions/listen" {
+		ctx, cancel = context.WithCancel(t.ctx)
+	} else {
+		ctx, cancel = context.WithTimeout(t.ctx, httpRequestTimeout)
+	}
+	pending := &httpPending{cancel: cancel, initialize: initialize, discover: discover, done: make(chan struct{})}
 	if request {
 		t.pending[key] = pending
 	}
 	if method == "notifications/cancelled" {
-		var params struct {
-			RequestID json.RawMessage `json:"requestId"`
-		}
-		if json.Unmarshal(message["params"], &params) == nil {
-			if current := t.pending[requestIDKey(params.RequestID)]; current != nil && !current.initialize {
-				current.cancel()
-			}
-		}
+		t.cancelNotificationLocked(message)
 	}
-	waitReady := !initialize && !initialized && method != "" && t.state != httpReady
+	waitReady := !initialize && !initialized && method != "" && t.state != httpReady && t.state != httpModern
 	t.wg.Add(1)
 	t.mu.Unlock()
 	id := append(json.RawMessage(nil), message.ID()...)
@@ -229,26 +295,61 @@ func (t *httpTransport) Write(message wire.Message) error {
 				}
 				t.mu.Unlock()
 			}
+			close(pending.done)
 		}()
 		if waitReady {
 			select {
 			case <-t.ready:
 			case <-ctx.Done():
-				t.postFailure(id, request, initialize, requestError(ctx), false)
+				t.postFailure(id, request, initialize, discover, requestError(ctx), false)
 				return
 			}
 		}
-		err := t.post(ctx, data, id, request, initialize, initialized)
+		err := t.post(ctx, data, id, request, initialize, initialized, discover)
 		if err != nil {
-			t.postFailure(id, request, initialize, err, errors.Is(err, errSessionExpired))
+			t.postFailure(id, request, initialize, discover, err, errors.Is(err, errSessionExpired))
 		}
 	}()
 	return nil
 }
 
-func (t *httpTransport) emit(ctx context.Context, message wire.Message) error {
+func (t *httpTransport) cancelNotificationLocked(message wire.Message) *httpPending {
+	var params struct {
+		RequestID json.RawMessage `json:"requestId"`
+	}
+	if json.Unmarshal(message["params"], &params) == nil {
+		if current := t.pending[requestIDKey(params.RequestID)]; current != nil && !current.initialize {
+			current.cancel()
+			return current
+		}
+	}
+	return nil
+}
+
+// CancelRequest cancels and drains a request before the broker changes protocol
+// modes after a discovery timeout. Ordinary HTTP cancellation notifications use
+// the same per-request context.
+func (t *httpTransport) CancelRequest(id json.RawMessage) {
+	t.mu.Lock()
+	pending := t.pending[requestIDKey(id)]
+	if pending != nil && !pending.initialize {
+		pending.cancel()
+	} else {
+		pending = nil
+	}
+	t.mu.Unlock()
+	if pending != nil {
+		<-pending.done
+	}
+}
+
+func (t *httpTransport) emit(ctx context.Context, message wire.Message, parent ...json.RawMessage) error {
+	event := routedMessage{message: message}
+	if len(parent) != 0 {
+		event.parent = append(json.RawMessage(nil), parent[0]...)
+	}
 	select {
-	case t.incoming <- message:
+	case t.incoming <- event:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -266,7 +367,7 @@ func (t *httpTransport) fail(err error) {
 	t.cancel()
 }
 
-func (t *httpTransport) postFailure(id json.RawMessage, request, initialize bool, err error, terminal bool) {
+func (t *httpTransport) postFailure(id json.RawMessage, request, initialize, discover bool, err error, terminal bool) {
 	if t.ctx.Err() != nil {
 		return
 	}
@@ -279,7 +380,7 @@ func (t *httpTransport) postFailure(id json.RawMessage, request, initialize bool
 	if request {
 		t.completePending(id)
 		select {
-		case t.incoming <- wire.Error(id, -32000, err.Error()):
+		case t.incoming <- routedMessage{message: wire.Error(id, -32000, err.Error()), parent: append(json.RawMessage(nil), id...)}:
 		case <-t.ctx.Done():
 		default:
 			// A cancelled/failed operation must release its lane even when the
@@ -292,6 +393,8 @@ func (t *httpTransport) postFailure(id json.RawMessage, request, initialize bool
 	}
 }
 
+// newRequest is used only for legacy unsolicited GET and final DELETE. The SDK
+// constructs every POST; its adapter adds configured headers and legacy state.
 func (t *httpTransport) newRequest(ctx context.Context, method string, data []byte) (*http.Request, error) {
 	var body io.Reader
 	if data != nil {
@@ -301,18 +404,10 @@ func (t *httpTransport) newRequest(ctx context.Context, method string, data []by
 	if err != nil {
 		return nil, errors.New("cannot construct MCP HTTP request")
 	}
-	// Do not install GetBody: it can enable automatic replay of a POST after a
-	// connection failure if an Idempotency-Key was supplied by configuration.
 	req.GetBody = nil
-	req.Header = t.headers.Clone()
+	req.Header = configuredHTTPHeaders(t.headers)
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Del("Content-Type")
-	if method == http.MethodPost {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Del("Mcp-Session-Id")
-	req.Header.Del("Mcp-Protocol-Version")
-	req.Header.Del("Last-Event-Id")
 	t.mu.Lock()
 	session, protocol := t.session, t.protocol
 	t.mu.Unlock()
@@ -322,7 +417,41 @@ func (t *httpTransport) newRequest(ctx context.Context, method string, data []by
 	if protocol != "" {
 		req.Header.Set("MCP-Protocol-Version", protocol)
 	}
+	if t.oauth != nil {
+		source, err := t.oauth.TokenSource(ctx)
+		if err != nil {
+			return nil, errors.New("MCP OAuth token unavailable")
+		}
+		if source != nil {
+			token, err := source.Token()
+			if err != nil {
+				return nil, errors.New("MCP OAuth token unavailable")
+			}
+			if token != nil {
+				token.SetAuthHeader(req)
+			}
+		}
+	}
 	return req, nil
+}
+
+// MCP 2026 wraps non-ASCII, control, edge-whitespace and reserved sentinel
+// values in =?base64?...?= to prevent header injection and preserve names.
+func encodeMCPHeader(value string) string {
+	unsafe := !utf8.ValidString(value) || strings.HasPrefix(value, "=?base64?") && strings.HasSuffix(value, "?=")
+	if len(value) != len(strings.Trim(value, " \t")) {
+		unsafe = true
+	}
+	for _, r := range value {
+		if r < 32 || r > 126 || r == 127 {
+			unsafe = true
+			break
+		}
+	}
+	if unsafe {
+		return "=?base64?" + base64.StdEncoding.EncodeToString([]byte(value)) + "?="
+	}
+	return value
 }
 
 func (t *httpTransport) Close() error {

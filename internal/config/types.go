@@ -22,6 +22,7 @@ type Server struct {
 	Headers   map[string]string `json:"headers,omitempty"`
 	Harnesses []string          `json:"harnesses,omitempty"`
 	Sharing   string            `json:"sharing,omitempty"`
+	OAuth     *OAuthConfig      `json:"oauth,omitempty"`
 	Source    string            `json:"-"`
 }
 
@@ -43,8 +44,9 @@ type Runtime struct {
 }
 
 type Override struct {
-	Harnesses []string `json:"harnesses,omitempty"`
-	Sharing   string   `json:"sharing,omitempty"`
+	Harnesses []string     `json:"harnesses,omitempty"`
+	Sharing   string       `json:"sharing,omitempty"`
+	OAuth     *OAuthConfig `json:"oauth,omitempty"`
 }
 
 // Allows reports whether an item is enabled for the named harness. An empty

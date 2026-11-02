@@ -17,9 +17,11 @@ import (
 	"agentmux/internal/broker"
 	"agentmux/internal/config"
 	"agentmux/internal/syncer"
+	"agentmux/internal/tui"
 )
 
-const version = "0.1.0"
+// Set at release build time: -ldflags '-X main.version=v0.2.0'.
+var version = "dev"
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -31,16 +33,26 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, input io.Reader, output, diagnostics io.Writer) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+	if len(args) == 0 {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		return tui.Run(ctx, home, input, output)
+	}
+	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		_, err := fmt.Fprintln(output, `agentmux — shared MCP processes and declarative skills
 
-Usage: agentmux <command> [options]
+Usage: agentmux [command] [options]
+
+  (no command) / ui     Open Bubble Tea terminal dashboard
 
   init       Create empty canonical .agentmux files (never overwrite)
   list       Show discovered MCP servers and skills
   validate   Validate canonical configuration and plugin discovery
   sync       Preview native harness changes; --apply writes them
   connect    Stdio proxy for one MCP; starts the private broker on demand
+  auth       Explicit OAuth login, status, or logout for a configured MCP
   status     Show the broker and upstream process IDs (does not start it)
   stop       Stop this root's broker and its managed MCP children
   daemon     Run the local IPC broker in the foreground
@@ -48,7 +60,9 @@ Usage: agentmux <command> [options]
 
 All commands use the current user's ~/.agentmux configuration.
 Use agentmux <command> --help for command-specific options.
-No web server or TCP listener is used. Bidirectional sync is not implemented.`)
+No persistent web server or TCP listener is used. OAuth login may temporarily
+listen on a loopback callback address when explicitly invoked.
+Bidirectional sync is not implemented.`)
 		return err
 	}
 	if args[0] == "version" {
@@ -63,6 +77,13 @@ No web server or TCP listener is used. Bidirectional sync is not implemented.`)
 	}
 	root := &home
 	switch args[0] {
+	case "auth":
+		return runAuth(ctx, home, args[1:], input, output, diagnostics)
+	case "ui", "tui":
+		if err := parse(flags, args[1:]); err != nil {
+			return helpResult(err)
+		}
+		return tui.Run(ctx, home, input, output)
 	case "init":
 		return initialize(flags, root, args[1:], output)
 	case "sync":

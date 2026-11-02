@@ -92,12 +92,12 @@ func parseHarnesses(raw json.RawMessage) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	allowed := map[string]bool{"claude-code": true, "codex": true, "cursor": true, "opencode": true, "gemini": true, "vscode": true}
+	allowed := map[string]bool{"claude-code": true, "codex": true, "cursor": true, "opencode": true, "gemini": true, "antigravity": true, "vscode": true}
 	seen := map[string]bool{}
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		if !allowed[value] {
-			return nil, fmt.Errorf("unsupported harness %q (choose claude-code, codex, cursor, opencode, gemini or vscode)", value)
+			return nil, fmt.Errorf("unsupported harness %q (choose claude-code, codex, cursor, opencode, gemini, antigravity or vscode)", value)
 		}
 		if !seen[value] {
 			result = append(result, value)
@@ -133,12 +133,18 @@ func parseOverrides(raw json.RawMessage, skills bool) (map[string]Override, erro
 		}
 		allowed := []string{"harnesses"}
 		if !skills {
-			allowed = append(allowed, "sharing")
+			allowed = append(allowed, "sharing", "oauth")
 		}
 		if err = allowFields(entry, allowed...); err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 		override := Override{}
+		if raw, exists := entry["oauth"]; exists {
+			override.OAuth, err = parseOAuth(raw)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+		}
 		if value, exists := entry["harnesses"]; exists {
 			override.Harnesses, err = parseHarnesses(value)
 			if err != nil {
@@ -172,6 +178,14 @@ func (l *loader) applyOverrides() {
 		}
 		if override.Sharing != "" {
 			server.Sharing = override.Sharing
+		}
+		if override.OAuth != nil {
+			server.OAuth = override.OAuth
+		}
+		if err := validateServerOAuth(server); err != nil {
+			l.warn("serverOverrides."+name, err)
+			delete(l.config.Servers, name)
+			continue
 		}
 		l.config.Servers[name] = server
 	}

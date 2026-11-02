@@ -4,6 +4,7 @@ package ipc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os/exec"
@@ -67,4 +68,19 @@ func Detach(cmd *exec.Cmd) {
 		HideWindow:    true,
 		CreationFlags: 0x00000008 | 0x00000200 | 0x01000000, // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
 	}
+}
+
+// RetryInInheritedJob is a constrained fallback for Windows hosts (notably
+// CI runners) whose existing Job Object forbids CREATE_BREAKAWAY_FROM_JOB.
+// The fallback does not guarantee that the broker survives that outer job;
+// callers must report that limitation rather than advertising full detachment.
+func RetryInInheritedJob(cmd *exec.Cmd, cause error) bool {
+	if !errors.Is(cause, windows.ERROR_ACCESS_DENIED) && !errors.Is(cause, windows.ERROR_PRIVILEGE_NOT_HELD) {
+		return false
+	}
+	if cmd.SysProcAttr == nil || cmd.SysProcAttr.CreationFlags&0x01000000 == 0 {
+		return false
+	}
+	cmd.SysProcAttr.CreationFlags &^= 0x01000000
+	return true
 }

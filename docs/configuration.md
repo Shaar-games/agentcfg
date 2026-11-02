@@ -1,6 +1,6 @@
 # Configuration and portable plugins
 
-`config.Load(root)` reads the project directory supplied by the caller. It returns resolved servers, discovered skills, settings and warnings. Loading performs no process execution, executable lookup, network access, schema download, directory creation or harness writes.
+`config.Load(root)` reads canonical sources under `<root>/.agentmux/`. The public CLI always passes the current user's home directory as `root`, never an open project. It returns resolved servers, discovered skills, settings and warnings. Loading performs no process execution, executable lookup, network access, schema download, directory creation or harness writes.
 
 ## Sources
 
@@ -65,11 +65,11 @@ The default settings are:
 }
 ~~~
 
-`vscode` is also an accepted explicit harness. Its sync adapter supports project scope; user-scope VS Code configuration is not supported. Duplicate harness names are removed while retaining their order. Unknown names are errors.
+`antigravity` is also accepted and targets `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/`, the Google Antigravity personal layout. `vscode` is recognized but user-scope VS Code synchronization remains unsupported by the global-only CLI. Duplicate harness names are removed while retaining their order. Unknown names are errors.
 
 Runtime durations use Go duration syntax, such as `30s` or `5m`, and must be positive. An omitted field retains its default.
 
-The global `harnesses` list selects sync destinations. An explicit empty global list selects none. A server or skill filter narrows those destinations. An omitted or empty item filter allows all selected harnesses. Direct CLI connections with no harness name are allowed by `config.Allows`; these filters are routing preferences, not authorization controls.
+The global `harnesses` list selects sync destinations. An explicit empty global list selects none. A server or skill filter narrows those destinations. An omitted filter allows all selected harnesses. For skills, `metadata.harness: none` represents an explicitly empty selection. Direct CLI connections with no harness name are allowed by `config.Allows`; these filters are routing preferences, not authorization controls.
 
 Use fully qualified plugin IDs in overrides:
 
@@ -89,7 +89,7 @@ Server overrides replace only fields explicitly present. For example, `"harnesse
 
 `shared` is the server default and requests a shared upstream instance. `isolated` requests a separate upstream connection for each client. Choose the latter when an MCP relies on private session state or client callbacks; see the runtime documentation for the supported shared-session operations.
 
-Harness-native discovery can still see source skills directly. In particular, Codex reads `.agentmux/skills`, and other harnesses may inspect that directory independently of generated configuration. A filter cannot hide a file from such a scanner.
+Harness-native discovery may still overlap the generated skill destinations. For example, a harness that reads `~/.agents/skills/` directly can see skills installed there for Codex, even if its own agentmux filter excludes them. The canonical sources under `~/.agentmux/skills/` are deliberately separate from the native discovery directory. A distribution filter is not an isolation or authorization boundary.
 
 ## Portable manifests
 
@@ -152,7 +152,7 @@ Portable paths use forward slashes; explicit backslashes and drive/stream colons
 The launcher receives reserved `PLUGIN_ROOT` and `PLUGIN_DATA` environment variables. Plugin-defined replacements, including case variants, are rejected. Data is assigned to:
 
 ~~~text
-<source-root>/.agentmux/data/plugins/<manifest-name>
+<user-home>/.agentmux/data/plugins/<manifest-name>
 ~~~
 
 That location remains stable across updates using the same manifest name. Existing data paths must be directories, remain within the source root, and must not alias another plugin's data directory. The loader computes missing paths without creating them. The process launcher is responsible for creating the data directory and a selected data-rooted working directory immediately before launch.

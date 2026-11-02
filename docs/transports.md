@@ -144,19 +144,54 @@ delivering the correlated response to the broker.
   with a fresh context bounded to two seconds, and closes idle connections.
   DELETE errors and HTTP 405 are best effort and do not prevent local cleanup.
 
-### Explicit v1 boundaries
+### Modern MCP 2026-07-28 (stateless)
 
-The implemented initialization/session/JSON/SSE flow targets the 2025 Streamable
-HTTP protocol. It supports the ordinary 2025-03-26/2025-06-18 flow and ordinary
-2025-11-25 streams. It does **not** implement SSE cursor resumption, `Last-Event-ID`
+In addition to the 2025 initialization/session protocol, the transport accepts
+requests carrying the `2026-07-28` version and capabilities inside `params._meta`.
+It also supports the optional `server/discover` request. Modern requests do not
+use `initialize`, `notifications/initialized`, `Mcp-Session-Id`, the HTTP GET
+stream, or a session DELETE. `MCP-Protocol-Version` and `Mcp-Method` are set
+for each request. `Mcp-Name` is set for `tools/call`, `prompts/get`, and
+`resources/read`, using `params.name` or `params.uri` as appropriate.
+
+Header values requiring escaping are represented as `=?base64?...?=` following
+the protocol's sentinel encoding. The transport caches validated
+`x-mcp-header` parameter annotations from modern `tools/list` responses
+(including nested direct properties) and mirrors applicable tool arguments into
+`Mcp-Param-*` headers. Invalid annotated tool schemas are excluded from the
+modern list. A direct `tools/call` **before** `tools/list` might lack schema-
+derived headers; clients should list tools first when using annotated tools.
+
+Modern requests are routed independently and retain the originating client's
+`_meta`. Two clients' identical JSON-RPC IDs are remapped by the broker; modern
+clients are not merged into an already-initialized legacy stdio session.
+Normal modern JSON/SSE results, including multi-round-trip `input_required`
+results, are forwarded as received. MRTR input collection remains the calling
+client's responsibility. The current finite request timeout does not promise
+an indefinite `subscriptions/listen` stream, and no automatic stream restart
+or SSE cursor resumption is claimed.
+
+### Explicit transport boundaries
+
+The legacy initialization/session/JSON/SSE path targets 2025 Streamable HTTP,
+including 2025-03-26/2025-06-18 and ordinary 2025-11-25 streams. It does **not**
+implement SSE cursor resumption, `Last-Event-ID`
 or the 2025-11-25 polling behavior where a server closes a POST stream before its
 result and expects GET resumption. Such an incomplete POST stream returns a
 correlated error; the operation is not replayed. Unsolicited GET reconnection is
 not lossless and does not replay missed events.
 
-There is no automatic OAuth discovery, login, token refresh or browser
-authorization in v1. Static configured headers are supported; HTTP 401/403 is
-returned as a sanitized transport error. Legacy 2024 HTTP+SSE (`type: "sse"`, with
+OAuth 2.1 authorization is available through the official Go MCP SDK with an
+explicitly configured `oauth` block and `agentmux auth login <server>`.
+Discovery, PKCE, encrypted cached tokens and refresh are supported; the broker
+never initiates an interactive login or opens a browser without a user command.
+The configured redirect URL must be registered with the authorization provider.
+Windows uses per-user DPAPI, while Linux/macOS need an explicitly supplied
+`AGENTMUX_OAUTH_KEY` (base64-encoded 32 random bytes) or an injected secure
+store. Static configured headers are supported without OAuth; a configured
+literal Authorization header cannot be combined with OAuth. HTTP 401/403
+failures without valid credentials return sanitized errors. Legacy 2024
+HTTP+SSE (`type: "sse"`, with
 a separate server-selected POST endpoint) is explicitly unsupported. There is no
 implicit fallback to that protocol and no endpoint supplied by SSE is followed.
 
@@ -180,6 +215,7 @@ mise exec -- go vet ./internal/upstream
 Protocol references:
 
 - [MCP 2025-06-18 transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [MCP 2026-07-28 Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 - [MCP 2025-11-25 transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 - [MCP lifecycle](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle)
 - [MCP cancellation](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/cancellation)

@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"agentmux/internal/wire"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 )
 
 var errStreamComplete = errors.New("MCP response complete")
@@ -40,6 +41,9 @@ func (s *sseSplitter) split(data []byte, atEOF bool) (int, []byte, error) {
 	return offset, nil, nil
 }
 
+// readSSE is only the legacy unsolicited GET fallback. The SDK handles every
+// POST stream; its raw Connection cannot start GET without a private session
+// hook. JSON-RPC decoding here also goes through the official SDK.
 func readSSE(reader io.Reader, receive func(wire.Message) error) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 32<<10), wire.MaxFrameSize+1)
@@ -60,7 +64,11 @@ func readSSE(reader io.Reader, receive func(wire.Message) error) error {
 				if !utf8.Valid(payload) {
 					return errors.New("MCP SSE message is not valid UTF-8")
 				}
-				message, err := wire.Decode(payload)
+				decoded, err := jsonrpc.DecodeMessage(payload)
+				if err != nil {
+					return errors.New("invalid or oversized MCP SSE JSON-RPC message")
+				}
+				message, err := encodeSDKMessage(decoded)
 				if err != nil {
 					return errors.New("invalid or oversized MCP SSE JSON-RPC message")
 				}

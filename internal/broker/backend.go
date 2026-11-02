@@ -43,8 +43,9 @@ type backend struct {
 	progress map[string]*pending
 	lastUsed time.Time
 
-	initMu     sync.Mutex
-	initResult json.RawMessage
+	initMu      sync.Mutex
+	initResult  json.RawMessage
+	protocolEra uint8 // 0 unknown, 1 legacy handshake, 2 stateless 2026; guarded by initMu
 }
 
 func newBackend(ctx context.Context, server config.Server, transport upstream.Transport, timeout time.Duration) *backend {
@@ -123,12 +124,35 @@ func (b *backend) handle(p *peer, message wire.Message) {
 		go b.initialize(p, message)
 		return
 	}
+	if method == "server/discover" && message.HasID() {
+		if p.initialized.CompareAndSwap(0, 1) {
+			go b.discover(p, message)
+		} else if p.initialized.Load() == 2 {
+			if _, err := b.forward(p, message, nil); err != nil {
+				p.send(wire.Error(message.ID(), -32000, err.Error()))
+			}
+		} else {
+			p.send(wire.Error(message.ID(), -32600, "MCP discovery already pending"))
+		}
+		return
+	}
 	if method == "ping" && message.HasID() {
 		p.send(wire.Result(message.ID(), map[string]any{}))
 		return
 	}
 	if method == "notifications/initialized" || method == "notifications/roots/list_changed" {
 		return
+	}
+	if p.initialized.Load() == 0 && wire.IsModernRequest(message) {
+		b.initMu.Lock()
+		if b.protocolEra == 1 {
+			b.initMu.Unlock()
+			p.send(wire.Error(message.ID(), -32601, "upstream uses legacy MCP; reconnect with initialize or configure sharing=isolated"))
+			return
+		}
+		b.protocolEra = 2
+		p.initialized.Store(2)
+		b.initMu.Unlock()
 	}
 	if p.initialized.Load() != 2 {
 		if message.HasID() {
@@ -143,9 +167,9 @@ func (b *backend) handle(p *peer, message wire.Message) {
 	if method == "" {
 		return // No server-to-client requests are advertised in shared mode.
 	}
-	if method == "resources/subscribe" || method == "resources/unsubscribe" || method == "logging/setLevel" {
+	if method == "resources/subscribe" || method == "resources/unsubscribe" || method == "logging/setLevel" || method == "subscriptions/listen" || method == "subscriptions/acknowledge" {
 		if message.HasID() {
-			p.send(wire.Error(message.ID(), -32601, "per-session state is unavailable in shared mode; configure sharing=isolated"))
+			p.send(wire.Error(message.ID(), -32601, "client-specific subscriptions or state are unavailable in shared mode; configure sharing=isolated"))
 		}
 		return
 	}
@@ -169,6 +193,11 @@ func (b *backend) handle(p *peer, message wire.Message) {
 func (b *backend) initialize(p *peer, message wire.Message) {
 	b.initMu.Lock()
 	defer b.initMu.Unlock()
+	if b.protocolEra == 2 {
+		p.initialized.Store(0)
+		p.send(wire.Error(message.ID(), -32601, "upstream uses stateless MCP 2026; configure sharing=isolated for legacy clients"))
+		return
+	}
 	if b.initResult == nil {
 		result, err := b.initializeUpstream(message)
 		if err != nil {
@@ -177,10 +206,12 @@ func (b *backend) initialize(p *peer, message wire.Message) {
 		}
 		if result["error"] != nil {
 			result["id"] = message.ID()
+			p.initialized.Store(0)
 			p.send(result)
 			return
 		}
 		b.initResult = sanitizeCapabilities(result["result"])
+		b.protocolEra = 1
 		if err := b.transport.Write(wire.Notification("notifications/initialized", nil)); err != nil {
 			b.close()
 			return
@@ -188,6 +219,82 @@ func (b *backend) initialize(p *peer, message wire.Message) {
 	}
 	p.initialized.Store(2)
 	p.send(wire.Message{"jsonrpc": wire.Raw("2.0"), "id": message.ID(), "result": b.initResult})
+}
+
+// discover forwards the modern, request-scoped handshake alternative. A modern
+// server may be shared among modern peers without initializing a global client
+// session; unsupported discovery leaves the connection eligible for legacy
+// initialize fallback. The two protocol eras cannot share one stdio connection.
+func (b *backend) discover(p *peer, message wire.Message) {
+	b.initMu.Lock()
+	defer b.initMu.Unlock()
+	if b.protocolEra == 1 {
+		p.initialized.Store(0)
+		p.send(wire.Error(message.ID(), -32601, "server/discover unavailable after legacy MCP initialization"))
+		return
+	}
+	replies := make(chan wire.Message, 1)
+	request, err := b.forward(nil, message, replies)
+	if err != nil {
+		p.initialized.Store(0)
+		p.send(wire.Error(message.ID(), -32000, err.Error()))
+		return
+	}
+	limit := b.timeout
+	if limit > 5*time.Second {
+		limit = 5 * time.Second
+	}
+	timer := time.NewTimer(limit)
+	defer timer.Stop()
+	var response wire.Message
+	select {
+	case response = <-replies:
+	case <-timer.C:
+		b.mu.Lock()
+		b.removeLocked(string(request.upstreamID), request)
+		b.mu.Unlock()
+		if cancellable, ok := b.transport.(interface{ CancelRequest(json.RawMessage) }); ok {
+			// Drain an abandoned HTTP discovery before allowing the legacy
+			// initialize fallback on this same upstream transport.
+			cancellable.CancelRequest(request.upstreamID)
+		}
+		p.initialized.Store(0)
+		p.send(wire.Error(message.ID(), -32001, "modern MCP discovery timed out; legacy initialization may be available"))
+		return
+	case <-b.ctx.Done():
+		p.initialized.Store(0)
+		p.send(wire.Error(message.ID(), -32000, "MCP stopped during discovery"))
+		return
+	}
+	response["id"] = message.ID()
+	if response["error"] != nil {
+		p.initialized.Store(0)
+		p.send(response)
+		return
+	}
+	var result struct {
+		SupportedVersions []string `json:"supportedVersions"`
+	}
+	if json.Unmarshal(response["result"], &result) != nil {
+		p.initialized.Store(0)
+		p.send(wire.Error(message.ID(), -32600, "invalid MCP discovery response"))
+		return
+	}
+	supported := false
+	for _, v := range result.SupportedVersions {
+		if v == wire.ModernProtocolVersion {
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		p.initialized.Store(0)
+		p.send(wire.Error(message.ID(), -32601, "upstream does not advertise MCP 2026-07-28"))
+		return
+	}
+	b.protocolEra = 2
+	p.initialized.Store(2)
+	p.send(response)
 }
 
 func (b *backend) initializeUpstream(message wire.Message) (wire.Message, error) {
@@ -299,15 +406,31 @@ func (b *backend) removeLocked(key string, request *pending) {
 func (b *backend) readLoop() {
 	defer b.close()
 	for {
-		message, err := b.transport.Read()
+		var message wire.Message
+		var parentID json.RawMessage
+		var err error
+		if transport, ok := b.transport.(interface {
+			ReadRouted() (wire.Message, json.RawMessage, error)
+		}); ok {
+			message, parentID, err = transport.ReadRouted()
+		} else {
+			message, err = b.transport.Read()
+		}
 		if err != nil {
 			return
 		}
-		b.route(message)
+		b.routeFrom(message, parentID)
 	}
 }
 
 func (b *backend) route(message wire.Message) {
+	b.routeFrom(message, nil)
+}
+
+// parentID is the upstream ID of the client request whose HTTP POST carried
+// this message. For a stateless MCP, the response stream is the correlation
+// boundary for notifications that don't contain their own request ID.
+func (b *backend) routeFrom(message wire.Message, parentID json.RawMessage) {
 	if b.isolated {
 		b.broadcast(message)
 		return
@@ -321,8 +444,20 @@ func (b *backend) route(message wire.Message) {
 			_ = b.transport.Write(response)
 		} else if method == "notifications/progress" {
 			b.routeProgress(message)
-		} else {
+		} else if method == "notifications/tools/list_changed" || method == "notifications/resources/list_changed" || method == "notifications/prompts/list_changed" {
+			// These are global list invalidations, safe to share across peers.
 			b.broadcast(message)
+		} else if len(parentID) != 0 {
+			b.mu.Lock()
+			request := b.pending[string(parentID)]
+			b.mu.Unlock()
+			if request != nil && request.owner != nil {
+				request.owner.send(message)
+			}
+		} else {
+			// Modern subscription notifications and request-scoped diagnostic
+			// details have no verified owner here. Broadcasting them would leak
+			// one harness's state to all others. Isolated mode preserves them.
 		}
 		return
 	}

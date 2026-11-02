@@ -136,17 +136,35 @@ func integrationRoot(t *testing.T, sharing, idle string) string {
 
 type cliPeer struct {
 	command   *exec.Cmd
+	root      string
 	input     io.WriteCloser
 	reader    *wire.Reader
 	writer    *wire.Writer
 	done      chan error
-	stderr    bytes.Buffer
+	stderr    safeBuffer
 	closeOnce sync.Once
+}
+
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(data)
+}
+
+func (b *safeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func startCLIPeer(t *testing.T, binary, root, harness string) *cliPeer {
 	t.Helper()
-	p := &cliPeer{done: make(chan error, 1)}
+	p := &cliPeer{root: root, done: make(chan error, 1)}
 	p.command = exec.Command(binary, "connect", "--server", "fixture", "--harness", harness)
 	p.command.Env = append(os.Environ(), "USERPROFILE="+root, "HOME="+root)
 	input, err := p.command.StdinPipe()
@@ -192,7 +210,16 @@ func (p *cliPeer) read(t *testing.T) wire.Message {
 	select {
 	case value := <-result:
 		if value.err != nil {
-			t.Fatalf("proxy read: %v", value.err)
+			log := ""
+			if endpoint, err := ipc.ForRoot(p.root); err == nil {
+				if bytes, err := os.ReadFile(filepath.Join(endpoint.Directory, "broker.log")); err == nil {
+					if len(bytes) > 8192 {
+						bytes = bytes[len(bytes)-8192:]
+					}
+					log = string(bytes)
+				}
+			}
+			t.Fatalf("proxy read: %v; proxy stderr: %s; broker log: %s", value.err, p.stderr.String(), log)
 		}
 		if value.message["error"] != nil {
 			t.Fatalf("MCP error: %s", value.message["error"])
@@ -289,6 +316,68 @@ func TestCLIIsolatedModeUsesDistinctProcesses(t *testing.T) {
 		t.Fatal("isolated servers share a process")
 	}
 	t.Logf("Isolated MCP process IDs: %d and %d", first, second)
+}
+
+func TestCLISharingModeTransitionKeepsExistingClients(t *testing.T) {
+	binary := cliBinary(t)
+	root := integrationRoot(t, "shared", "5s")
+	first := startCLIPeer(t, binary, root, "cursor")
+	first.initialize(t)
+	_ = first.read(t)
+	first.call(t, 2, "shared-before")
+	sharedPID := resultPID(t, first.read(t), "shared-before")
+
+	// Change only the global canonical settings; no project configuration exists
+	// or is touched. Existing clients keep their generation, new clients get
+	// the opted-in isolated backend.
+	settingsPath := filepath.Join(root, ".agentmux", "agentmux.json")
+	original, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(original, &settings); err != nil {
+		t.Fatal(err)
+	}
+	settings["serverOverrides"] = map[string]any{"fixture": map[string]any{"sharing": "isolated"}}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	second := startCLIPeer(t, binary, root, "codex")
+	second.initialize(t)
+	_ = second.read(t)
+	second.call(t, 3, "isolated-after")
+	isolatedPID := resultPID(t, second.read(t), "isolated-after")
+	if isolatedPID == sharedPID {
+		t.Fatal("new isolated MCP reused prior shared process")
+	}
+	first.call(t, 4, "shared-survives")
+	if pid := resultPID(t, first.read(t), "shared-survives"); pid != sharedPID {
+		t.Fatal("existing shared client was migrated or disrupted")
+	}
+
+	// Reverting to shared must not attach new peers to the isolated process.
+	delete(settings, "serverOverrides")
+	data, err = json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	third := startCLIPeer(t, binary, root, "codex")
+	third.initialize(t)
+	_ = third.read(t)
+	third.call(t, 5, "shared-again")
+	returnedPID := resultPID(t, third.read(t), "shared-again")
+	if returnedPID == isolatedPID {
+		t.Fatal("reverted shared client joined isolated upstream")
+	}
 }
 
 func TestCLIIdleBrokerStopsAutomatically(t *testing.T) {

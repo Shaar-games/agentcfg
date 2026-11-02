@@ -14,12 +14,13 @@ présentés dans un plan explicite. Aucun « dernier écrivain gagne » silencie
 
 ## Autres améliorations possibles
 
-Support des protocoles MCP 2026 remaniés après tests de conformité dédiés ;
-OAuth distant avec stockage séparé des tokens ; profils et chemins personnalisés
-par harness ; mécanisme d’import explicite ; mode watch unidirectionnel ;
-restauration guidée des sauvegardes ; métriques RAM/processus ; limites et
+Tests de conformité approfondis du MCP 2026-07-28 (MRTR, tâches,
+subscriptions, fournisseurs réels) ; stockage natif OAuth Keychain macOS et
+Secret Service Linux en complément du chiffrement explicite actuel ; profils et
+chemins personnalisés par harness ; mécanisme d’import explicite ; mode watch
+unidirectionnel ; restauration guidée des sauvegardes ; métriques RAM/processus ;
 politique de rétention des logs ; compatibilité skills avec liens internes
-contrôlés.
+contrôlés ; provenance signée des binaires de release.
 
 Les tests futurs avec les applications réelles doivent compléter, et non
 remplacer, les tests de protocole et de fichiers temporaires existants.

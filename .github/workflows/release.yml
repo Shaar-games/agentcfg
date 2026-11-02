@@ -1,0 +1,197 @@
+name: Release binaries
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing semver Git tag (e.g. v0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify before publishing (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: go test -count=1 -timeout=180s ./...
+      - name: Race detector
+        if: runner.os == 'Linux'
+        run: go test -race -count=1 -timeout=180s ./...
+
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    needs: [verify]
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Resolve release version
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][a-zA-Z0-9.-]+)?$ ]] || { echo "Invalid release tag: $tag"; exit 1; }
+          git rev-parse "refs/tags/$tag" >/dev/null
+          [[ "$(git rev-list -n 1 "$tag")" == "$(git rev-parse HEAD)" ]] || { echo "Release must build the checked-out tag"; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Build and package
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pkg"
+          name="agentmux"
+          if [[ "$GOOS" == windows ]]; then name="agentmux.exe"; fi
+          go build -trimpath -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" -o "$RUNNER_TEMP/pkg/$name" ./cmd/agentmux
+          asset="agentmux_${GOOS}_${GOARCH}"
+          if [[ "$GOOS" == windows ]]; then
+            (cd "$RUNNER_TEMP/pkg" && zip -q "$RUNNER_TEMP/$asset.zip" "$name")
+          else
+            tar -czf "$RUNNER_TEMP/$asset.tar.gz" -C "$RUNNER_TEMP/pkg" "$name"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentmux-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ runner.temp }}/agentmux_*
+          if-no-files-found: error
+          retention-days: 2
+
+  publish:
+    name: Publish precompiled binaries and SHA-256 manifest
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agentmux-*
+          path: release
+          merge-multiple: true
+      - name: Verify all expected assets and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              ext=tar.gz
+              if [[ "$os" == windows ]]; then ext=zip; fi
+              test -s "agentmux_${os}_${arch}.${ext}" || { echo "Missing $os/$arch"; exit 1; }
+            done
+          done
+          sha256sum agentmux_* > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Publish or verify immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][a-zA-Z0-9.-]+)?$ ]] || exit 1
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # Re-runs are allowed only when every published asset is byte-identical.
+            # Never overwrite artifacts that may already have been downloaded.
+            published="$(mktemp -d)"
+            trap 'rm -rf "$published"' EXIT
+            gh release download "$tag" --dir "$published"
+            expected_names="$(cd release && find . -maxdepth 1 -type f -printf '%f\n' | sort)"
+            actual_names="$(cd "$published" && find . -maxdepth 1 -type f -printf '%f\n' | sort)"
+            [[ "$expected_names" == "$actual_names" ]] || {
+              echo "Published release assets differ from the intended set; refusing overwrite" >&2
+              exit 1
+            }
+            for asset in release/*; do
+              cmp "$asset" "$published/$(basename "$asset")" || {
+                echo "Published asset differs: $(basename "$asset"); refusing overwrite" >&2
+                exit 1
+              }
+            done
+            echo 'Published assets are byte-identical; nothing overwritten.'
+          else
+            gh release create "$tag" release/* --verify-tag --title "$tag" --generate-notes
+          fi
+
+  smoke:
+    name: Install published binary (${{ matrix.os }})
+    needs: [publish]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Bash installer smoke
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          AGENTMUX_VERSION: ${{ inputs.tag || github.ref_name }}
+          AGENTMUX_BIN_DIR: ${{ runner.temp }}/agentmux-bin
+        run: |
+          set -euo pipefail
+          bash install.sh
+          "$AGENTMUX_BIN_DIR/agentmux" version
+          if bash install.sh; then
+            echo 'Installer unexpectedly overwrote an existing binary' >&2
+            exit 1
+          fi
+      - name: PowerShell installer smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          AGENTMUX_VERSION: ${{ inputs.tag || github.ref_name }}
+          AGENTMUX_BIN_DIR: ${{ runner.temp }}/agentmux-bin
+        run: |
+          ./install.ps1
+          & (Join-Path $env:AGENTMUX_BIN_DIR 'agentmux.exe') version
+          if ($LASTEXITCODE -ne 0) { throw 'Installed binary smoke test failed' }
+          $overwrote = $false
+          try { ./install.ps1; $overwrote = $true } catch { Write-Host "Correctly refused existing binary: $_" }
+          if ($overwrote) { throw 'Installer unexpectedly overwrote existing binary' }

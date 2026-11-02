@@ -11,6 +11,8 @@ import (
 
 	"agentmux/internal/config"
 	"agentmux/internal/wire"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type childProcess interface {
@@ -20,17 +22,18 @@ type childProcess interface {
 }
 
 type stdioTransport struct {
-	process   childProcess
-	input     *os.File
-	output    *os.File
-	errors    *os.File
-	reader    *wire.Reader
-	writer    *wire.Writer
-	cancel    context.CancelFunc
-	done      chan struct{}
-	logsDone  chan struct{}
-	closeOnce sync.Once
-	closeErr  error
+	process    childProcess
+	input      *os.File
+	output     *os.File
+	errors     *os.File
+	ctx        context.Context
+	connection mcp.Connection
+	readErr    error // Read is single-consumer; SDK's EOF/error channel is not replayed.
+	cancel     context.CancelFunc
+	done       chan struct{}
+	logsDone   chan struct{}
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 func startStdio(parent context.Context, s config.Server, stderr io.Writer) (Transport, error) {
@@ -94,8 +97,21 @@ func startStdio(parent context.Context, s config.Server, stderr io.Writer) (Tran
 	_ = childErr.Close()
 	opened = nil
 	ctx, cancel := context.WithCancel(parent)
+	connection, err := (&mcp.IOTransport{
+		Reader: &singleMessageReader{ReadCloser: output, atStart: true},
+		Writer: input, MaxLineLength: wire.MaxFrameSize,
+	}).Connect(ctx)
+	if err != nil {
+		cancel()
+		_ = process.stop()
+		_ = input.Close()
+		_ = output.Close()
+		_ = logs.Close()
+		_ = process.wait()
+		return nil, fmt.Errorf("connect SDK stdio transport: %w", err)
+	}
 	t := &stdioTransport{process: process, input: input, output: output, errors: logs,
-		reader: wire.NewReader(output), writer: wire.NewWriter(input), cancel: cancel,
+		ctx: ctx, connection: connection, cancel: cancel,
 		done: make(chan struct{}), logsDone: make(chan struct{})}
 	if stderr == nil {
 		stderr = io.Discard
@@ -148,16 +164,40 @@ func preparePluginDirectory(cwd string, configured map[string]string, env []stri
 	return nil
 }
 
-func (t *stdioTransport) PID() int                    { return t.process.pid() }
-func (t *stdioTransport) Read() (wire.Message, error) { return t.reader.Read() }
-func (t *stdioTransport) Write(m wire.Message) error  { return t.writer.Write(m) }
+func (t *stdioTransport) PID() int { return t.process.pid() }
+
+func (t *stdioTransport) Read() (wire.Message, error) {
+	if t.readErr != nil {
+		return nil, t.readErr
+	}
+	message, err := t.connection.Read(t.ctx)
+	if err != nil {
+		if t.ctx.Err() != nil || err == io.EOF {
+			t.readErr = io.EOF
+		} else {
+			t.readErr = fmt.Errorf("read MCP stdio through SDK (maximum 32 MiB): %w", err)
+		}
+		return nil, t.readErr
+	}
+	return encodeSDKMessage(message)
+}
+
+func (t *stdioTransport) Write(message wire.Message) error {
+	if t.ctx.Err() != nil {
+		return ErrClosed
+	}
+	decoded, err := decodeSDKMessage(message)
+	if err != nil {
+		return err
+	}
+	return t.connection.Write(t.ctx, decoded)
+}
 
 func (t *stdioTransport) Close() error {
 	t.closeOnce.Do(func() {
 		t.cancel()
 		t.closeErr = t.process.stop()
-		_ = t.input.Close()
-		_ = t.output.Close()
+		_ = t.connection.Close()
 		_ = t.errors.Close()
 		<-t.done
 		<-t.logsDone

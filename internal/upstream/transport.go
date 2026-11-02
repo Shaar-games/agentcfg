@@ -1,8 +1,8 @@
-// Package upstream connects the broker to MCP servers without opening a listener.
 package upstream
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +19,14 @@ type Transport interface {
 	Write(wire.Message) error
 	Close() error
 	PID() int
+}
+
+// RoutedTransport preserves the HTTP request that produced an incoming message.
+// The parent ID is nil for an unsolicited legacy GET event. Callers must choose
+// either Read or ReadRouted, using exactly one reader for the transport.
+type RoutedTransport interface {
+	Transport
+	ReadRouted() (wire.Message, json.RawMessage, error)
 }
 
 var ErrClosed = errors.New("MCP transport is closed")

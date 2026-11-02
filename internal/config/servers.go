@@ -95,11 +95,11 @@ func parseServer(raw json.RawMessage, root, pluginRoot, pluginName string) (Serv
 		return Server{}, fmt.Errorf("unsupported transport %q; use stdio or streamable-http", kind)
 	}
 	if !portable {
-		allowed = append(allowed, "harnesses", "sharing")
+		allowed = append(allowed, "harnesses", "sharing", "oauth")
 	}
 	if err = allowFields(fields, allowed...); err != nil {
 		if portable {
-			return Server{}, fmt.Errorf("%w; agentmux harnesses/sharing belong in agentmux.json serverOverrides", err)
+			return Server{}, fmt.Errorf("%w; agentmux harnesses/sharing/oauth belong in agentmux.json serverOverrides", err)
 		}
 		return Server{}, err
 	}
@@ -120,11 +120,20 @@ func parseServer(raw json.RawMessage, root, pluginRoot, pluginName string) (Serv
 	if kind == "sse" {
 		return Server{}, fmt.Errorf("legacy sse transport is unsupported; use a streamable-http endpoint (SSE responses within Streamable HTTP are supported separately)")
 	}
+	if err = validateServerOAuth(server); err != nil {
+		return Server{}, err
+	}
 	return server, nil
 }
 
 func parseServerOptions(fields map[string]json.RawMessage, server *Server) error {
 	var err error
+	if raw, exists := fields["oauth"]; exists {
+		server.OAuth, err = parseOAuth(raw)
+		if err != nil {
+			return err
+		}
+	}
 	if raw, exists := fields["harnesses"]; exists {
 		server.Harnesses, err = parseHarnesses(raw)
 		if err != nil {

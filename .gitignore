@@ -1,9 +1,6 @@
 /bin/
 /dist/
-/.agentmux/data/
-/.agentmux/backups/
-/.agentmux/sync-*.json
-/.agentmux/sync.lock
+/.agentmux/
 /coverage.out
 *.test
 *.exe

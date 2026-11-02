@@ -18,14 +18,14 @@ This file is an **operational migration playbook** for AI coding agents helping 
 | Concern | Current implementation |
 | --- | --- |
 | Canonical root | `~/.agentmux/`, always user-level |
-| CLI | `agentmux init`, `validate`, `list`, `sync`, `sync --apply`, `status`, `stop` |
-| Configured harnesses | `claude-code`, `codex`, `cursor`, `opencode`, `gemini` |
+| CLI | `agentmux` (Bubble Tea TUI), `init`, `validate`, `list`, `sync`, `sync --apply`, `status`, `stop` |
+| Configured harnesses | `claude-code`, `codex`, `cursor`, `opencode`, `gemini`, `antigravity` |
 | Unsupported in global sync | `claude-desktop`; VS Code's adapter is project-only |
 | MCP execution | Local stdio proxies, one shared upstream or an isolated backend |
 | Skills | Directory links (copy fallback) or copies to native user-level directories |
 | Existing entries | **Not automatically imported or adopted** |
 | Bidirectional sync | Not implemented |
-| Global instruction file | `~/.agentmux/AGENTS.md` is **not yet propagated** |
+| Global instruction file | `~/.agentmux/AGENTS.md` distributes user-level instructions to Codex, Claude Code and OpenCode when selected |
 
 There is **no `--root` CLI flag** and no project synchronization option. Do not use commands from older agentmux documentation that include them.
 
@@ -40,6 +40,7 @@ Inspect **only** supported user-level files, if present:
 | Cursor | `~/.cursor/mcp.json` | `~/.cursor/skills/` |
 | OpenCode | `~/.config/opencode/opencode.json` (or existing `.jsonc`) | `~/.config/opencode/skills/` |
 | Gemini CLI | `~/.gemini/settings.json` | `~/.gemini/skills/` |
+| Google Antigravity App / CLI | `~/.gemini/config/mcp_config.json` | `~/.gemini/config/skills/` (shared personal layout) |
 
 Find the user's own MCP server names, transport types, executable names, arguments, working directories, environment-variable **names**, remote URLs, and any client-specific settings. Treat private values as opaque; preserve them securely without displaying them.
 
@@ -59,7 +60,7 @@ The agentmux synchronizer also creates backups of changes it owns, but **that is
 
 ## Step 3 — Prepare agentmux
 
-If not installed, review the [installation scripts](README.md#installation) with the user. Their prerequisites are Git and mise; installation is separate from configuration migration.
+If not installed, review the [installation scripts](README.md#installation) with the user. Bash or PowerShell downloads verified, precompiled GitHub Release binaries; neither a Go toolchain nor Git nor mise is needed for installation. Installation is separate from configuration migration.
 
 ```sh
 agentmux version
@@ -77,7 +78,7 @@ agentmux validate
 └── plugins/
 ```
 
-The source can also contain `AGENTS.md`, but **the current release does not synchronize it**. Do not pretend those instructions have reached any harness.
+The source can also contain `AGENTS.md`; `metadata.harness` selects which verified user-level adapters receive it. Agentmux strips the routing frontmatter from generated native copies and preserves the canonical original. This feature supports Codex (`~/.codex/AGENTS.md`), Claude Code (`~/.claude/CLAUDE.md`) and OpenCode (`~/.config/opencode/AGENTS.md`) only, and rejects collisions with existing unmanaged instruction files. Do not assume other clients are supported.
 
 ## Step 4 — Translate MCP definitions
 
@@ -105,7 +106,7 @@ Create/update the canonical `mcpServers` object in `~/.agentmux/mcp.json`. The f
 - Use `harnesses` to include only the clients that originally had (or have been approved to receive) a server. Absence means all globally selected clients.
 - Use `sharing: "shared"` only when a server is safe to share. Use `"isolated"` for private browser sessions, client-specific state, callbacks, roots, sampling, or elicitation.
 - On Windows, prefer invoking the underlying executable directly if a batch wrapper cannot safely pass the existing arguments.
-- Do not automatically convert legacy HTTP+SSE or OAuth-only setups; these are not fully supported by agentmux's outbound HTTP transport.
+- Do not automatically convert legacy HTTP+SSE configurations: the separate-endpoint transport is unsupported. For OAuth-protected Streamable HTTP MCPs, preserve the intended resource, issuer, scopes and client registration, then configure `oauth` and perform a separate explicit `agentmux auth login <server>` with consent. Do not copy existing client access or refresh tokens into plaintext files.
 - If distinct MCPs collide on the same name, choose unique canonical names **with the user's approval**.
 
 For standard Agent Plugins, keep each package under `~/.agentmux/plugins/<plugin>/` with its `plugin.json`, standard `mcp.json`, and optional `skills/`. **Do not add `harnesses` or `sharing` to a portable plugin's `mcp.json`.** Use qualified names in `serverOverrides` of `~/.agentmux/agentmux.json` instead.
@@ -125,7 +126,7 @@ metadata:
 ---
 ```
 
-An omitted `metadata.harness` means all selected harnesses; a YAML list is not valid for this field. **Do not use `skillOverrides`** in `agentmux.json`.
+An omitted `metadata.harness` means all selected harnesses; `metadata.harness: none` explicitly selects no harness. A YAML list is not valid for this field. **Do not use `skillOverrides`** in `agentmux.json`.
 
 Set the globally selected harnesses in `~/.agentmux/agentmux.json`:
 
@@ -164,7 +165,7 @@ An unmanaged skill collision must likewise be resolved explicitly; do not silent
 
 ## Step 7 — Apply and verify
 
-After the user reviews the changes:
+After the user reviews the changes (the Bubble Tea dashboard also supports enable/disable selections and sharing preferences in canonical settings):
 
 ```sh
 agentmux sync --apply

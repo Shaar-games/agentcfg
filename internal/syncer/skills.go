@@ -3,7 +3,6 @@ package syncer
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -15,8 +14,6 @@ import (
 	"agentmux/internal/config"
 	"agentmux/internal/pathutil"
 )
-
-const originMarker = ".agentmux-origin.json"
 
 type skillRecord struct {
 	Source      string `json:"source"`
@@ -215,9 +212,5 @@ func copySkill(source, destination string) error {
 		}
 		return closeErr
 	})
-	if err != nil {
-		return err
-	}
-	marker, _ := json.MarshalIndent(map[string]string{"source": source, "managedBy": "agentmux"}, "", "  ")
-	return os.WriteFile(filepath.Join(destination, originMarker), append(marker, '\n'), 0o600)
+	return err
 }
