@@ -9,10 +9,5 @@
       "harnesses": ["claude-code", "codex"],
       "sharing": "shared"
     }
-  },
-  "skillOverrides": {
-    "docs-helper.documentation-check": {
-      "harnesses": ["claude-code", "codex"]
-    }
   }
 }

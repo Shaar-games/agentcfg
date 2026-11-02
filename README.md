@@ -149,14 +149,15 @@ plugin sont `nom-du-plugin.nom-du-serveur` ou `nom-du-plugin.nom-du-skill`.
       "harnesses": ["cursor", "codex"],
       "sharing": "isolated"
     }
-  },
-  "skillOverrides": {
-    "code-review": {"harnesses": ["codex", "claude-code"]}
   }
 }
 ```
 
-Les overrides doivent désigner des éléments réellement découverts ; sinon
+Les skills utilisent `metadata.harness: codex,claude-code,cursor` dans leur
+`SKILL.md` pour limiter les harnesses. Sans ce champ, ils ciblent tous les
+harnesses configurés. `skillOverrides` n'est plus accepté.
+
+Les overrides MCP doivent désigner des éléments réellement découverts ; sinon
 `validate` signale un avertissement. Une liste globale `harnesses: []` ne génère
 rien. Un filtre absent ou vide sur un élément signifie « tous les harnesses
 sélectionnés ». Les filtres choisissent les destinations ; ce ne sont pas des

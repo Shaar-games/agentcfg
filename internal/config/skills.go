@@ -93,6 +93,11 @@ func (l *loader) loadSkill(directory, dirname, plugin, boundary string) {
 		l.warn(location, err)
 		return
 	}
+	harnesses, err := skillHarnesses(data)
+	if err != nil {
+		l.warn(location, err)
+		return
+	}
 	if err = validateSkillTree(directory, boundary); err != nil {
 		l.warn(location, err)
 		return
@@ -106,7 +111,50 @@ func (l *loader) loadSkill(directory, dirname, plugin, boundary string) {
 			return
 		}
 	}
-	l.config.Skills = append(l.config.Skills, Skill{Name: name, Path: directory})
+	l.config.Skills = append(l.config.Skills, Skill{Name: name, Path: directory, Harnesses: harnesses})
+}
+
+// skillHarnesses reads the optional Agent Skills string metadata.harness.
+// A missing key means all configured harnesses.
+func skillHarnesses(data []byte) ([]string, error) {
+	frontmatter, err := skillFrontmatter(data)
+	if err != nil {
+		return nil, err
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &document); err != nil {
+		return nil, err
+	}
+	fields := yamlFields(document.Content[0])
+	metadata := fields["metadata"]
+	if metadata == nil {
+		return nil, nil
+	}
+	value := yamlFields(metadata)["harness"]
+	if value == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(value.Value) == "" {
+		return nil, fmt.Errorf("metadata.harness cannot be empty")
+	}
+	seen := map[string]bool{}
+	var result []string
+	for _, item := range strings.Split(value.Value, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return nil, fmt.Errorf("metadata.harness contains an empty harness")
+		}
+		switch item {
+		case "claude-code", "codex", "cursor", "opencode", "gemini", "vscode":
+		default:
+			return nil, fmt.Errorf("unknown metadata.harness %q", item)
+		}
+		if !seen[item] {
+			result = append(result, item)
+			seen[item] = true
+		}
+	}
+	return result, nil
 }
 
 func validateSkill(data []byte, dirname string) (string, error) {

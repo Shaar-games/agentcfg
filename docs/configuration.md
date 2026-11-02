@@ -61,8 +61,7 @@ The default settings are:
     "idleTimeout": "5m",
     "requestTimeout": "5m"
   },
-  "serverOverrides": {},
-  "skillOverrides": {}
+  "serverOverrides": {}
 }
 ~~~
 
@@ -82,16 +81,11 @@ Use fully qualified plugin IDs in overrides:
       "harnesses": ["codex", "claude-code"],
       "sharing": "isolated"
     }
-  },
-  "skillOverrides": {
-    "docs-helper.documentation-check": {
-      "harnesses": ["codex"]
-    }
   }
 }
 ~~~
 
-Overrides replace only fields explicitly present. For example, `"harnesses": []` clears a narrower filter. `sharing` accepts exactly `shared` or `isolated`; an empty string is invalid. Skills accept harness overrides only. Overrides naming entries that did not load generate warnings.
+Server overrides replace only fields explicitly present. For example, `"harnesses": []` clears a narrower filter. `sharing` accepts exactly `shared` or `isolated`; an empty string is invalid. Skills use `metadata.harness` in their own SKILL.md, not settings overrides.
 
 `shared` is the server default and requests a shared upstream instance. `isolated` requests a separate upstream connection for each client. Choose the latter when an MCP relies on private session state or client callbacks; see the runtime documentation for the supported shared-session operations.
 
@@ -179,6 +173,8 @@ Both standalone and plugin skills require a regular `SKILL.md` with YAML frontma
 ---
 name: documentation-check
 description: Check official documentation when a task depends on a library API.
+metadata:
+  harness: codex,claude-code,cursor
 ---
 Read the relevant documentation and cite the version used.
 ~~~

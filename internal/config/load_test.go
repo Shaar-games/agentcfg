@@ -121,6 +121,7 @@ func TestCanonicalServersSettingsAndOverrides(t *testing.T) {
 		"remote": testObject{"url": "https://example.test/mcp", "headers": testObject{"X-Literal": "${PLUGIN_ROOT}"}},
 	})
 	skillFixture(t, filepath.Join(root, ".agents", "skills"), "review")
+		putFile(t, filepath.Join(root, ".agents", "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Review code.\nmetadata:\n  harness: claude-code\n---\n")
 	putJSON(t, filepath.Join(root, ".agents", "agentmux.json"), testObject{
 		"harnesses": []string{"codex", "claude-code", "codex"},
 		"runtime":   testObject{"idleTimeout": "30s", "requestTimeout": "2m"},
@@ -129,7 +130,6 @@ func TestCanonicalServersSettingsAndOverrides(t *testing.T) {
 			"remote":  testObject{"harnesses": []string{}},
 			"missing": testObject{"sharing": "shared"},
 		},
-		"skillOverrides": testObject{"review": testObject{"harnesses": []string{"claude-code"}}},
 	})
 	config := loadOK(t, root)
 	local := config.Servers["local"]
@@ -200,9 +200,9 @@ func TestPortablePluginVariablesAndNamespaces(t *testing.T) {
 	})
 	putFile(t, filepath.Join(plugin, "bin", "runner"), "This fixture must never be executed.\n")
 	skill := skillFixture(t, filepath.Join(plugin, "skills"), "review")
+		putFile(t, filepath.Join(skill, "SKILL.md"), "---\nname: review\ndescription: Review code.\nmetadata:\n  harness: codex\n---\n")
 	putJSON(t, filepath.Join(root, ".agents", "agentmux.json"), testObject{
 		"serverOverrides": testObject{"acme.tools.inspect": testObject{"harnesses": []string{"cursor"}, "sharing": "isolated"}},
-		"skillOverrides":  testObject{"acme.tools.review": testObject{"harnesses": []string{"codex"}}},
 	})
 	config := loadOK(t, root)
 	if len(config.Warnings) != 0 {

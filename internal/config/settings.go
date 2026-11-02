@@ -12,7 +12,7 @@ func defaultSettings() Settings {
 	return Settings{
 		Harnesses:       []string{"claude-code", "codex", "cursor", "opencode", "gemini"},
 		Runtime:         Runtime{IdleTimeout: "5m", RequestTimeout: "5m"},
-		ServerOverrides: map[string]Override{}, SkillOverrides: map[string]Override{},
+		ServerOverrides: map[string]Override{},
 	}
 }
 
@@ -36,7 +36,7 @@ func (l *loader) parseSettings(data []byte) error {
 	if err != nil {
 		return err
 	}
-	if err = allowFields(fields, "harnesses", "runtime", "serverOverrides", "skillOverrides"); err != nil {
+	if err = allowFields(fields, "harnesses", "runtime", "serverOverrides"); err != nil {
 		return err
 	}
 	settings := &l.config.Settings
@@ -54,10 +54,6 @@ func (l *loader) parseSettings(data []byte) error {
 	settings.ServerOverrides, err = parseOverrides(fields["serverOverrides"], false)
 	if err != nil {
 		return fmt.Errorf("serverOverrides: %w", err)
-	}
-	settings.SkillOverrides, err = parseOverrides(fields["skillOverrides"], true)
-	if err != nil {
-		return fmt.Errorf("skillOverrides: %w", err)
 	}
 	return nil
 }
@@ -178,22 +174,5 @@ func (l *loader) applyOverrides() {
 			server.Sharing = override.Sharing
 		}
 		l.config.Servers[name] = server
-	}
-	found := map[string]bool{}
-	for i := range l.config.Skills {
-		skill := &l.config.Skills[i]
-		override, exists := l.config.Settings.SkillOverrides[skill.Name]
-		if !exists {
-			continue
-		}
-		found[skill.Name] = true
-		if override.Harnesses != nil {
-			skill.Harnesses = override.Harnesses
-		}
-	}
-	for _, name := range sortedKeys(l.config.Settings.SkillOverrides) {
-		if !found[name] {
-			l.warn("skillOverrides", fmt.Errorf("%q does not match a loaded skill", name))
-		}
 	}
 }
