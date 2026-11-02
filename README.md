@@ -1,121 +1,118 @@
-# agentmux
+<p align="center">
+  <img src="https://shieldcn.dev/header/glow.svg?title=agentmux&amp;subtitle=One+MCP+process.+Every+AI+agent.&amp;logo=go&amp;theme=blue&amp;size=banner" alt="agentmux — shared MCP processes and skills for AI coding agents" width="750" />
+</p>
 
-Un gestionnaire local de **processus MCP partagés** et de **skills**, écrit en Go.
-Chaque harness conserve une entrée native par serveur MCP. Seule la commande
-change : un petit relais `agentmux connect` rejoint un broker local qui démarre
-le serveur réel une seule fois pour la même racine de configuration.
+<p align="center">
+  <a href="https://github.com/Shaar-games/agentmux/actions"><img alt="GitHub CI" src="https://shieldcn.dev/github/ci/Shaar-games/agentmux.svg?variant=outline&amp;size=sm" /></a>
+  <a href="https://github.com/Shaar-games/agentmux/stargazers"><img alt="GitHub stars" src="https://shieldcn.dev/github/stars/Shaar-games/agentmux.svg?variant=outline&amp;size=sm" /></a>
+  <a href="https://github.com/Shaar-games/agentmux/issues"><img alt="GitHub issues" src="https://shieldcn.dev/github/issues/Shaar-games/agentmux.svg?variant=outline&amp;size=sm" /></a>
+  <img alt="Go 1.26" src="https://shieldcn.dev/badge/Go-1.26-blue.svg?variant=outline&amp;size=sm&amp;logo=go" />
+</p>
+
+<p align="center">
+  <strong>Run each MCP server once. Connect it to multiple AI coding agents.</strong><br />
+  A local, on-demand MCP process multiplexer and skills synchronizer written in Go.
+</p>
+
+<p align="center">
+  <a href="#installation">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="MIGRATION_FOR_AGENTS.md">Migrate with an AI agent</a> ·
+  <a href="docs/architecture.md">Architecture</a>
+</p>
+
+---
+
+## Why agentmux?
+
+Most MCP clients launch their own copy of every configured local server. When Claude Code, Codex, Cursor, OpenCode, or Gemini CLI use the same tools, that can mean duplicate processes, startup overhead, and memory usage.
+
+**agentmux keeps a separate, native MCP entry in every client but shares the upstream process.** Each client starts a lightweight stdio proxy; the proxy connects to a local broker, which launches the actual MCP server only when needed.
 
 ```text
-Cursor  ── chrome-devtools: agentmux connect ──┐
-Codex   ── chrome-devtools: agentmux connect ──┼── IPC local ── broker ── chrome-devtools × 1
-Claude  ── chrome-devtools: agentmux connect ──┘                 │
-                                                            └── context7 × 1
-Cursor  ── context7: agentmux connect ─────────────────────────┘
+Claude Code ── chrome-devtools: agentmux connect ──┐
+Codex       ── chrome-devtools: agentmux connect ──┼── local IPC ── agentmux broker ── chrome-devtools × 1
+Cursor      ── chrome-devtools: agentmux connect ──┘
+
+Codex       ── context7: agentmux connect ────────┐
+OpenCode    ── context7: agentmux connect ────────┴── local IPC ── agentmux broker ── Context7
 ```
 
-**Aucun serveur HTTP local, aucun port TCP en écoute.** Le transport local est
-un named pipe Windows ou un socket Unix. Un serveur MCP distant peut néanmoins
-être joint en HTTP sortant. Le broker démarre à la première connexion et s’arrête
-après inactivité. Il n’est pas installé comme service système.
+**No local HTTP server or listening TCP port.** The broker uses a private Windows named pipe or Unix domain socket. Remote MCP servers can still be accessed through outbound Streamable HTTP connections.
 
-## Démarrer
+### Features
 
-La configuration canonique est **globale** : `~/.agentmux/` (sur Windows,
-`$HOME\.agentmux\`). Par défaut, `agentmux init`, `list`, `connect`, `status`
-et `sync` utilisent le dossier personnel, indépendamment du projet courant.
-`sync` cible les configurations utilisateur par défaut (portée utilisateur).
-Le dossier `.agentmux/` d'un projet n'est pas découvert automatiquement.
+- **One upstream per shared MCP configuration**, even with multiple connected harnesses.
+- **Starts on demand and stops after inactivity**; no permanently installed background service.
+- **Individual MCP entries** in each harness, not one aggregated tool catalog.
+- **Global configuration** at `~/.agentmux/`, independent of the current project.
+- **Skills and Agent Plugins** discovered from canonical directories and installed into native harness locations.
+- **Selective distribution** using MCP harness filters and a skill's `metadata.harness`.
+- **Conservative synchronization** with dry runs, backups, ownership tracking, and conflict detection.
+- **Isolated mode** for MCPs that need per-client state or callbacks.
 
-### Installation en une commande
+## Installation
 
-Prérequis : **Git** et **mise** ([installation de mise](https://mise.jdx.dev/getting-started.html)).
-Les scripts clonent le dépôt dans un emplacement stable, installent Go via
-`mise.toml` et compilent le binaire. Ils refusent d'écraser une installation
-existante et ne modifient pas les configurations des harnesses.
+Requires [Git](https://git-scm.com/) and [mise](https://mise.jdx.dev/getting-started.html). The installers use `mise.toml` to install the required Go toolchain and compile agentmux locally.
 
-**Linux / macOS (POSIX shell)** :
+**Linux / macOS (POSIX shell)**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Shaar-games/agentmux/main/install.sh | sh
 ```
 
-**Windows PowerShell** :
+**Windows (PowerShell)**
 
 ```powershell
 irm https://raw.githubusercontent.com/Shaar-games/agentmux/main/install.ps1 | iex
 ```
 
-Sur Linux, macOS et Windows, les sources et fichiers de build sont conservés
-dans `~/.local/share/agentmux`, tandis que l'exécutable est accessible dans
-`~/.local/bin/agentmux` (ou `agentmux.exe` sous Windows). Sous Unix, il s'agit
-d'un lien symbolique vers le binaire compilé ; sous Windows, d'une copie.
-Ajouter `~/.local/bin` au `PATH` s'il n'y figure pas. Pour choisir le dossier
-des sources, définir `AGENTMUX_INSTALL_DIR` avant l'installation ; le dossier
-des exécutables reste `~/.local/bin`. Les scripts refusent d'écraser un binaire
-existant. **Sécurité :** examiner `install.sh` ou `install.ps1` avant
-d'exécuter un script distant ; ces commandes suivent la branche `main`.
+Both installers keep the source and build files in `~/.local/share/agentmux/` and place an executable at `~/.local/bin/agentmux` (`agentmux.exe` on Windows). Unix uses a symlink; Windows uses a copy. Add `~/.local/bin` to your `PATH` if necessary.
 
-### Développement depuis les sources
+The scripts **do not modify your harness configurations**. They refuse to overwrite an existing installation or executable. Review the remote installation scripts before executing them; these one-liners follow the repository's `main` branch.
 
-Après compilation, `agentmux init` initialise `~/.agentmux/`, puis
-`agentmux sync` prévisualise la synchronisation globale et
-`agentmux sync --apply` l'applique. Aucun paramètre `--root` ou
-`--scope project` n'est exposé : les sources et les destinations sont globales.
+## Quick start
 
-```powershell
-mise trust
-mise install
-mise run check
-mise run build
+Run these commands from **any directory**:
 
-# Configuration globale, indépendante du projet courant :
-.\bin\agentmux.exe init
-.\bin\agentmux.exe list
-.\bin\agentmux.exe validate
-
-# Toujours une prévisualisation par défaut ; aucun fichier modifié :
-.\bin\agentmux.exe sync
-
-# Écrit les configurations natives et installe les skills :
-.\bin\agentmux.exe sync --apply
-
-# Lecture seule, sans démarrer de broker :
-.\bin\agentmux.exe status
-.\bin\agentmux.exe stop
+```sh
+agentmux init                  # Create ~/.agentmux/ without overwriting existing files
+# Edit ~/.agentmux/mcp.json and ~/.agentmux/agentmux.json
+agentmux validate              # Validate sources, plugins, and skills
+agentmux list                  # Show discovered MCP servers and skills
+agentmux sync                  # Preview user-level changes (read-only)
+agentmux sync --apply          # Apply reviewed changes
+agentmux status                # Inspect the broker (does not start it)
 ```
 
-Sous Linux/macOS, le binaire construit est `./bin/agentmux`. Les versions d’outils
-sont fixées par `mise.toml`, les dépendances par `go.mod` et `go.sum`.
-Utiliser un binaire installé à une adresse stable : les fichiers générés
-enregistrent son chemin absolu. Ne pas appliquer une synchronisation depuis un
-exécutable temporaire créé par `go run`, sauf avec `--binary /chemin/stable/agentmux`.
+When a harness next connects to a generated MCP entry, the proxy starts the broker if it is not already running. `agentmux stop` shuts down the broker and its managed MCP children.
 
-## Organisation des sources
+> **Migrating existing setups?** Do not immediately replace your MCP configurations. The current release does not automatically import or adopt existing harness entries. Follow **[MIGRATION_FOR_AGENTS.md](MIGRATION_FOR_AGENTS.md)** for a backup-first, conflict-aware migration that an AI coding agent can execute with you.
+
+## Global configuration
+
+Everything originates from your **home directory**, not from whichever repository is open:
 
 ```text
-mon-projet/
-  .agentmux/
-    agentmux.json                    # Harnesses, runtime, filtres des plugins/skills
-    mcp.json                         # Serveurs MCP canoniques
-    skills/
-      code-review/
-        SKILL.md
-        references/...
-    plugins/
-      mon-plugin/
-        plugin.json                  # Manifest Agent Plugins portable
-        mcp.json                     # Serveurs MCP du plugin
-        skills/
-          mon-skill/SKILL.md
-    data/plugins/mon-plugin/          # PLUGIN_DATA, créé à l’exécution seulement
-  .agentmux/                         # État de synchronisation et sauvegardes
+~/.agentmux/
+├── agentmux.json             # Enabled harnesses, runtime, MCP overrides
+├── mcp.json                  # Canonical MCP definitions
+├── AGENTS.md                 # Reserved for future instruction synchronization
+├── skills/
+│   └── code-review/
+│       └── SKILL.md
+└── plugins/
+    └── docs-helper/
+        ├── plugin.json      # Standard Agent Plugins manifest
+        ├── mcp.json         # Standard plugin MCP component
+        └── skills/
+            └── documentation-check/
+                └── SKILL.md
 ```
 
-Les exemples dans `examples/` ne sont pas chargés automatiquement dans tes
-harnesses. Charger une configuration ne lance jamais de commande, n’installe
-aucun paquet et ne crée pas les répertoires de données des plugins.
+The source directories are not placed inside projects. `agentmux sync --apply` writes **user-level harness configuration** only. The application may also create runtime data and synchronization state beneath `~/.agentmux/`.
 
-### `.agentmux/mcp.json`
+### MCP servers — `~/.agentmux/mcp.json`
 
 ```json
 {
@@ -125,28 +122,20 @@ aucun paquet et ne crée pas les répertoires de données des plugins.
       "command": "npx",
       "args": ["-y", "chrome-devtools-mcp@latest"],
       "sharing": "shared",
-      "harnesses": ["cursor", "codex", "claude-code"]
+      "harnesses": ["claude-code", "codex", "cursor"]
     },
     "context7": {
       "type": "streamable-http",
-      "url": "https://mcp.context7.com/mcp"
+      "url": "https://mcp.context7.com/mcp",
+      "sharing": "shared"
     }
   }
 }
 ```
 
-Cet exemple nécessite Node/npm pour Chrome DevTools. `@latest` est pratique pour
-un exemple ; fixer une version vérifiée avant un usage reproductible. La commande
-n’est exécutée que lorsqu’un client se connecte. Le navigateur et son état sont
-communs aux clients en mode partagé : utiliser `"sharing": "isolated"` lorsque
-deux agents doivent piloter des navigateurs indépendants.
+For reproducible setups, pin server versions instead of using `@latest`. On Windows, npm-based commands may run through `.cmd` wrappers; see [transport limitations](docs/transports.md). A shared browser MCP shares its browser state too: choose `"sharing": "isolated"` if different agents must control independent sessions.
 
-`harnesses` et `sharing` sont des extensions **agentmux**, pas des ajouts au schéma
-portable Agent Plugins. Dans le `mcp.json` d’un plugin, conserver le standard et
-placer ces réglages dans les overrides ci-dessous. Les identifiants importés d’un
-plugin sont `nom-du-plugin.nom-du-serveur` ou `nom-du-plugin.nom-du-skill`.
-
-### `.agentmux/agentmux.json`
+### Harness settings — `~/.agentmux/agentmux.json`
 
 ```json
 {
@@ -156,143 +145,85 @@ plugin sont `nom-du-plugin.nom-du-serveur` ou `nom-du-plugin.nom-du-skill`.
     "requestTimeout": "5m"
   },
   "serverOverrides": {
-    "mon-plugin.browser": {
-      "harnesses": ["cursor", "codex"],
+    "context7": {
+      "harnesses": ["codex", "claude-code"],
       "sharing": "isolated"
     }
   }
 }
 ```
 
-Les skills utilisent `metadata.harness: codex,claude-code,cursor` dans leur
-`SKILL.md` pour limiter les harnesses. Sans ce champ, ils ciblent tous les
-harnesses configurés. `skillOverrides` n'est plus accepté.
+`serverOverrides` is especially useful for **portable Agent Plugins**, whose `mcp.json` should remain standards-compliant. For example, a plugin server called `docs-helper.context7` can be filtered by adding an override under that qualified name. An override takes effect only if the named server is installed; otherwise validation reports a warning. There is **no `skillOverrides` setting**.
 
-Les overrides MCP doivent désigner des éléments réellement découverts ; sinon
-`validate` signale un avertissement. Une liste globale `harnesses: []` ne génère
-rien. Un filtre absent ou vide sur un élément signifie « tous les harnesses
-sélectionnés ». Les filtres choisissent les destinations ; ce ne sont pas des
-autorisations de sécurité entre logiciels du même utilisateur.
+### Skills — `~/.agentmux/skills/<name>/SKILL.md`
 
-### Résultat dans un harness
+Use standard [Agent Skills](https://agentskills.io/specification) frontmatter, with an optional agentmux-specific string in `metadata`:
 
-Exemple pour Cursor : deux entrées distinctes, sans catalogue MCP agrégé.
+```yaml
+---
+name: code-review
+description: Review source code and explain actionable improvements.
+metadata:
+  harness: codex,claude-code,cursor
+---
 
-```json
-{
-  "mcpServers": {
-    "chrome-devtools": {
-      "type": "stdio",
-      "command": "C:\\outils\\agentmux.exe",
-      "args": ["connect", "--server", "chrome-devtools", "--harness", "cursor"]
-    },
-    "context7": {
-      "type": "stdio",
-      "command": "C:\\outils\\agentmux.exe",
-      "args": ["connect", "--server", "context7", "--harness", "cursor"]
-    }
-  }
-}
+Review the requested code and report concrete findings.
 ```
 
-Codex reçoit des tables TOML ; OpenCode reçoit des commandes sous forme de
-tableaux. Les schémas natifs ne sont donc pas remplacés par un format commun.
+An omitted `metadata.harness` distributes the skill to all selected, supported harnesses. With the field present, only the comma-separated harness IDs are selected. This is a **distribution rule**, not a security boundary: some clients also discover shared skill directories independently.
 
-## Harnesses et skills
+Plugin skills use the same frontmatter, located under `~/.agentmux/plugins/<plugin>/skills/`. Keep plugin manifests and MCP components in the [Agent Plugins format](https://agent-plugins.org/plugin-authors/mcp-servers).
 
-| Harness | MCP, portée projet | Destination skills |
-|---|---|---|
-| Claude Code | `.mcp.json` | `.claude/skills/` |
-| Codex | `.codex/config.toml` | `.agentmux/skills/`, natif |
-| Cursor | `.cursor/mcp.json` | `.cursor/skills/` |
-| OpenCode | `opencode.json` ou `opencode.jsonc` existant | `.opencode/skills/` |
-| Gemini CLI | `.gemini/settings.json` | `.gemini/skills/` |
-| VS Code, sélection explicite | `.vscode/mcp.json` | `.github/skills/` |
+## Supported harnesses
 
-La synchronisation cible exclusivement les fichiers utilisateur ;
-VS Code reste limité à la portée projet dans cette version. Les emplacements
-utilisateur personnalisés par des variables de harness ou des profils ne sont
-pas détectés automatiquement.
+| Harness | User MCP configuration | User skills destination |
+| --- | --- | --- |
+| Claude Code (`claude-code`) | `~/.claude.json` | `~/.claude/skills/` |
+| Codex (`codex`) | `~/.codex/config.toml` | `~/.agents/skills/` |
+| Cursor (`cursor`) | `~/.cursor/mcp.json` | `~/.cursor/skills/` |
+| OpenCode (`opencode`) | `~/.config/opencode/opencode.json` (or existing JSONC) | `~/.config/opencode/skills/` |
+| Gemini CLI (`gemini`) | `~/.gemini/settings.json` | `~/.gemini/skills/` |
 
-Les skills ne sont pas des serveurs à démarrer. `--skill-mode auto` crée des
-liens symboliques vers les répertoires canoniques et copie leur contenu complet
-si les liens ne sont pas disponibles. `copy` force la copie ; `symlink` exige un
-lien et échoue plutôt que de copier. Les mises à jour d’un lien sont immédiates ;
-une copie nécessite une nouvelle commande `sync --apply`.
+The generated MCP entries run `agentmux connect --server <name> --harness <client>` using the **installed executable's absolute path**. Clients retain distinct MCP names and their native config formats.
 
-**Limite des filtres de skills :** les harnesses qui découvrent nativement
-`.agentmux/skills` peuvent lire des sources même sans lien généré pour eux. agentmux
-ne supprime pas les sources pour masquer un skill. Deux plugins dont les skills
-ont le même nom natif provoquent un conflit explicite, pas un écrasement.
+`claude-desktop` does **not** have an adapter yet; it is not interchangeable with Claude Code. VS Code's existing adapter is project-scoped only and therefore unavailable in the current global-only CLI.
 
-## Préservation des configurations
+## Migrate existing MCPs and skills
 
-La synchronisation est unidirectionnelle : sources `.agentmux` vers fichiers
-natifs. Elle préserve les entrées non gérées, les commentaires JSONC et les octets
-TOML hors de son bloc. Les modifications et suppressions portent uniquement sur
-des éléments suivis par le manifeste `.agentmux/sync-<scope>.json` et restés
-inchangés depuis leur génération. Un conflit ou une modification concurrente
-interrompt l’application. Des sauvegardes sont conservées sous
-`.agentmux/backups/` dans la portée cible.
+Use the root-level **[AI agent migration guide](MIGRATION_FOR_AGENTS.md)**. It gives an AI coding agent an explicit, safe workflow to:
 
-Une entrée existante portant le même nom n’est pas adoptée automatiquement.
-L’import des configurations existantes et la synchronisation bidirectionnelle
-sont **reportés**, avec résolution des conflits à concevoir. Il n’y a pas de
-surveillance automatique des fichiers dans cette première version.
+1. Inspect **user-level** MCP and skill configurations without touching project files.
+2. Back up the originals and translate selected definitions into `~/.agentmux/`.
+3. Resolve name collisions before applying any generated entries.
+4. Run `agentmux validate`, review the `agentmux sync` preview, then apply with approval.
+5. Verify clients, MCP startup, process reuse, and the rollback path.
 
-## Limites assumées de la première version
+**Suggested prompt for your coding agent:**
 
-- Le partage est **par utilisateur et par racine source**, pas entre projets
-  indépendants. Tous les clients d’un backend partagent son identité distante,
-  ses variables et son état applicatif. Un changement de configuration crée une
-  nouvelle génération pour les nouvelles connexions ; les connexions déjà
-  ouvertes ne sont pas migrées. Redémarrer le broker après changement de son
-  environnement hérité ou de ses réglages runtime.
-- Le mode partagé couvre les requêtes MCP classiques, mais ne prétend pas isoler
-  l’état métier. Roots, sampling, elicitation, subscriptions, niveau de logging
-  par client et cycle des tâches nécessitent `sharing: isolated`. Les identifiants
-  de requêtes et de progression sont remappés ; les appels mutateurs ne sont
-  jamais rejoués automatiquement après un échec.
-- Le transport HTTP implémente le cycle MCP **2025** initialise/session,
-  réponses JSON ou SSE. Pas d’ancien transport SSE autonome, pas d’OAuth
-  interactif, pas de reprise SSE par `Last-Event-ID`, pas de revendication de
-  compatibilité avec les transports/procédures MCP 2026 remaniés.
-- Sous Windows, les wrappers `.cmd`/`.bat` acceptent un sous-ensemble prudent
-  d’arguments ; les cas impossibles à transmettre sans interprétation sont
-  refusés. Un serveur `.exe` natif garde les arguments complets. Le broker doit
-  pouvoir sortir du Job Object du premier harness pour lui survivre.
-- Les MCP/plugins sont du code de confiance exécuté avec les droits de
-  l’utilisateur. Les contrôles de chemins ne constituent pas un sandbox. Ne pas
-  publier les clés/API tokens, les données des plugins, les sauvegardes ni les
-  logs. Les arbres de skills contenant des liens internes sont refusés par le
-  synchroniseur dans cette version.
+> Read https://github.com/Shaar-games/agentmux/blob/main/MIGRATION_FOR_AGENTS.md and migrate my existing **user-level** MCP servers and skills to agentmux. Do not change any project files. Preserve my current configurations, show conflicts and a proposed diff, and obtain my approval before replacing old MCP entries or running `agentmux sync --apply`.
 
-## Développement et documentation
+## Safety and current limits
 
-```text
-cmd/agentmux/       CLI et tests d’intégration avec de vrais processus
-internal/config/   Sources canoniques, Agent Plugins, validation des skills
-internal/ipc/      Named pipes privés / sockets Unix
-internal/wire/     Trames JSON-RPC bornées et écritures concurrentes
-internal/broker/   Démarrage, partage, routage, statut et cycle de vie
-internal/upstream/ Processus stdio, HTTP sortant, fermeture des descendants
-internal/syncer/   Adaptateurs, plan, sauvegardes, skills, conflits
+- **No silent takeover:** unknown MCP names and unmanaged skill directories are preserved; collisions stop synchronization. Existing configurations are **not** imported automatically.
+- **No project changes:** the public CLI uses `~/.agentmux/` and user-level targets. There is no `--root` flag or project-scope synchronization.
+- **Not a sandbox:** installed MCP servers and plugin executables run with your account's permissions. Review untrusted packages and avoid committing credentials.
+- **Sharing is not isolation:** the server's application state can be shared between harnesses. Use `sharing: "isolated"` for private state, roots, sampling, elicitation, or client-specific callbacks.
+- **Protocol scope:** outbound Streamable HTTP supports ordinary 2025 JSON/SSE flows, without automatic OAuth, legacy standalone SSE transport, or SSE stream resumption.
+- **Not implemented:** bidirectional sync, automatic migration/import, and propagation of `~/.agentmux/AGENTS.md` into harness instruction files. That file is a planned source, not a currently synchronized feature.
+
+## Development and documentation
+
+```sh
+git clone https://github.com/Shaar-games/agentmux.git
+cd agentmux
+mise trust
+mise install
+mise run check
+mise run build
 ```
 
-`mise run check` lance tests et analyse statique. `go test -race ./...` ajoute la
-détection des courses lorsque le compilateur C adapté est disponible. Les tests
-utilisent des répertoires temporaires, des subprocessus de test et des serveurs
-HTTP locaux ; ils ne modifient pas tes configurations de harness existantes et
-ne démarrent ni Chrome ni un serveur Context7 réel.
+Go tests include a real subprocess integration fixture that verifies two harness proxies can reuse one upstream MCP process. Test results do **not** imply that every version of every harness has been end-to-end tested.
 
-Voir [configuration](docs/configuration.md), [synchronisation](docs/synchronization.md),
-[architecture](docs/architecture.md), [transports](docs/transports.md) et
-[évolutions](docs/roadmap.md). Les contrôles réellement exécutés et leurs limites
-sont consignés dans [le rapport de vérification](docs/verification.md).
+Explore the [configuration reference](docs/configuration.md), [synchronization behavior](docs/synchronization.md), [architecture](docs/architecture.md), [transports](docs/transports.md), [verification notes](docs/verification.md), and [roadmap](docs/roadmap.md).
 
-Formats de référence : [Agent Plugins](https://agent-plugins.org/plugin-authors/mcp-servers),
-[règles de chargement](https://agent-plugins.org/client-implementers/loading-and-discovery),
-[Agent Skills](https://agentskills.io/specification) et
-[MCP 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25).
-Les [révisions MCP ultérieures](https://modelcontextprotocol.io/specification)
-ne sont pas couvertes par une affirmation de conformité de ce projet.
+<sub>Header and GitHub badges rendered with <a href="https://github.com/jal-co/shieldcn">shieldcn</a>. The README uses hosted SVGs; it does not require shieldcn at runtime.</sub>

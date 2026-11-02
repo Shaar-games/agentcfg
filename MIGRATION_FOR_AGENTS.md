@@ -1,0 +1,197 @@
+# Migrate to agentmux — instructions for AI coding agents
+
+This file is an **operational migration playbook** for AI coding agents helping a user move existing MCP server definitions and Agent Skills into [agentmux](README.md). Read it **before changing anything**.
+
+## Mission and non-negotiable boundaries
+
+**Goal:** establish `~/.agentmux/` as the single user-level source of MCP servers, skills, and portable Agent Plugins, then synchronize the native configurations of supported harnesses without losing the user's existing data.
+
+1. **Do not inspect, create, or modify project-level configuration.** No changes to the current project's `.agents/`, `.claude/`, `.cursor/`, `AGENTS.md`, `CLAUDE.md`, `.mcp.json`, or other project files. Operate on the user's home directory only.
+2. **Never silently replace an existing MCP entry or skill.** Back up first. The current synchronizer intentionally refuses to adopt an unowned entry with the same name.
+3. **Do not run unknown MCP commands just to discover what they do.** Reading configuration is not authorization to execute servers, download packages, or expose credentials.
+4. **Keep credentials private.** Do not paste environment variables, tokens, credential files, or header values into chat reports, public issues, or version control.
+5. **Request authorization for destructive changes.** Present the exact user-level files/entries that would be replaced or removed, along with backups and a rollback plan. Only apply approved changes.
+6. **Never infer missing configuration.** If a client-specific value cannot be translated, report it rather than guessing or silently discarding it.
+
+## Supported product behavior
+
+| Concern | Current implementation |
+| --- | --- |
+| Canonical root | `~/.agentmux/`, always user-level |
+| CLI | `agentmux init`, `validate`, `list`, `sync`, `sync --apply`, `status`, `stop` |
+| Configured harnesses | `claude-code`, `codex`, `cursor`, `opencode`, `gemini` |
+| Unsupported in global sync | `claude-desktop`; VS Code's adapter is project-only |
+| MCP execution | Local stdio proxies, one shared upstream or an isolated backend |
+| Skills | Directory links (copy fallback) or copies to native user-level directories |
+| Existing entries | **Not automatically imported or adopted** |
+| Bidirectional sync | Not implemented |
+| Global instruction file | `~/.agentmux/AGENTS.md` is **not yet propagated** |
+
+There is **no `--root` CLI flag** and no project synchronization option. Do not use commands from older agentmux documentation that include them.
+
+## Step 1 — Inventory the current user setup
+
+Inspect **only** supported user-level files, if present:
+
+| Harness | Native MCP config | Native skills |
+| --- | --- | --- |
+| Claude Code | `~/.claude.json` | `~/.claude/skills/` |
+| Codex | `~/.codex/config.toml` | `~/.agents/skills/` |
+| Cursor | `~/.cursor/mcp.json` | `~/.cursor/skills/` |
+| OpenCode | `~/.config/opencode/opencode.json` (or existing `.jsonc`) | `~/.config/opencode/skills/` |
+| Gemini CLI | `~/.gemini/settings.json` | `~/.gemini/skills/` |
+
+Find the user's own MCP server names, transport types, executable names, arguments, working directories, environment-variable **names**, remote URLs, and any client-specific settings. Treat private values as opaque; preserve them securely without displaying them.
+
+For each MCP, record which harnesses currently use it and whether those definitions are truly equivalent. **A matching name is not proof of an identical MCP.** Different commands, credentials, namespaces, state, or working directories may require separate names or `sharing: "isolated"`.
+
+For skills, inventory `SKILL.md` plus the whole skill tree, not just the Markdown file. Note duplicate names, plugin-owned skills, and any native discovery rules that bypass generated links.
+
+## Step 2 — Create recoverable backups
+
+- Before editing a native user configuration, make a timestamped **private** backup outside any Git repository. Preserve original bytes and access permissions wherever possible.
+- Back up `~/.agentmux/` if it already exists; **merge with existing canonical sources**, never replace them wholesale.
+- Record the original paths, which entries belong to each client, and how to restore them.
+- Do not put secrets, private skill files, or backups inside the agentmux source repository.
+- Keep the backups until the user verifies each harness and approves cleanup.
+
+The agentmux synchronizer also creates backups of changes it owns, but **that is not a substitute for backing up the original configurations during migration**.
+
+## Step 3 — Prepare agentmux
+
+If not installed, review the [installation scripts](README.md#installation) with the user. Their prerequisites are Git and mise; installation is separate from configuration migration.
+
+```sh
+agentmux version
+agentmux init
+agentmux validate
+```
+
+`init` creates missing empty canonical files and directories without overwriting existing ones. Edit only:
+
+```text
+~/.agentmux/
+├── mcp.json
+├── agentmux.json
+├── skills/
+└── plugins/
+```
+
+The source can also contain `AGENTS.md`, but **the current release does not synchronize it**. Do not pretend those instructions have reached any harness.
+
+## Step 4 — Translate MCP definitions
+
+Create/update the canonical `mcpServers` object in `~/.agentmux/mcp.json`. The following is **illustrative only**, not a request to add these servers automatically:
+
+```json
+{
+  "mcpServers": {
+    "my-local-mcp": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/server.js"],
+      "sharing": "shared",
+      "harnesses": ["claude-code", "codex", "cursor"]
+    },
+    "my-remote-mcp": {
+      "type": "streamable-http",
+      "url": "https://example.com/mcp"
+    }
+  }
+}
+```
+
+- Preserve actual executable names, arguments, environment settings, URLs and authorization requirements, including the difference between stdio and Streamable HTTP.
+- Use `harnesses` to include only the clients that originally had (or have been approved to receive) a server. Absence means all globally selected clients.
+- Use `sharing: "shared"` only when a server is safe to share. Use `"isolated"` for private browser sessions, client-specific state, callbacks, roots, sampling, or elicitation.
+- On Windows, prefer invoking the underlying executable directly if a batch wrapper cannot safely pass the existing arguments.
+- Do not automatically convert legacy HTTP+SSE or OAuth-only setups; these are not fully supported by agentmux's outbound HTTP transport.
+- If distinct MCPs collide on the same name, choose unique canonical names **with the user's approval**.
+
+For standard Agent Plugins, keep each package under `~/.agentmux/plugins/<plugin>/` with its `plugin.json`, standard `mcp.json`, and optional `skills/`. **Do not add `harnesses` or `sharing` to a portable plugin's `mcp.json`.** Use qualified names in `serverOverrides` of `~/.agentmux/agentmux.json` instead.
+
+## Step 5 — Translate skills and select harnesses
+
+Store standalone skills as `~/.agentmux/skills/<skill>/SKILL.md`, keeping their associated scripts and references. Portable plugin skills stay under their plugin's `skills/` directory. Verify the frontmatter name matches the skill directory.
+
+For a subset of harnesses, add a **comma-separated string** in the skill's standard metadata map:
+
+```yaml
+---
+name: code-review
+description: Review code and report actionable findings.
+metadata:
+  harness: codex,claude-code,cursor
+---
+```
+
+An omitted `metadata.harness` means all selected harnesses; a YAML list is not valid for this field. **Do not use `skillOverrides`** in `agentmux.json`.
+
+Set the globally selected harnesses in `~/.agentmux/agentmux.json`:
+
+```json
+{
+  "harnesses": ["claude-code", "codex", "cursor", "opencode", "gemini"],
+  "runtime": {
+    "idleTimeout": "5m",
+    "requestTimeout": "5m"
+  }
+}
+```
+
+The user may choose a smaller list. Skill filters control agentmux's generated destinations, **not independent native discovery**; for example, another harness may scan `~/.agents/skills/` even when that directory is installed for Codex. Report this limitation rather than claiming strict isolation.
+
+## Step 6 — Validate, preview and resolve conflicts
+
+```sh
+agentmux validate
+agentmux list
+agentmux sync
+```
+
+`agentmux sync` is read-only. Examine its proposed changes and warnings. It may fail on a name collision between an existing user MCP entry and an agentmux-generated entry.
+
+**Do not use a force flag, delete the synchronization manifest, or overwrite native files to hide a conflict.** There is no automatic adoption operation.
+
+If a conflicting native entry must be migrated:
+
+1. Verify that the same behavior has been represented in `~/.agentmux/mcp.json` or a portable plugin.
+2. Show the user **which exact entry in which user-level config file** would need to be removed, plus the before/after diff and backup location.
+3. Obtain approval. Remove **only** that approved old entry while preserving the rest of the native config (and its JSON/JSONC/TOML structure).
+4. Re-run `agentmux sync`. If another conflict remains, stop and resolve it separately.
+
+An unmanaged skill collision must likewise be resolved explicitly; do not silently remove its existing directory. If an existing harness configuration is managed by another tool, document the ownership conflict instead of fighting that tool.
+
+## Step 7 — Apply and verify
+
+After the user reviews the changes:
+
+```sh
+agentmux sync --apply
+agentmux sync
+agentmux status
+```
+
+Verify that the second `sync` has no unexpected changes. `status` may say the broker is stopped; it does **not** start MCP servers itself. An actual harness connection starts the broker on demand.
+
+Check each selected harness as available:
+
+- Its MCP names appear individually, with the expected `agentmux connect` proxy commands.
+- The correct skills are discoverable, without unintended duplicates.
+- An MCP can initialize and perform a harmless read-only operation where appropriate.
+- Two harnesses using the **same shared** MCP reuse a single upstream process (the broker's status and process IDs help verify this).
+- An `isolated` MCP gets separate upstream connections where required.
+
+Do not claim full application compatibility if the harness application was not launched or tested.
+
+## Rollback and handoff
+
+If the migration fails, stop newly generated activity when safe, preserve diagnostic information **without secrets**, and restore the **specific approved native files** from pre-migration backups. Do not delete `~/.agentmux/sync-user.json` or generated files indiscriminately: that manifest tracks ownership, and deleting it can make managed entries appear unowned and cause future conflicts. Reconcile the state explicitly before attempting a new sync.
+
+Provide the user a concise final report covering **migrated MCPs, migrated skills, selected harnesses, shared versus isolated choices, changed user-level paths, backup locations, commands actually run, verified behavior, and unresolved blockers**. Distinguish planned steps from performed steps.
+
+## Ready-to-use request
+
+> Read https://github.com/Shaar-games/agentmux/blob/main/MIGRATION_FOR_AGENTS.md and migrate my existing **user-level** MCP servers and skills into `~/.agentmux/`. Do not touch the current project. Inventory and back up existing native configurations, preserve secrets, show a concrete diff for every conflicting entry, and request my approval before deleting/replacing an old entry or running `agentmux sync --apply`. Validate and report exactly what you verified.
+
+See [README.md](README.md), [configuration](docs/configuration.md), and [synchronization](docs/synchronization.md) for details.
