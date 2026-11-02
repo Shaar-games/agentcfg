@@ -199,11 +199,15 @@ func TestStdioArgumentsEnvironmentCwdAndPID(t *testing.T) {
 	if err := json.Unmarshal(message["result"], &result); err != nil {
 		t.Fatal(err)
 	}
-	physicalDirectory, err := filepath.EvalSymlinks(directory)
+	physicalDirectory, err := os.Stat(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.PID != transport.PID() || result.Cwd != physicalDirectory || result.Env != "resolved value" || !reflect.DeepEqual(result.Args, args) {
+	probeDirectory, err := os.Stat(result.Cwd)
+	if err != nil {
+		t.Fatalf("probe working directory %q: %v", result.Cwd, err)
+	}
+	if result.PID != transport.PID() || !os.SameFile(physicalDirectory, probeDirectory) || result.Env != "resolved value" || !reflect.DeepEqual(result.Args, args) {
 		t.Fatalf("unexpected probe: %+v", result)
 	}
 	if info, err := os.Stat(server.Env["PLUGIN_DATA"]); err != nil || !info.IsDir() {

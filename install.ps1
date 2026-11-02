@@ -46,12 +46,32 @@ try {
         }
     }
     if ($null -eq $expected) { throw "Missing SHA-256 checksum entry for $asset" }
-    $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+    # Use the .NET SHA-256 implementation: Get-FileHash is not available on
+    # every Windows PowerShell runner, even when Invoke-WebRequest works.
+    $stream = [IO.File]::OpenRead($archive)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $digest = $sha.ComputeHash($stream) } finally { $sha.Dispose() }
+    } finally { $stream.Dispose() }
+    $actual = ([BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
     if ($actual -cne $expected) { throw "SHA-256 mismatch for $asset. Installation cancelled." }
     $unpacked = Join-Path $tmp 'unpacked'
-    Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+    New-Item -ItemType Directory -Path $unpacked | Out-Null
     $executable = Join-Path $unpacked 'agentmux.exe'
-    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw 'Archive has no agentmux.exe' }
+    # Extract only the expected regular file; do not unpack other zip entries.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+    try {
+        $entries = @($zip.Entries | Where-Object { $_.FullName -ceq 'agentmux.exe' })
+        if ($entries.Count -ne 1 -or $entries[0].Length -le 0 -or $entries[0].Length -gt 268435456) {
+            throw 'Archive must contain exactly one nonempty agentmux.exe of reasonable size'
+        }
+        $inputStream = $entries[0].Open()
+        try {
+            $outputStream = [IO.File]::Create($executable)
+            try { $inputStream.CopyTo($outputStream) } finally { $outputStream.Dispose() }
+        } finally { $inputStream.Dispose() }
+    } finally { $zip.Dispose() }
     New-Item -ItemType Directory -Force -Path $bindir | Out-Null
     $stage = Join-Path $bindir ('.agentmux-install-' + [guid]::NewGuid().ToString('N') + '.exe')
     Copy-Item -LiteralPath $executable -Destination $stage

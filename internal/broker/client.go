@@ -138,17 +138,25 @@ func spawn(root string, endpoint ipc.Endpoint) error {
 		return err
 	}
 	defer log.Close()
-	command := exec.Command(executable, "daemon")
-	command.Stdin = nil
-	command.Stdout, command.Stderr = log, log
-	ipc.Detach(command)
+	newCommand := func() *exec.Cmd {
+		cmd := exec.Command(executable, "daemon")
+		cmd.Stdin = nil
+		cmd.Stdout, cmd.Stderr = log, log
+		ipc.Detach(cmd)
+		return cmd
+	}
+	command := newCommand()
 	if err := command.Start(); err != nil {
-		if !ipc.RetryInInheritedJob(command, err) {
+		// A failed Start marks exec.Cmd as used. Retrying that same Cmd always
+		// fails with "exec: already started", even if its SysProcAttr changes.
+		retry := newCommand()
+		if !ipc.RetryInInheritedJob(retry, err) {
 			return fmt.Errorf("start detached broker: %w", err)
 		}
-		if retryErr := command.Start(); retryErr != nil {
+		if retryErr := retry.Start(); retryErr != nil {
 			return fmt.Errorf("start detached broker with inherited job fallback: %w (breakaway failure: %v)", retryErr, err)
 		}
+		command = retry
 		_, _ = fmt.Fprintln(log, "warning: Windows Job Object denied breakaway; the broker may stop when the outer job closes")
 	}
 	return command.Process.Release()
