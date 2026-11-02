@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -60,7 +61,7 @@ func discoverPlugins(root string, cfg *config.Config) []pluginInfo {
 			Name        string `json:"name"`
 			Description string `json:"description"`
 		}
-		if json.Unmarshal(data, &document) != nil || document.Schema != pluginSchema || document.Name == "" {
+		if json.Unmarshal(bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf}), &document) != nil || document.Schema != pluginSchema || document.Name == "" {
 			item.Problem = "Unsupported or invalid plugin manifest"
 			plugins = append(plugins, item)
 			continue

@@ -24,7 +24,7 @@ manifest from the latest GitHub Release, verify the archive, extract the
 executable, and install it into `~/.local/bin/`. They refuse to overwrite an
 existing executable and perform a binary version smoke test.
 
-Set `AGENTMUX_VERSION=v0.2.0` to select a specific published release.
+Set `AGENTMUX_VERSION=v0.2.1` to select a specific published release.
 Set `AGENTMUX_BIN_DIR` for a custom user-owned destination.
 `AGENTMUX_RELEASE_BASE_URL` is used by local installer test fixtures and
 normally should remain unset.

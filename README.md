@@ -43,7 +43,7 @@ OpenCode    ── context7: agentmux connect ────────┴── 
 ### Features
 
 - **One upstream per shared MCP configuration**, even with multiple connected harnesses.
-- **Interactive Bubble Tea dashboard** for harness selection, MCP status, server sharing modes, skills, plugins and diagnostics.
+- **Interactive Charmbracelet Huh forms** for all configuration: harness selection, MCP sharing, skills, plugins, diagnostics and sync confirmation.
 - **Starts on demand and stops after inactivity**; no permanently installed background service.
 - **Individual MCP entries** in each harness, not one aggregated tool catalog.
 - **Global configuration** at `~/.agentmux/`, independent of the current project.
@@ -70,17 +70,17 @@ irm https://raw.githubusercontent.com/Shaar-games/agentmux/main/install.ps1 | ie
 
 The installer places a single executable in `~/.local/bin/agentmux` (`agentmux.exe` on Windows). No source checkout, compiler or persistent build directory is created. Add `~/.local/bin` to your `PATH` if necessary. Available release targets are Linux, macOS and Windows on AMD64 and ARM64 (where the OS supports the architecture). The scripts require `curl` and `tar` plus `sha256sum` or `shasum` on Unix; Windows PowerShell provides its own downloader, checksum and ZIP extraction.
 
-The scripts **do not modify your harness configurations**. They refuse to overwrite an existing executable, validate SHA-256 checksums, and run a post-install binary smoke test. Review the remote scripts before executing them; these one-liners follow the repository's `main` branch. Set `AGENTMUX_VERSION=v0.2.0` to install a specific published release, or `AGENTMUX_BIN_DIR` for another executable directory. A checksum fetched from the same release prevents accidental corruption but is not a substitute for a cryptographically signed provenance attestation.
+The scripts **do not modify your harness configurations**. They refuse to overwrite an existing executable, validate SHA-256 checksums, and run a post-install binary smoke test. Review the remote scripts before executing them; these one-liners follow the repository's `main` branch. Set `AGENTMUX_VERSION=v0.2.1` to install a specific published release, or `AGENTMUX_BIN_DIR` for another executable directory. A checksum fetched from the same release prevents accidental corruption but is not a substitute for a cryptographically signed provenance attestation.
 
 ## Quick start
 
-Run these commands from **any directory**. Launch `agentmux` with no arguments to open the interactive Bubble Tea dashboard:
+Run these commands from **any directory**. Launch `agentmux` with no arguments to open the interactive Huh configuration menus:
 
 ```sh
 agentmux init                  # Create ~/.agentmux/ without overwriting existing files
 # Edit ~/.agentmux/mcp.json and ~/.agentmux/agentmux.json
-agentmux                       # Open interactive Bubble Tea dashboard
-agentmux ui                    # Explicit TUI command
+agentmux                       # Huh configuration menus
+agentmux ui                    # Explicit interactive configuration
 agentmux validate              # Validate sources, plugins, and skills
 agentmux list                  # Show discovered MCP servers and skills
 agentmux sync                  # Preview user-level changes (read-only)
@@ -90,11 +90,11 @@ agentmux status                # Inspect the broker (does not start it)
 
 When a harness next connects to a generated MCP entry, the proxy starts the broker if it is not already running. `agentmux stop` shuts down the broker and its managed MCP children.
 
-### Interactive dashboard
+### Interactive configuration
 
-The Bubble Tea interface has five sections: **Harnesses**, **MCP servers**, **Skills**, **Plugins**, and **Diagnostics**. Use `Tab`/`Shift+Tab` (or left/right arrows) to switch sections; up/down arrows or `j`/`k` to select rows; `1`–`5` to jump directly; `r` to refresh; `?` for help; and `q` to quit. It adapts to terminal resizing and never starts MCP servers merely to display status.
+The Huh interface presents a main menu with **Harnesses**, **MCP servers**, **Skills**, **Agent Plugins**, **Diagnostics**, **Synchronization**, **Refresh**, and **Exit**. Use up/down arrows or `j`/`k` to navigate, `/` to filter choices and `Enter` to open or confirm. Huh provides a text-based accessible fallback for terminals without full-screen support. Listing status never starts MCP servers.
 
-Press `Space` or `Enter` on a harness to enable/disable it globally. From the MCP tab press `i` to switch between **shared** and **isolated**; the Skills tab presents per-harness availability and editable `metadata.harness` filters. The interface writes the canonical `~/.agentmux/` settings only, with validation, a lock and backups. **Run `agentmux sync` to preview and `agentmux sync --apply` to propagate changes to native user-level files.** Interactive setting changes do not directly overwrite harness configurations.
+Select a harness to enable/disable it, a MCP server to change **shared** / **isolated**, or a skill to toggle individual harness availability through its source `metadata.harness`. The Huh sync menu first displays a read-only plan, then requires explicit confirmation before applying native user-level changes. The CLI commands `agentmux sync` (preview) and `agentmux sync --apply` (apply) are also available. Interactive terminal commands use Huh; scripts and pipelines retain plain output, and `--plain` explicitly suppresses Huh forms. `agentmux status --json` remains machine-readable.
 
 > **Migrating existing setups?** Do not immediately replace your MCP configurations. The current release does not automatically import or adopt existing harness entries. Follow **[MIGRATION_FOR_AGENTS.md](MIGRATION_FOR_AGENTS.md)** for a backup-first, conflict-aware migration that an AI coding agent can execute with you.
 

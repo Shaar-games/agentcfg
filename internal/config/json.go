@@ -40,6 +40,9 @@ func readBounded(path string) ([]byte, error) {
 }
 
 func object(data []byte) (map[string]json.RawMessage, error) {
+	// Windows PowerShell 5.1 emits UTF-8 BOMs with Set-Content -Encoding UTF8.
+	// JSON readers may ignore an initial BOM; do not rewrite the source file.
+	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	token, err := decoder.Token()
 	if err != nil {

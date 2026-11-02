@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -15,6 +16,11 @@ func pointer(value string) string {
 
 func editJSON(before []byte, key string, desired map[string]map[string]any, previous map[string]string) ([]byte, map[string]string, error) {
 	original := before
+	bom := []byte{0xef, 0xbb, 0xbf}
+	withBOM := bytes.HasPrefix(before, bom)
+	if withBOM {
+		before = before[len(bom):]
+	}
 	if len(before) == 0 {
 		before = []byte("{}\n")
 	}
@@ -85,5 +91,9 @@ func editJSON(before []byte, key string, desired map[string]map[string]any, prev
 		return nil, nil, err
 	}
 	value.Format()
-	return value.Pack(), owned, nil
+	result := value.Pack()
+	if withBOM {
+		result = append(append([]byte{}, bom...), result...)
+	}
+	return result, owned, nil
 }

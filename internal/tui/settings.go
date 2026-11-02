@@ -20,6 +20,8 @@ import (
 
 const maxSettingsBytes = 1 << 20
 
+func settingsFile(root string) string { return filepath.Join(root, ".agentmux", "agentmux.json") }
+
 // setHarnessEnabled changes the canonical user-scope harness selection. An
 // expected state check refuses stale edits, while a lock protects concurrent
 // AgentMux TUI writers. Other settings keys are retained verbatim as values.
@@ -148,7 +150,7 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 	}
 	fields := make(map[string]json.RawMessage)
 	if existed {
-		if err := json.Unmarshal(original, &fields); err != nil || fields == nil {
+		if err := json.Unmarshal(bytes.TrimPrefix(original, []byte{0xef, 0xbb, 0xbf}), &fields); err != nil || fields == nil {
 			return errors.New("settings file must be a valid JSON object")
 		}
 	}
@@ -161,6 +163,9 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 		return err
 	}
 	updated = append(updated, '\n')
+	if bytes.HasPrefix(original, []byte{0xef, 0xbb, 0xbf}) {
+		updated = append([]byte{0xef, 0xbb, 0xbf}, updated...)
+	}
 	if len(updated) > maxSettingsBytes {
 		return fmt.Errorf("settings exceed %d bytes", maxSettingsBytes)
 	}

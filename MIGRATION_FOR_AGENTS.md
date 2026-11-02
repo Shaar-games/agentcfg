@@ -18,7 +18,7 @@ This file is an **operational migration playbook** for AI coding agents helping 
 | Concern | Current implementation |
 | --- | --- |
 | Canonical root | `~/.agentmux/`, always user-level |
-| CLI | `agentmux` (Bubble Tea TUI), `init`, `validate`, `list`, `sync`, `sync --apply`, `status`, `stop` |
+| CLI | `agentmux` (Huh interactive configuration), `init`, `validate`, `list`, `sync`, `sync --apply`, `status`, `stop` |
 | Configured harnesses | `claude-code`, `codex`, `cursor`, `opencode`, `gemini`, `antigravity` |
 | Unsupported in global sync | `claude-desktop`; VS Code's adapter is project-only |
 | MCP execution | Local stdio proxies, one shared upstream or an isolated backend |
@@ -165,7 +165,7 @@ An unmanaged skill collision must likewise be resolved explicitly; do not silent
 
 ## Step 7 — Apply and verify
 
-After the user reviews the changes (the Bubble Tea dashboard also supports enable/disable selections and sharing preferences in canonical settings):
+After the user reviews the changes (the Huh configuration menus also support harness selection, skill availability, sharing preferences and a confirmed sync preview):
 
 ```sh
 agentmux sync --apply

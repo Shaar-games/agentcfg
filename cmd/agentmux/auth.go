@@ -19,6 +19,7 @@ import (
 	"agentmux/internal/auth"
 	"agentmux/internal/config"
 
+	"github.com/charmbracelet/huh"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
@@ -34,12 +35,18 @@ func runAuth(ctx context.Context, home string, args []string, input io.Reader, o
 	flags.SetOutput(diagnostics)
 	noBrowser := flags.Bool("no-browser", false, "print the URL instead of opening a browser")
 	asJSON := flags.Bool("json", false, "show status as JSON without exposing tokens")
+	plain := flags.Bool("plain", false, "plain output without Huh terminal forms")
+	yes := flags.Bool("yes", false, "skip confirmation for local logout")
 	if err := parse(flags, args[2:]); err != nil {
 		return helpResult(err)
 	}
 	if (operation != "login" && *noBrowser) || (operation != "status" && *asJSON) {
 		return errors.New("--no-browser is only available for login; --json is only available for status")
 	}
+	if operation != "logout" && *yes {
+		return errors.New("--yes is only available for logout")
+	}
+	interactive := terminalPresentation(input, output, *plain)
 	cfg, err := config.Load(home)
 	if err != nil {
 		return err
@@ -64,6 +71,17 @@ func runAuth(ctx context.Context, home string, args []string, input io.Reader, o
 			if err != nil {
 				return err
 			}
+			if interactive {
+				var summary strings.Builder
+				fmt.Fprintf(&summary, "MCP: %s\nAccount: %s\nAuthenticated: %t\nRefresh available: %t\n", name, state.Account, state.Authenticated, state.CanRefresh)
+				if !state.Expiry.IsZero() {
+					fmt.Fprintf(&summary, "Expires: %s\n", state.Expiry.Format(time.RFC3339))
+				}
+				if len(state.Scopes) > 0 {
+					fmt.Fprintf(&summary, "Scopes: %s\n", strings.Join(state.Scopes, ", "))
+				}
+				return terminalNote(ctx, input, output, "OAuth credentials status", summary.String())
+			}
 			_, err = fmt.Fprintln(output, string(encoded))
 			return err
 		}
@@ -76,6 +94,15 @@ func runAuth(ctx context.Context, home string, args []string, input io.Reader, o
 		}
 		return nil
 	case "logout":
+		if interactive && !*yes {
+			confirmed, err := terminalConfirm(ctx, input, output, "Forget local OAuth credentials?", "Only local encrypted records are removed. Remote tokens are not revoked.")
+			if err != nil {
+				return err
+			}
+			if !confirmed {
+				return nil
+			}
+		}
 		if err := auth.Logout(ctx, server, opts); err != nil {
 			return err
 		}
@@ -85,7 +112,7 @@ func runAuth(ctx context.Context, home string, args []string, input io.Reader, o
 		if input == nil {
 			return errors.New("OAuth login requires interactive input")
 		}
-		opts.AuthorizationCodeFetcher = authorizationCodeFetcher(server.OAuth.RedirectURL, input, output, *noBrowser)
+		opts.AuthorizationCodeFetcher = authorizationCodeFetcherWithForm(server.OAuth.RedirectURL, input, output, *noBrowser, interactive)
 		if err := auth.Login(ctx, server, opts); err != nil {
 			return err
 		}
@@ -95,6 +122,10 @@ func runAuth(ctx context.Context, home string, args []string, input io.Reader, o
 }
 
 func authorizationCodeFetcher(redirect string, input io.Reader, output io.Writer, noBrowser bool) sdkauth.AuthorizationCodeFetcher {
+	return authorizationCodeFetcherWithForm(redirect, input, output, noBrowser, false)
+}
+
+func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output io.Writer, noBrowser, interactive bool) sdkauth.AuthorizationCodeFetcher {
 	return func(ctx context.Context, args *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
 		if args == nil || args.URL == "" {
 			return nil, errors.New("OAuth authorization endpoint was not provided")
@@ -166,6 +197,18 @@ func authorizationCodeFetcher(redirect string, input io.Reader, output io.Writer
 		}
 		if input == nil {
 			return nil, errors.New("OAuth requires an interactive callback")
+		}
+		if interactive {
+			var response string
+			err := terminalForm(ctx, input, output, huh.NewInput().
+				Title("Paste the complete final redirected OAuth URL").
+				Description("The authorization code is masked and not saved in shell history.").
+				EchoMode(huh.EchoModePassword).
+				Value(&response))
+			if err != nil {
+				return nil, err
+			}
+			return auth.ParseAuthorizationResponse(redirect, strings.TrimSpace(response))
 		}
 		fmt.Fprintln(output, "Paste the complete final redirected URL here and press Enter:")
 		response, err := bufio.NewReader(input).ReadString('\n')

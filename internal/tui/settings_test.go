@@ -69,6 +69,49 @@ func TestHarnessSettingsAtomicBackupAndPreservation(t *testing.T) {
 	}
 }
 
+func TestPowerShellUTF8BOMSettingsEditAndPluginInventory(t *testing.T) {
+	root := settingsFixture(t)
+	original := append([]byte{0xef, 0xbb, 0xbf}, []byte(`{"harnesses":["codex"],"serverOverrides":{},"runtime":{"idleTimeout":"7m"}}`)...)
+	if err := os.WriteFile(settingsFile(root), original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := setHarnessEnabled(root, "cursor", true, false); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.ReadFile(settingsFile(root))
+	if err != nil || !bytes.HasPrefix(updated, []byte{0xef, 0xbb, 0xbf}) {
+		t.Fatalf("BOM lost: %v (%q)", err, updated)
+	}
+	cfg, err := config.Load(root)
+	if err != nil || !enabledForHarness(cfg.Settings.Harnesses, "cursor") || cfg.Settings.Runtime.IdleTimeout != "7m" {
+		t.Fatalf("PowerShell settings corrupted: %+v (%v)", cfg, err)
+	}
+	backups, _ := filepath.Glob(settingsFile(root) + ".bak-*")
+	if len(backups) != 1 {
+		t.Fatalf("original backup missing: %v", backups)
+	}
+	backedUp, err := os.ReadFile(backups[0])
+	if err != nil || !bytes.Equal(backedUp, original) {
+		t.Fatal("BOM backup not byte-for-byte")
+	}
+	plugin := filepath.Join(root, ".agentmux", "plugins", "demo")
+	if err := os.MkdirAll(plugin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw := append([]byte{0xef, 0xbb, 0xbf}, []byte(`{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"demo"}`)...)
+	if err := os.WriteFile(filepath.Join(plugin, "plugin.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugins := discoverPlugins(root, cfg)
+	if len(plugins) != 1 || !plugins[0].Valid || plugins[0].Name != "demo" {
+		t.Fatalf("BOM plugin incorrectly reported invalid: %+v", plugins)
+	}
+}
+
 func TestServerSharingOverrideKeepsExistingFilters(t *testing.T) {
 	root := settingsFixture(t)
 	putSettings(t, root, `{"serverOverrides":{"alpha":{"harnesses":["codex"]}},"harnesses":["codex"]}`)
