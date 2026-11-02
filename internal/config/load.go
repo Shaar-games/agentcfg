@@ -39,7 +39,7 @@ func Load(root string) (*Config, error) {
 	l := &loader{config: &Config{
 		Root: root, Servers: map[string]Server{}, Skills: []Skill{}, Warnings: []string{},
 		Settings: defaultSettings(),
-	}, agents: filepath.Join(root, ".agents")}
+	}, agents: filepath.Join(root, ".agentmux")}
 	if err = l.loadSettings(); err != nil {
 		return nil, err
 	}

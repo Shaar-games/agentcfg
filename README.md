@@ -83,7 +83,7 @@ exécutable temporaire créé par `go run`, sauf avec `--binary /chemin/stable/a
 
 ```text
 mon-projet/
-  .agents/
+  .agentmux/
     agentmux.json                    # Harnesses, runtime, filtres des plugins/skills
     mcp.json                         # Serveurs MCP canoniques
     skills/
@@ -104,7 +104,7 @@ Les exemples dans `examples/` ne sont pas chargés automatiquement dans tes
 harnesses. Charger une configuration ne lance jamais de commande, n’installe
 aucun paquet et ne crée pas les répertoires de données des plugins.
 
-### `.agents/mcp.json`
+### `.agentmux/mcp.json`
 
 ```json
 {
@@ -135,7 +135,7 @@ portable Agent Plugins. Dans le `mcp.json` d’un plugin, conserver le standard 
 placer ces réglages dans les overrides ci-dessous. Les identifiants importés d’un
 plugin sont `nom-du-plugin.nom-du-serveur` ou `nom-du-plugin.nom-du-skill`.
 
-### `.agents/agentmux.json`
+### `.agentmux/agentmux.json`
 
 ```json
 {
@@ -192,7 +192,7 @@ tableaux. Les schémas natifs ne sont donc pas remplacés par un format commun.
 | Harness | MCP, portée projet | Destination skills |
 |---|---|---|
 | Claude Code | `.mcp.json` | `.claude/skills/` |
-| Codex | `.codex/config.toml` | `.agents/skills/`, natif |
+| Codex | `.codex/config.toml` | `.agentmux/skills/`, natif |
 | Cursor | `.cursor/mcp.json` | `.cursor/skills/` |
 | OpenCode | `opencode.json` ou `opencode.jsonc` existant | `.opencode/skills/` |
 | Gemini CLI | `.gemini/settings.json` | `.gemini/skills/` |
@@ -210,13 +210,13 @@ lien et échoue plutôt que de copier. Les mises à jour d’un lien sont imméd
 une copie nécessite une nouvelle commande `sync --apply`.
 
 **Limite des filtres de skills :** les harnesses qui découvrent nativement
-`.agents/skills` peuvent lire des sources même sans lien généré pour eux. agentmux
+`.agentmux/skills` peuvent lire des sources même sans lien généré pour eux. agentmux
 ne supprime pas les sources pour masquer un skill. Deux plugins dont les skills
 ont le même nom natif provoquent un conflit explicite, pas un écrasement.
 
 ## Préservation des configurations
 
-La synchronisation est unidirectionnelle : sources `.agents` vers fichiers
+La synchronisation est unidirectionnelle : sources `.agentmux` vers fichiers
 natifs. Elle préserve les entrées non gérées, les commentaires JSONC et les octets
 TOML hors de son bloc. Les modifications et suppressions portent uniquement sur
 des éléments suivis par le manifeste `.agentmux/sync-<scope>.json` et restés

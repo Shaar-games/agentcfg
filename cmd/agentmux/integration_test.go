@@ -97,7 +97,7 @@ func TestMCPFixture(t *testing.T) {
 func integrationRoot(t *testing.T, sharing, idle string) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".agentmux"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	executable, err := os.Executable()
@@ -106,12 +106,12 @@ func integrationRoot(t *testing.T, sharing, idle string) string {
 	}
 	document := map[string]any{"mcpServers": map[string]any{"fixture": map[string]any{"type": "stdio", "command": executable, "args": []string{"-test.run=^TestMCPFixture$"}, "env": map[string]string{"AGENTMUX_MCP_FIXTURE": "1", "AGENTMUX_START_LOG": filepath.Join(root, "starts.txt")}, "sharing": sharing}}}
 	data, _ := json.Marshal(document)
-	if err := os.WriteFile(filepath.Join(root, ".agents", "mcp.json"), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".agentmux", "mcp.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	settings := map[string]any{"harnesses": []string{"cursor", "codex"}, "runtime": map[string]string{"idleTimeout": idle, "requestTimeout": "3s"}}
 	data, _ = json.Marshal(settings)
-	if err := os.WriteFile(filepath.Join(root, ".agents", "agentmux.json"), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".agentmux", "agentmux.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -315,7 +315,7 @@ func TestInitDoesNotOverwriteCanonicalFiles(t *testing.T) {
 	if err := run(context.Background(), []string{"init", "--root", root}, nil, &output, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, ".agents", "mcp.json")
+	path := filepath.Join(root, ".agentmux", "mcp.json")
 	original := []byte(`{"mcpServers":{},"my-manual-content":true}`)
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)

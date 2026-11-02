@@ -2,7 +2,7 @@
 
 ## Autorité
 
-Les fichiers canoniques `.agents/mcp.json`, `.agents/agentmux.json`, les plugins
+Les fichiers canoniques `.agentmux/mcp.json`, `.agentmux/agentmux.json`, les plugins
 et les skills sont les seules sources d’autorité. `sync` prépare un plan en
 lecture seule. `sync --apply` applique ce plan. Il n’existe ni import implicite,
 ni mode force, ni fusion bidirectionnelle dans cette version.
@@ -49,7 +49,7 @@ le harness ou le système ne suit pas les liens. Aucune réécriture des noms du
 frontmatter n’est effectuée ; les collisions entre noms natifs doivent être
 résolues dans les sources.
 
-Un skill déjà situé à sa destination canonique, notamment `.agents/skills` pour
+Un skill déjà situé à sa destination canonique, notamment `.agentmux/skills` pour
 Codex, est laissé en place et n’est jamais adopté comme copie gérée. Les copies
 de plugins matérialisées dans cet emplacement reçoivent
 `.agentmux-origin.json`, afin de ne pas être redécouvertes comme nouvelles
@@ -62,7 +62,7 @@ ou les références qui s’échappent de la destination. Un dossier source comp
 peut en revanche être résolu avant création du lien de destination.
 
 Les filtres ne peuvent pas empêcher un harness de scanner de lui-même les
-sources `.agents/skills`. Ils ne constituent donc pas une ACL. Les sources ne
+sources `.agentmux/skills`. Ils ne constituent donc pas une ACL. Les sources ne
 sont jamais effacées pour contourner le scanner natif d’un logiciel.
 
 ## Portée utilisateur

@@ -36,7 +36,7 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 
 Usage: agentmux <command> [options]
 
-  init       Create empty canonical .agents files (never overwrite)
+  init       Create empty canonical .agentmux files (never overwrite)
   list       Show discovered MCP servers and skills
   validate   Validate canonical configuration and plugin discovery
   sync       Preview native harness changes; --apply writes them
@@ -57,7 +57,7 @@ No web server or TCP listener is used. Bidirectional sync is not implemented.`)
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
-	root := flags.String("root", ".", "source project containing .agents")
+	root := flags.String("root", ".", "source project containing .agentmux")
 	switch args[0] {
 	case "init":
 		return initialize(flags, root, args[1:], output)
@@ -176,7 +176,7 @@ func initialize(flags *flag.FlagSet, root *string, args []string, output io.Writ
 	settings := config.Settings{Harnesses: names, Runtime: config.Runtime{IdleTimeout: "5m", RequestTimeout: "5m"}}
 	files := map[string]any{"mcp.json": map[string]any{"mcpServers": map[string]any{}}, "agentmux.json": settings}
 	for name, value := range files {
-		path := filepath.Join(abs, ".agents", name)
+		path := filepath.Join(abs, ".agentmux", name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return err
 		}
@@ -201,7 +201,7 @@ func initialize(flags *flag.FlagSet, root *string, args []string, output io.Writ
 		fmt.Fprintln(output, "Created", path)
 	}
 	for _, name := range []string{"skills", "plugins"} {
-		if err := os.MkdirAll(filepath.Join(abs, ".agents", name), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(abs, ".agentmux", name), 0o700); err != nil {
 			return err
 		}
 	}

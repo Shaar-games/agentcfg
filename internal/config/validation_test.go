@@ -30,8 +30,8 @@ func TestInvalidServerValueCannotPoisonDocument(t *testing.T) {
 
 func TestRejectedPluginCannotHideStandaloneSkills(t *testing.T) {
 	root := t.TempDir()
-	skillFixture(t, filepath.Join(root, ".agents", "skills"), "review")
-	directoryLink(t, filepath.Join(root, ".agents"), filepath.Join(root, ".agents", "plugins", "bad"))
+	skillFixture(t, filepath.Join(root, ".agentmux", "skills"), "review")
+	directoryLink(t, filepath.Join(root, ".agentmux"), filepath.Join(root, ".agentmux", "plugins", "bad"))
 	config := loadOK(t, root)
 	if !reflect.DeepEqual(skillNames(config), []string{"review"}) {
 		t.Fatalf("rejected plugin hid canonical skills: %v", config.Skills)
@@ -42,7 +42,7 @@ func TestRejectedPluginCannotHideStandaloneSkills(t *testing.T) {
 func TestEmptySharingOverrideIsRejected(t *testing.T) {
 	root := t.TempDir()
 	canonicalServers(t, root, testObject{"private": testObject{"command": "node", "sharing": "isolated"}})
-	putJSON(t, filepath.Join(root, ".agents", "agentmux.json"), testObject{
+	putJSON(t, filepath.Join(root, ".agentmux", "agentmux.json"), testObject{
 		"serverOverrides": testObject{"private": testObject{"sharing": ""}},
 	})
 	if _, err := Load(root); err == nil {
@@ -53,7 +53,7 @@ func TestEmptySharingOverrideIsRejected(t *testing.T) {
 func TestVSCodeExplicitHarness(t *testing.T) {
 	root := t.TempDir()
 	canonicalServers(t, root, testObject{"local": testObject{"command": "node", "harnesses": []string{"vscode"}}})
-	putJSON(t, filepath.Join(root, ".agents", "agentmux.json"), testObject{"harnesses": []string{"vscode"}})
+	putJSON(t, filepath.Join(root, ".agentmux", "agentmux.json"), testObject{"harnesses": []string{"vscode"}})
 	config := loadOK(t, root)
 	if len(config.Warnings) != 0 || !reflect.DeepEqual(config.Settings.Harnesses, []string{"vscode"}) {
 		t.Fatal(config.Warnings, config.Settings.Harnesses)
@@ -68,7 +68,7 @@ func TestPluginDataMustBeDedicatedDirectory(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
 			pluginFixture(t, root, "demo", "demo", testObject{"local": testObject{"type": "stdio", "command": "node"}})
-			path := filepath.Join(root, ".agents", "data", "plugins", "demo")
+			path := filepath.Join(root, ".agentmux", "data", "plugins", "demo")
 			if kind == "file" {
 				putFile(t, path, "not a directory")
 			} else {
@@ -153,7 +153,7 @@ func TestWrongComponentKindsStayIsolated(t *testing.T) {
 
 func TestSkillTreeCycleAndFrontmatterLimit(t *testing.T) {
 	root := t.TempDir()
-	parent := filepath.Join(root, ".agents", "skills")
+	parent := filepath.Join(root, ".agentmux", "skills")
 	skill := skillFixture(t, parent, "loop")
 	directoryLink(t, skill, filepath.Join(skill, "loop"))
 	config := loadOK(t, root)
@@ -196,12 +196,12 @@ func TestCheckedInExamplesAreInactiveAndValidWhenCopied(t *testing.T) {
 	}
 	root := t.TempDir()
 	files := map[string]string{
-		"canonical/mcp.json.example":                              ".agents/mcp.json",
-		"canonical/agentmux.json.example":                         ".agents/agentmux.json",
-		"plugins/docs-helper/plugin.json":                         ".agents/plugins/docs-helper/plugin.json",
-		"plugins/docs-helper/mcp.json":                            ".agents/plugins/docs-helper/mcp.json",
-		"plugins/docs-helper/skills/documentation-check/SKILL.md": ".agents/plugins/docs-helper/skills/documentation-check/SKILL.md",
-		"skills/quick-review/SKILL.md":                            ".agents/skills/quick-review/SKILL.md",
+		"canonical/mcp.json.example":                              ".agentmux/mcp.json",
+		"canonical/agentmux.json.example":                         ".agentmux/agentmux.json",
+		"plugins/docs-helper/plugin.json":                         ".agentmux/plugins/docs-helper/plugin.json",
+		"plugins/docs-helper/mcp.json":                            ".agentmux/plugins/docs-helper/mcp.json",
+		"plugins/docs-helper/skills/documentation-check/SKILL.md": ".agentmux/plugins/docs-helper/skills/documentation-check/SKILL.md",
+		"skills/quick-review/SKILL.md":                            ".agentmux/skills/quick-review/SKILL.md",
 	}
 	for source, destination := range files {
 		data, err := os.ReadFile(filepath.Join(examples, filepath.FromSlash(source)))
@@ -220,7 +220,7 @@ func TestCheckedInExamplesAreInactiveAndValidWhenCopied(t *testing.T) {
 	if len(config.Warnings) != 0 {
 		t.Fatal(config.Warnings)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".agents", "data")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, ".agentmux", "data")); !os.IsNotExist(err) {
 		t.Fatal("example loading created runtime data")
 	}
 }

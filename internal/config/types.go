@@ -33,7 +33,7 @@ type Skill struct {
 
 type Settings struct {
 	Harnesses       []string            `json:"harnesses"`
-	Runtime         Runtime            `json:"runtime,omitempty"`
+	Runtime         Runtime             `json:"runtime,omitempty"`
 	ServerOverrides map[string]Override `json:"serverOverrides,omitempty"`
 }
 

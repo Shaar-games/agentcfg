@@ -6,12 +6,12 @@
 
 | Location relative to root | Purpose |
 | --- | --- |
-| `.agents/mcp.json` | Explicit canonical MCP servers and optional agentmux fields |
-| `.agents/agentmux.json` | Selected harnesses, runtime durations and named overrides |
-| `.agents/skills/<skill>/SKILL.md` | Standalone skills |
-| `.agents/plugins/<folder>/plugin.json` | Required portable plugin manifest |
-| `.agents/plugins/<folder>/mcp.json` | Optional portable MCP component |
-| `.agents/plugins/<folder>/skills/<skill>/SKILL.md` | Optional portable skills |
+| `.agentmux/mcp.json` | Explicit canonical MCP servers and optional agentmux fields |
+| `.agentmux/agentmux.json` | Selected harnesses, runtime durations and named overrides |
+| `.agentmux/skills/<skill>/SKILL.md` | Standalone skills |
+| `.agentmux/plugins/<folder>/plugin.json` | Required portable plugin manifest |
+| `.agentmux/plugins/<folder>/mcp.json` | Optional portable MCP component |
+| `.agentmux/plugins/<folder>/skills/<skill>/SKILL.md` | Optional portable skills |
 
 Only immediate plugin directories and immediate skill directories are discovered. The manifest name, rather than the installation folder name, supplies a plugin's namespace. Missing optional sources are valid. The source root itself must exist and be a directory.
 
@@ -89,7 +89,7 @@ Server overrides replace only fields explicitly present. For example, `"harnesse
 
 `shared` is the server default and requests a shared upstream instance. `isolated` requests a separate upstream connection for each client. Choose the latter when an MCP relies on private session state or client callbacks; see the runtime documentation for the supported shared-session operations.
 
-Harness-native discovery can still see source skills directly. In particular, Codex reads `.agents/skills`, and other harnesses may inspect that directory independently of generated configuration. A filter cannot hide a file from such a scanner.
+Harness-native discovery can still see source skills directly. In particular, Codex reads `.agentmux/skills`, and other harnesses may inspect that directory independently of generated configuration. A filter cannot hide a file from such a scanner.
 
 ## Portable manifests
 
@@ -152,7 +152,7 @@ Portable paths use forward slashes; explicit backslashes and drive/stream colons
 The launcher receives reserved `PLUGIN_ROOT` and `PLUGIN_DATA` environment variables. Plugin-defined replacements, including case variants, are rejected. Data is assigned to:
 
 ~~~text
-<source-root>/.agents/data/plugins/<manifest-name>
+<source-root>/.agentmux/data/plugins/<manifest-name>
 ~~~
 
 That location remains stable across updates using the same manifest name. Existing data paths must be directories, remain within the source root, and must not alias another plugin's data directory. The loader computes missing paths without creating them. The process launcher is responsible for creating the data directory and a selected data-rooted working directory immediately before launch.

@@ -23,7 +23,7 @@ func writeTestFile(t *testing.T, path, data string) {
 func fixture(t *testing.T) (*config.Config, Options) {
 	t.Helper()
 	root := t.TempDir()
-	skill := filepath.Join(root, ".agents", "skills", "review")
+	skill := filepath.Join(root, ".agentmux", "skills", "review")
 	writeTestFile(t, filepath.Join(skill, "SKILL.md"), "---\nname: review\ndescription: Review code\n---\nRead code.\n")
 	writeTestFile(t, filepath.Join(skill, "references", "rules.txt"), "Preserve behavior.\n")
 	cfg := &config.Config{Root: root, Servers: map[string]config.Server{
@@ -39,10 +39,10 @@ func TestDryRunThenApplyIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Changes) != 9 {
-		t.Fatalf("want 5 configs + 4 skills, got %d", len(plan.Changes))
+	if len(plan.Changes) != 10 {
+		t.Fatalf("want 5 configs + 5 skills, got %d", len(plan.Changes))
 	}
-	for _, path := range []string{".mcp.json", ".agentmux", ".cursor", ".codex"} {
+	for _, path := range []string{".mcp.json", ".cursor", ".codex"} {
 		if _, err := os.Stat(filepath.Join(cfg.Root, path)); !os.IsNotExist(err) {
 			t.Fatalf("dry run wrote %s", path)
 		}
@@ -169,7 +169,7 @@ func TestFiltersAndPruneOnlyOwned(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.Root, ".claude", "skills", "review")); !os.IsNotExist(err) {
 		t.Fatal("managed skill not pruned")
 	}
-	if _, err := os.Stat(filepath.Join(cfg.Root, ".agents", "skills", "review", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(cfg.Root, ".agentmux", "skills", "review", "SKILL.md")); err != nil {
 		t.Fatal("canonical source removed")
 	}
 }
@@ -345,10 +345,10 @@ func TestSkillAutoLinksAndTracksSourceChanges(t *testing.T) {
 
 func TestPluginSkillIsNotRediscoveredAfterCodexCopy(t *testing.T) {
 	root := t.TempDir()
-	plugin := filepath.Join(root, ".agents", "plugins", "test-plugin")
+	plugin := filepath.Join(root, ".agentmux", "plugins", "test-plugin")
 	writeTestFile(t, filepath.Join(plugin, "plugin.json"), `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"test-plugin"}`)
 	writeTestFile(t, filepath.Join(plugin, "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Review source files\n---\nRead before editing.\n")
-	writeTestFile(t, filepath.Join(root, ".agents", "agentmux.json"), `{"harnesses":["codex"]}`)
+	writeTestFile(t, filepath.Join(root, ".agentmux", "agentmux.json"), `{"harnesses":["codex"]}`)
 	cfg, err := config.Load(root)
 	if err != nil {
 		t.Fatal(err)
