@@ -20,6 +20,12 @@ après inactivité. Il n’est pas installé comme service système.
 
 ## Démarrer
 
+La configuration canonique est **globale** : `~/.agentmux/` (sur Windows,
+`$HOME\.agentmux\`). Par défaut, `agentmux init`, `list`, `connect`, `status`
+et `sync` utilisent le dossier personnel, indépendamment du projet courant.
+`sync` cible les configurations utilisateur par défaut (`--scope user`).
+Le dossier `.agentmux/` d'un projet n'est pas découvert automatiquement.
+
 ### Installation en une commande
 
 Prérequis : **Git** et **mise** ([installation de mise](https://mise.jdx.dev/getting-started.html)).
@@ -50,6 +56,11 @@ existant. **Sécurité :** examiner `install.sh` ou `install.ps1` avant
 d'exécuter un script distant ; ces commandes suivent la branche `main`.
 
 ### Développement depuis les sources
+
+Après compilation, `agentmux init` initialise `~/.agentmux/`, puis
+`agentmux sync` prévisualise la synchronisation globale et
+`agentmux sync --apply` l'applique. `--root` permet de cibler explicitement
+un autre dossier personnel pour les tests ou installations particulières.
 
 ```powershell
 mise trust

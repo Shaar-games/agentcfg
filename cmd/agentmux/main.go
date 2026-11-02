@@ -46,7 +46,7 @@ Usage: agentmux <command> [options]
   daemon     Run the local IPC broker in the foreground
   version    Print version
 
-All commands accept --root <source-project> (default: current directory).
+All commands accept --root <home-directory> (default: user home).
 Use agentmux <command> --help for command-specific options.
 No web server or TCP listener is used. Bidirectional sync is not implemented.`)
 		return err
@@ -57,7 +57,11 @@ No web server or TCP listener is used. Bidirectional sync is not implemented.`)
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
-	root := flags.String("root", ".", "source project containing .agentmux")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	root := flags.String("root", home, "home directory containing .agentmux")
 	switch args[0] {
 	case "init":
 		return initialize(flags, root, args[1:], output)
@@ -211,7 +215,7 @@ func initialize(flags *flag.FlagSet, root *string, args []string, output io.Writ
 func synchronize(flags *flag.FlagSet, root *string, args []string, output, diagnostics io.Writer) error {
 	apply := flags.Bool("apply", false, "apply the proposed changes; default is read-only")
 	dryRun := flags.Bool("dry-run", false, "explicit read-only preview")
-	scope := flags.String("scope", "project", "project or user")
+	scope := flags.String("scope", "user", "user (default) or project")
 	mode := flags.String("skill-mode", "auto", "auto (symlink, copy fallback), symlink, or copy")
 	binary := flags.String("binary", "", "absolute installed agentmux binary path (defaults to current executable)")
 	if err := parse(flags, args); err != nil {
