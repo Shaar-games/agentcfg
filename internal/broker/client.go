@@ -138,7 +138,7 @@ func spawn(root string, endpoint ipc.Endpoint) error {
 		return err
 	}
 	defer log.Close()
-	command := exec.Command(executable, "daemon", "--root", root)
+	command := exec.Command(executable, "daemon")
 	command.Stdin = nil
 	command.Stdout, command.Stderr = log, log
 	ipc.Detach(command)

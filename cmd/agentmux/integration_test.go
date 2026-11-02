@@ -97,6 +97,8 @@ func TestMCPFixture(t *testing.T) {
 func integrationRoot(t *testing.T, sharing, idle string) string {
 	t.Helper()
 	root := t.TempDir()
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("HOME", root)
 	if err := os.MkdirAll(filepath.Join(root, ".agentmux"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +147,8 @@ type cliPeer struct {
 func startCLIPeer(t *testing.T, binary, root, harness string) *cliPeer {
 	t.Helper()
 	p := &cliPeer{done: make(chan error, 1)}
-	p.command = exec.Command(binary, "connect", "--root", root, "--server", "fixture", "--harness", harness)
+	p.command = exec.Command(binary, "connect", "--server", "fixture", "--harness", harness)
+	p.command.Env = append(os.Environ(), "USERPROFILE="+root, "HOME="+root)
 	input, err := p.command.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -311,8 +314,10 @@ func TestCLIIdleBrokerStopsAutomatically(t *testing.T) {
 
 func TestInitDoesNotOverwriteCanonicalFiles(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("HOME", root)
 	var output, diagnostics bytes.Buffer
-	if err := run(context.Background(), []string{"init", "--root", root}, nil, &output, &diagnostics); err != nil {
+	if err := run(context.Background(), []string{"init"}, nil, &output, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, ".agentmux", "mcp.json")
@@ -320,7 +325,7 @@ func TestInitDoesNotOverwriteCanonicalFiles(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(context.Background(), []string{"init", "--root", root}, nil, &output, &diagnostics); err != nil {
+	if err := run(context.Background(), []string{"init"}, nil, &output, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
 	actual, _ := os.ReadFile(path)

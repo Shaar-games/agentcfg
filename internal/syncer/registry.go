@@ -48,7 +48,7 @@ func registry(base, scope string) []target {
 }
 
 func proxyEntry(t target, binary, root, name string) map[string]any {
-	args := []string{"connect", "--root", root, "--server", name, "--harness", t.name}
+	args := []string{"connect", "--server", name, "--harness", t.name}
 	if t.name == "opencode" {
 		return map[string]any{"type": "local", "command": append([]string{binary}, args...), "enabled": true}
 	}

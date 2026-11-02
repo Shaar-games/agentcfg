@@ -23,7 +23,7 @@ après inactivité. Il n’est pas installé comme service système.
 La configuration canonique est **globale** : `~/.agentmux/` (sur Windows,
 `$HOME\.agentmux\`). Par défaut, `agentmux init`, `list`, `connect`, `status`
 et `sync` utilisent le dossier personnel, indépendamment du projet courant.
-`sync` cible les configurations utilisateur par défaut (`--scope user`).
+`sync` cible les configurations utilisateur par défaut (portée utilisateur).
 Le dossier `.agentmux/` d'un projet n'est pas découvert automatiquement.
 
 ### Installation en une commande
@@ -59,8 +59,8 @@ d'exécuter un script distant ; ces commandes suivent la branche `main`.
 
 Après compilation, `agentmux init` initialise `~/.agentmux/`, puis
 `agentmux sync` prévisualise la synchronisation globale et
-`agentmux sync --apply` l'applique. `--root` permet de cibler explicitement
-un autre dossier personnel pour les tests ou installations particulières.
+`agentmux sync --apply` l'applique. Aucun paramètre `--root` ou
+`--scope project` n'est exposé : les sources et les destinations sont globales.
 
 ```powershell
 mise trust
@@ -68,20 +68,20 @@ mise install
 mise run check
 mise run build
 
-# Dans le projet qui contiendra tes configurations canoniques :
-.\bin\agentmux.exe init --root C:\chemin\mon-projet
-.\bin\agentmux.exe list --root C:\chemin\mon-projet
-.\bin\agentmux.exe validate --root C:\chemin\mon-projet
+# Configuration globale, indépendante du projet courant :
+.\bin\agentmux.exe init
+.\bin\agentmux.exe list
+.\bin\agentmux.exe validate
 
 # Toujours une prévisualisation par défaut ; aucun fichier modifié :
-.\bin\agentmux.exe sync --root C:\chemin\mon-projet
+.\bin\agentmux.exe sync
 
 # Écrit les configurations natives et installe les skills :
-.\bin\agentmux.exe sync --root C:\chemin\mon-projet --apply
+.\bin\agentmux.exe sync --apply
 
 # Lecture seule, sans démarrer de broker :
-.\bin\agentmux.exe status --root C:\chemin\mon-projet
-.\bin\agentmux.exe stop --root C:\chemin\mon-projet
+.\bin\agentmux.exe status
+.\bin\agentmux.exe stop
 ```
 
 Sous Linux/macOS, le binaire construit est `./bin/agentmux`. Les versions d’outils
@@ -184,12 +184,12 @@ Exemple pour Cursor : deux entrées distinctes, sans catalogue MCP agrégé.
     "chrome-devtools": {
       "type": "stdio",
       "command": "C:\\outils\\agentmux.exe",
-      "args": ["connect", "--root", "C:\\projets\\demo", "--server", "chrome-devtools", "--harness", "cursor"]
+      "args": ["connect", "--server", "chrome-devtools", "--harness", "cursor"]
     },
     "context7": {
       "type": "stdio",
       "command": "C:\\outils\\agentmux.exe",
-      "args": ["connect", "--root", "C:\\projets\\demo", "--server", "context7", "--harness", "cursor"]
+      "args": ["connect", "--server", "context7", "--harness", "cursor"]
     }
   }
 }
@@ -209,7 +209,7 @@ tableaux. Les schémas natifs ne sont donc pas remplacés par un format commun.
 | Gemini CLI | `.gemini/settings.json` | `.gemini/skills/` |
 | VS Code, sélection explicite | `.vscode/mcp.json` | `.github/skills/` |
 
-`--scope user` cible les fichiers utilisateur plutôt que les fichiers projet ;
+La synchronisation cible exclusivement les fichiers utilisateur ;
 VS Code reste limité à la portée projet dans cette version. Les emplacements
 utilisateur personnalisés par des variables de harness ou des profils ne sont
 pas détectés automatiquement.
