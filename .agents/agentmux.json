@@ -1,0 +1,13 @@
+{
+  "harnesses": [
+    "claude-code",
+    "codex",
+    "cursor",
+    "opencode",
+    "gemini"
+  ],
+  "runtime": {
+    "idleTimeout": "5m",
+    "requestTimeout": "5m"
+  }
+}

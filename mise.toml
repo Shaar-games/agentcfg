@@ -1,0 +1,22 @@
+[tools]
+go = "1.26.10"
+
+[tasks.fmt]
+description = "Format Go source"
+run = "go fmt ./..."
+
+[tasks.test]
+description = "Run all tests"
+run = "go test ./..."
+
+[tasks.vet]
+description = "Run Go static checks"
+run = "go vet ./..."
+
+[tasks.build]
+description = "Build the agentmux CLI into bin/"
+run = "go build -o ./bin/ ./cmd/agentmux"
+
+[tasks.check]
+description = "Run static checks and the test suite"
+depends = ["vet", "test"]

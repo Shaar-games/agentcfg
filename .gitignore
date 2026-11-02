@@ -1,0 +1,7 @@
+/bin/
+/dist/
+/.agentmux/
+/.agents/data/
+/coverage.out
+*.test
+*.exe

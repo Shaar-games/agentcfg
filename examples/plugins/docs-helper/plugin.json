@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "docs-helper",
+  "version": "1.0.0",
+  "description": "Example portable documentation server and review skill.",
+  "keywords": ["documentation", "example"]
+}

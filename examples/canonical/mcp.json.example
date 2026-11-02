@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "./node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+      ],
+      "sharing": "shared"
+    },
+    "context7": {
+      "type": "streamable-http",
+      "url": "https://mcp.context7.com/mcp",
+      "sharing": "shared"
+    }
+  }
+}

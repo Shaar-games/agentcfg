@@ -1,0 +1,18 @@
+{
+  "harnesses": ["claude-code", "codex", "cursor", "opencode", "gemini"],
+  "runtime": {
+    "idleTimeout": "5m",
+    "requestTimeout": "5m"
+  },
+  "serverOverrides": {
+    "docs-helper.context7": {
+      "harnesses": ["claude-code", "codex"],
+      "sharing": "shared"
+    }
+  },
+  "skillOverrides": {
+    "docs-helper.documentation-check": {
+      "harnesses": ["claude-code", "codex"]
+    }
+  }
+}
