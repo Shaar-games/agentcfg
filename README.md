@@ -39,10 +39,14 @@ curl -fsSL https://raw.githubusercontent.com/Shaar-games/agentmux/main/install.s
 irm https://raw.githubusercontent.com/Shaar-games/agentmux/main/install.ps1 | iex
 ```
 
-L'installation est placée par défaut dans `~/.local/share/agentmux` ; le
-binaire se trouve dans `bin/`. Utiliser son chemin absolu ou ajouter ce dossier
-au `PATH`. Pour choisir le dossier, définir `AGENTMUX_INSTALL_DIR` avant
-l'installation. **Sécurité :** examiner `install.sh` ou `install.ps1` avant
+Sur Linux, macOS et Windows, les sources et fichiers de build sont conservés
+dans `~/.local/share/agentmux`, tandis que l'exécutable est accessible dans
+`~/.local/bin/agentmux` (ou `agentmux.exe` sous Windows). Sous Unix, il s'agit
+d'un lien symbolique vers le binaire compilé ; sous Windows, d'une copie.
+Ajouter `~/.local/bin` au `PATH` s'il n'y figure pas. Pour choisir le dossier
+des sources, définir `AGENTMUX_INSTALL_DIR` avant l'installation ; le dossier
+des exécutables reste `~/.local/bin`. Les scripts refusent d'écraser un binaire
+existant. **Sécurité :** examiner `install.sh` ou `install.ps1` avant
 d'exécuter un script distant ; ces commandes suivent la branche `main`.
 
 ### Développement depuis les sources

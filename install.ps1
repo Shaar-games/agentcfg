@@ -1,7 +1,10 @@
 $ErrorActionPreference = 'Stop'
 $repo = 'https://github.com/Shaar-games/agentmux.git'
 $dest = if ($env:AGENTMUX_INSTALL_DIR) { $env:AGENTMUX_INSTALL_DIR } else { Join-Path $HOME '.local\share\agentmux' }
+$binDir = Join-Path $HOME '.local\bin'
+$binary = Join-Path $binDir 'agentmux.exe'
 if (Test-Path -LiteralPath $dest) { throw "Destination already exists: $dest (refusing to overwrite)" }
+if (Test-Path -LiteralPath $binary) { throw "Executable already exists: $binary (refusing to overwrite)" }
 foreach ($tool in @('git', 'mise')) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "$tool is required" }
 }
@@ -18,5 +21,7 @@ try {
     & mise run build
     if ($LASTEXITCODE -ne 0) { throw 'mise build failed' }
 } finally { Pop-Location }
-Write-Host "Installed: $(Join-Path $dest 'bin\agentmux.exe')"
-Write-Host "Add $(Join-Path $dest 'bin') to PATH or use its absolute path."
+New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+Copy-Item -LiteralPath (Join-Path $dest 'bin\agentmux.exe') -Destination $binary -ErrorAction Stop
+Write-Host "Installed: $binary"
+Write-Host "Add $binDir to PATH if needed."
