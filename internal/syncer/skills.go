@@ -86,9 +86,6 @@ func treeFingerprint(path string) (string, error) {
 }
 
 func (p *Plan) planSkills(t target, c *config.Config, selected bool, mode string, old manifest) error {
-	if err := ensureNoSymlinkParents(p.base, t.skills); err != nil {
-		return err
-	}
 	desired := map[string]config.Skill{}
 	for _, skill := range c.Skills {
 		destination := filepath.Join(t.skills, filepath.Base(skill.Path))
@@ -117,6 +114,12 @@ func (p *Plan) planSkills(t target, c *config.Config, selected bool, mode string
 		if filepath.Dir(path) == t.skills {
 			paths[path] = true
 		}
+	}
+	if len(paths) == 0 {
+		return nil // No generated skill is needed or previously owned here.
+	}
+	if err := ensureNoSymlinkParents(p.base, t.skills); err != nil {
+		return err
 	}
 	ordered := make([]string, 0, len(paths))
 	for path := range paths {

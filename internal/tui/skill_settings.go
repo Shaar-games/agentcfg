@@ -49,7 +49,9 @@ func setSkillHarness(root string, selected config.Skill, harness string, enabled
 	if err := requireRealDirectory(agents); err != nil {
 		return fmt.Errorf("source directory: %w", err)
 	}
-	lockPath := filepath.Join(agents, ".tui-skills.lock")
+	// The synchronizer also reads SKILL.md sources while applying a plan.
+	// Coordinate with its lock to avoid a stale or mixed native projection.
+	lockPath := filepath.Join(agents, "sync.lock")
 	if err := rejectLinkedFile(lockPath); err != nil {
 		return err
 	}

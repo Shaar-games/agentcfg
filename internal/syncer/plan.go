@@ -147,9 +147,6 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	knownPaths := map[string]bool{}
 	for _, t := range all {
 		knownPaths[t.path] = true
-		if err := ensureNoSymlinkParents(base, t.path); err != nil {
-			return nil, err
-		}
 		desired := map[string]map[string]any{}
 		if selected[t.name] {
 			for name, server := range c.Servers {
@@ -159,6 +156,12 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 			}
 		}
 		if len(desired) != 0 || len(old.Configs[t.path]) != 0 {
+			// An unselected, never-managed harness does not belong to this
+			// operation's write set. Its native directory may be a symlink,
+			// without making unrelated harnesses impossible to synchronize.
+			if err := ensureNoSymlinkParents(base, t.path); err != nil {
+				return nil, err
+			}
 			if err := p.planConfig(t, desired, old); err != nil {
 				return nil, err
 			}
