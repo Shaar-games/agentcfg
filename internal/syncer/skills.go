@@ -25,6 +25,7 @@ type skillRecord struct {
 type skillChange struct {
 	source, sourceHash, beforeHash, mode string
 	remove                               bool
+	adoptionHash                         string
 }
 
 func treeFingerprint(path string) (string, error) {
@@ -135,7 +136,15 @@ func (p *Plan) planSkills(t target, c *config.Config, selected bool, mode string
 }
 
 func (p *Plan) planSkill(destination string, skill config.Skill, wanted bool, mode string, previous skillRecord) error {
-	current, err := treeFingerprint(destination)
+	var adoption SkillAdoption
+	if p.adoption != nil {
+		adoption = p.adoption.skills[destination]
+	}
+	fingerprint := treeFingerprint
+	if adoption.CanonicalName != "" {
+		fingerprint = adoptionTreeFingerprint
+	}
+	current, err := fingerprint(destination)
 	exists := err == nil
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -148,7 +157,7 @@ func (p *Plan) planSkill(destination string, skill config.Skill, wanted bool, mo
 			skill: &skillChange{beforeHash: current, remove: true}})
 		return nil
 	}
-	if exists && previous.Fingerprint == "" {
+	if exists && previous.Fingerprint == "" && adoption.CanonicalName == "" {
 		return fmt.Errorf("skill destination exists and is not owned by agentcfg: %s", destination)
 	}
 	source, err := pathutil.Resolve(skill.Path)
@@ -159,20 +168,42 @@ func (p *Plan) planSkill(destination string, skill config.Skill, wanted bool, mo
 	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("refusing to copy a skill into itself: %s", destination)
 	}
-	sourceHash, err := treeFingerprint(source)
+	sourceHash, err := fingerprint(source)
 	if err != nil {
 		return err
+	}
+	if adoption.CanonicalName != "" {
+		if !exists || adoption.CanonicalName != skill.Name {
+			return fmt.Errorf("scanner-approved skill destination no longer matches %q: %s", skill.Name, destination)
+		}
+		nativeHash, nativeErr := SkillTreeSHA256(destination)
+		canonicalHash, sourceErr := SkillTreeSHA256(source)
+		if nativeErr != nil {
+			return nativeErr
+		}
+		if sourceErr != nil {
+			return sourceErr
+		}
+		if !strings.EqualFold(nativeHash, adoption.TreeSHA256) || nativeHash != canonicalHash {
+			return fmt.Errorf("skill adoption requires the scanned native tree and canonical source to be byte-identical: %s", destination)
+		}
+		adoption.TreeSHA256 = nativeHash
+		p.Warnings = append(p.Warnings, fmt.Sprintf("explicitly adopt existing native skill %q for %s (%s)", skill.Name, adoption.Harness, destination))
 	}
 	record := skillRecord{Source: source, SourceHash: sourceHash, Mode: mode}
 	p.state.Skills[destination] = record
 	compatibleMode := mode == "auto" || mode == previous.Mode
-	if exists && compatibleMode && previous.Source == source && (previous.Mode == "symlink" || previous.SourceHash == sourceHash) {
+	if adoption.CanonicalName == "" && exists && compatibleMode && previous.Source == source && (previous.Mode == "symlink" || previous.SourceHash == sourceHash) {
 		previous.SourceHash = sourceHash
 		p.state.Skills[destination] = previous
 		return nil
 	}
-	p.Changes = append(p.Changes, Change{Path: destination, Action: "sync skill (" + mode + ")", exists: exists,
-		skill: &skillChange{source: source, sourceHash: sourceHash, beforeHash: current, mode: mode}})
+	action := "sync skill (" + mode + ")"
+	if adoption.CanonicalName != "" {
+		action = "adopt existing skill (" + mode + ")"
+	}
+	p.Changes = append(p.Changes, Change{Path: destination, Action: action, exists: exists, adopted: adoption.CanonicalName != "",
+		skill: &skillChange{source: source, sourceHash: sourceHash, beforeHash: current, mode: mode, adoptionHash: adoption.TreeSHA256}})
 	return nil
 }
 

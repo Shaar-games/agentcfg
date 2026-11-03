@@ -33,6 +33,62 @@ func putSettings(t *testing.T, root string, data string) {
 	}
 }
 
+func TestServerHarnessBulkChoicePreservesOtherOverrides(t *testing.T) {
+	root := settingsFixture(t)
+	putSettings(t, root, "{\"harnesses\":[\"codex\",\"cursor\"],\"serverOverrides\":{\"alpha\":{\"sharing\":\"isolated\"}}}")
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := cfg.Servers["alpha"]
+	if err := setServerHarnessSelection(root, snapshot, []string{"codex"}, cfg.Settings.Harnesses); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := updated.Servers["alpha"]
+	if got.Sharing != "isolated" || !config.Allows(got.Harnesses, "codex") || config.Allows(got.Harnesses, "cursor") {
+		t.Fatalf("MCP selection or sharing lost: %+v", got)
+	}
+	if err := setServerHarnessSelection(root, snapshot, []string{"cursor"}, cfg.Settings.Harnesses); err == nil {
+		t.Fatal("stale server availability selection was accepted")
+	}
+	if err := setServerHarnessSelection(root, got, []string{"codex"}, updated.Settings.Harnesses); !errors.Is(err, errNoChange) {
+		t.Fatalf("unchanged selection should not rewrite canonical files: %v", err)
+	}
+}
+
+func TestServerHarnessNoneAndMissingConfiguredHarnessRejected(t *testing.T) {
+	root := settingsFixture(t)
+	putSettings(t, root, "{\"harnesses\":[\"codex\",\"cursor\"],\"serverOverrides\":{\"alpha\":{\"harnesses\":[\"codex\",\"cursor\"],\"sharing\":\"isolated\"}}}")
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(settingsFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setServerHarnessSelection(root, cfg.Servers["alpha"], nil, cfg.Settings.Harnesses); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(reloaded.Servers["alpha"].Harnesses, []string{"none"}) {
+		t.Fatalf("empty selection did not disable MCP explicitly: %+v", reloaded.Servers["alpha"].Harnesses)
+	}
+	if err := setServerHarnessSelection(root, reloaded.Servers["alpha"], []string{"antigravity"}, reloaded.Settings.Harnesses); err == nil {
+		t.Fatal("unconfigured harness permitted")
+	}
+	if bytes.Equal(before, []byte{}) {
+		t.Fatal("invalid fixture")
+	}
+}
+
 func TestHarnessSettingsAtomicBackupAndPreservation(t *testing.T) {
 	root := settingsFixture(t)
 	original := `{"harnesses":["codex","antigravity"],"runtime":{"idleTimeout":"7m"},"serverOverrides":{"alpha":{"harnesses":["codex"]}}}`

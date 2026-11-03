@@ -68,7 +68,33 @@ func setSkillHarnessSelection(root string, selected config.Skill, chosen []strin
 	return applySkillHarnessSelection(root, selected, desired)
 }
 
+// setSkillHarnessForConfigured changes only harnesses currently enabled in
+// agentcfg.json. Other source metadata.harness choices are preserved, including
+// a previously explicit "none", so the UI does not silently rewrite filters
+// belonging to harnesses that are not part of this configuration session.
+func setSkillHarnessForConfigured(root string, selected config.Skill, chosen, configured []string) error {
+	configured, err := config.ValidateUserHarnesses(configured)
+	if err != nil {
+		return err
+	}
+	allowed := make(map[string]bool, len(configured))
+	for _, id := range configured {
+		allowed[id] = false
+	}
+	for _, id := range chosen {
+		if _, ok := allowed[id]; !ok || allowed[id] {
+			return fmt.Errorf("skill harness %q is not configured or is repeated", id)
+		}
+		allowed[id] = true
+	}
+	return applySkillHarnessSelectionChecked(root, selected, allowed, configured)
+}
+
 func applySkillHarnessSelection(root string, selected config.Skill, desired map[string]bool) error {
+	return applySkillHarnessSelectionChecked(root, selected, desired, nil)
+}
+
+func applySkillHarnessSelectionChecked(root string, selected config.Skill, desired map[string]bool, configured []string) error {
 	for harness := range desired {
 		if !slices.Contains(knownSkillHarnesses, harness) {
 			return fmt.Errorf("unknown skill harness %q", harness)
@@ -104,6 +130,9 @@ func applySkillHarnessSelection(root string, selected config.Skill, desired map[
 	current, err = config.Load(current.Root)
 	if err != nil {
 		return fmt.Errorf("reload current skill configuration: %w", err)
+	}
+	if configured != nil && !slices.Equal(current.Settings.Harnesses, configured) {
+		return errors.New("configured harnesses changed; refresh skill availability")
 	}
 	var found *config.Skill
 	for i := range current.Skills {

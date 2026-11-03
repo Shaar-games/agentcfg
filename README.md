@@ -43,7 +43,9 @@ OpenCode    ── context7: agentcfg connect ────────┴── 
 ### Features
 
 - **One upstream per shared MCP configuration**, even with multiple connected harnesses.
-- **Interactive Charmbracelet Huh forms** for harness selection, MCP sharing settings, skill availability, plugin inventory, diagnostics and sync confirmation.
+- **Consistent Charmbracelet Huh lists** for harness selection, per-harness MCP and skill availability, MCP sharing settings, plugin inventory, diagnostics and sync confirmation.
+- **Native setup discovery** to inspect installed harness MCPs and skills before creating a canonical configuration.
+- **Shell completion** for Bash, Zsh, Fish and PowerShell (including `pwsh`).
 - **Starts on demand and stops after inactivity**; no permanently installed background service.
 - **Individual MCP entries** in each harness, not one aggregated tool catalog.
 - **Canonical configuration** at `~/.agentcfg/`, projected into each harness's native configuration files.
@@ -86,24 +88,40 @@ Run these commands from **any directory**. `agentcfg` without arguments prints t
 
 ```sh
 agentcfg                       # Display help without changing configuration
-agentcfg init                  # Fresh installation: create missing ~/.agentcfg/ sources
+agentcfg init                  # Discover native MCPs/skills; choose and confirm canonical setup
+agentcfg init --plain          # Read-only discovery preview, without Huh or writes
+agentcfg init --apply          # Also preview and confirm native harness synchronization
 agentcfg config                # Open Huh configuration for harnesses, skills, MCPs and sync
-agentcfg harnesses             # Open only the Huh harness multi-select
+agentcfg harness               # Configure enabled harnesses (alias: harnesses)
+agentcfg skill                 # Configure skill availability (alias: skills)
+agentcfg mcp                   # Configure MCP availability and sharing (alias: mcps)
+agentcfg mcp --plain           # Inspect effective MCP availability without editing
 agentcfg validate              # Validate sources, plugins, and skills
 agentcfg list                  # Show discovered MCP servers and skills
 agentcfg update                # Update this executable from GitHub Releases
 agentcfg sync                  # Preview user-level changes (read-only)
 agentcfg sync --apply          # Apply reviewed changes
 agentcfg status                # Inspect the broker (does not start it)
+agentcfg completion bash       # Print a sourceable completion script
 ```
 
 When a harness next connects to a generated MCP entry, the proxy starts the broker if it is not already running. `agentcfg stop` shuts down the broker and its managed MCP children.
 
+### First-run discovery and confirmation
+
+`agentcfg init` examines the **user-level native MCP configurations and skill directories** of supported, installed harnesses. It prepares a proposed `~/.agentcfg/mcp.json`, `~/.agentcfg/agentcfg.json` and skill inventory, identifies conflicts or settings that cannot safely be adopted, and displays a preview **before writing**. Discovery must not start MCP servers, execute skill scripts, or alter native harness files.
+
+Review the discovered entries, target harnesses, and any duplicates in the Huh interface. **`agentcfg init` asks for explicit confirmation before creating the canonical sources**; cancelling stops the operation. `agentcfg init --apply` additionally previews the proposed native changes and asks for a **second Huh confirmation**, including any adoption of existing scanner-proven MCP entries or identical skill trees. The original native files are verified again and backed up; unrelated settings are preserved. Unproved collisions and native TOML MCP adoption are refused: **there is no silent overwrite**. For read-only automation, `agentcfg init --plain` prints the discovery preview; `--yes` explicitly approves the creation and, with `--apply`, synchronization in noninteractive use. Independently, `agentcfg sync` previews ongoing configuration changes and `agentcfg sync --apply` applies a reviewed plan. See [CLI setup details](docs/cli.md) and [synchronization rules](docs/synchronization.md).
+
 ### Interactive configuration
 
-Run `agentcfg config` to manage **harnesses, MCP servers, skills, Agent Plugins, diagnostics and synchronization** through consistent native Huh checkbox lists, including the top-level navigation and MCP sharing choices. Use ↑/↓ to navigate, **Space to check a section, then Enter to open it**. Navigation allows one checked section at a time; Enter with no section checked returns to the previous screen. Harness and skill availability allow multiple checked values, with the current settings prechecked; Enter saves, Ctrl+C cancels. MCP servers and skills can be selected from the same style of list to view details or change supported settings; `agentcfg harnesses` opens the harness multi-select directly. Run `agentcfg` or `agentcfg help` to see the command reference. Huh provides an accessible numbered prompt fallback for terminals without full-screen support. On Windows, genuine interactive consoles use the normal Huh interface even when `TERM=dumb`; set `AGENTCFG_ACCESSIBLE=1` to request numbered prompts instead. Listing status never starts MCP servers.
+Run `agentcfg config` to manage **harnesses, MCP servers, skills, Agent Plugins, diagnostics and synchronization** through consistent native Huh checkbox lists, including the top-level navigation and MCP sharing choices. Use ↑/↓ to navigate, **Space to check a section, then Enter to open it**. Navigation allows one checked section at a time; Enter with no section checked returns to the previous screen. Harness and skill availability allow multiple checked values, with the current settings prechecked; Enter saves, Ctrl+C cancels. MCP servers and skills can be selected from the same style of list to view details or change supported settings. `agentcfg harness` / `agentcfg harnesses`, `agentcfg skill` / `agentcfg skills` and `agentcfg mcp` / `agentcfg mcps` open those sections directly. Run `agentcfg` or `agentcfg help` to see the command reference. Huh provides an accessible numbered prompt fallback for terminals without full-screen support. On Windows, genuine interactive consoles use the normal Huh interface even when `TERM=dumb`; set `AGENTCFG_ACCESSIBLE=1` to request numbered prompts instead. Listing status never starts MCP servers.
 
-Use **Huh multi-select checkboxes** to configure enabled harnesses and the availability of each skill. Choose **shared** / **isolated** separately for an existing MCP server. The Huh sync menu first displays a read-only plan and asks before applying changes to native harness configuration files. **Raw MCP definitions (command, URL, credentials, arguments) and plugin package installation still require editing `~/.agentcfg/mcp.json` or `~/.agentcfg/plugins/`**; validate these sources before syncing. Huh inventories plugin contents. CLI scripts and pipelines retain plain output; `--plain` explicitly suppresses Huh forms. `agentcfg status --json` remains machine-readable and `agentcfg sync --apply --yes` skips confirmation.
+Use **Huh multi-select checkboxes** to configure enabled harnesses and the availability of each skill or MCP. Choose **shared** / **isolated** separately for an existing MCP server. The Huh sync menu first displays a read-only plan and asks before applying changes to native harness configuration files. **Raw MCP definitions (command, URL, credentials, arguments) and plugin package installation still require editing `~/.agentcfg/mcp.json` or `~/.agentcfg/plugins/`**; validate these sources before syncing. Huh inventories plugin contents. For `harness(es)`, `skill(s)` and `mcp(s)`, `--plain` prints the effective configuration without opening a form or editing files. It also keeps inspection and sync previews script-friendly. `agentcfg status --json` remains machine-readable and `agentcfg sync --apply --yes` skips confirmation.
+
+### Shell completion
+
+`agentcfg completion bash|zsh|fish|powershell|pwsh` prints a completion script for that shell. For instance, run `source <(agentcfg completion bash)` in Bash, `agentcfg completion fish | source` in Fish, or `agentcfg completion pwsh | Out-String | Invoke-Expression` in PowerShell 7. PowerShell 5.1 uses `powershell` instead of `pwsh`. For persistent installation in your shell's startup file, see [shell completion setup](docs/completion.md).
 
 ## Global configuration
 
@@ -278,6 +296,6 @@ Go tests include a real subprocess integration fixture that verifies two harness
 
 GitHub Actions tests Linux, Windows and macOS. Tagged releases build precompiled AMD64/ARM64 binaries for all three operating systems, publish SHA-256 checksums, and are consumed by the installation scripts. See [release process](docs/releases.md).
 
-Explore the [configuration reference](docs/configuration.md), [synchronization behavior](docs/synchronization.md), [architecture](docs/architecture.md), [transports](docs/transports.md), [verification notes](docs/verification.md), and [roadmap](docs/roadmap.md).
+Explore the [CLI and setup guide](docs/cli.md), [shell completion setup](docs/completion.md), [configuration reference](docs/configuration.md), [synchronization behavior](docs/synchronization.md), [architecture](docs/architecture.md), [transports](docs/transports.md), [verification notes](docs/verification.md), and [roadmap](docs/roadmap.md).
 
 <sub>Header and GitHub badges rendered with <a href="https://github.com/jal-co/shieldcn">shieldcn</a>. The README uses hosted SVGs; it does not require shieldcn at runtime.</sub>

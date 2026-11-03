@@ -51,14 +51,20 @@ type Override struct {
 
 // Allows reports whether an item is enabled for the named harness. An empty
 // harness denotes a direct CLI connection; an empty filter means all harnesses.
+// A "none" filter disables every named harness, including when an invalid
+// programmatically constructed filter also contains other names.
 func Allows(filter []string, harness string) bool {
 	if len(filter) == 0 || harness == "" {
 		return true
 	}
+	allowed := false
 	for _, value := range filter {
+		if value == "none" {
+			return false
+		}
 		if value == harness {
-			return true
+			allowed = true
 		}
 	}
-	return false
+	return allowed
 }

@@ -14,7 +14,14 @@ import (
 	"agentcfg/internal/config"
 )
 
-type Options struct{ Root, Home, Binary, Scope, SkillMode string }
+type Options struct {
+	Root, Home, Binary, Scope, SkillMode string
+	// AdoptExisting is reserved for explicitly confirmed init --apply imports.
+	// Every existing entry also needs a scanner-captured proof below.
+	AdoptExisting bool
+	AdoptMCP      []MCPAdoption
+	AdoptSkills   []SkillAdoption
+}
 
 type Change struct {
 	Path         string `json:"path"`
@@ -27,6 +34,7 @@ type Change struct {
 	source       string
 	sourceHash   string
 	sourceExists bool
+	adopted      bool
 }
 
 type manifest struct {
@@ -45,6 +53,7 @@ type Plan struct {
 	stateExists           bool
 	state                 manifest
 	sourceConfigDigest    string
+	adoption              *adoptionState
 }
 
 func freshManifest() manifest {
@@ -67,6 +76,9 @@ func digest(value any) string {
 func rawDigest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
 
 func normalizeOptions(c *config.Config, opts Options) (Options, error) {
+	if opts.AdoptExisting && opts.Home == "" {
+		return opts, errors.New("adoption requires an explicitly supplied home")
+	}
 	if opts.Root == "" {
 		opts.Root = c.Root
 	}
@@ -108,7 +120,8 @@ func normalizeOptions(c *config.Config, opts Options) (Options, error) {
 }
 
 // BuildPlan performs no filesystem writes. It refuses unowned name collisions
-// and changes to previously managed content, rather than guessing an authority.
+// unless explicit scanner proofs and adoption consent authorize those entries.
+// Changes to previously managed content always remain conflicts.
 func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	opts, err := normalizeOptions(c, opts)
 	if err != nil {
@@ -126,6 +139,9 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	if current, loadErr := config.Load(c.Root); loadErr == nil && digest(current) == digest(c) {
 		p.sourceConfigDigest = digest(c)
 	}
+	if opts.AdoptExisting && p.sourceConfigDigest == "" {
+		return nil, errors.New("adoption requires a fresh canonical configuration loaded from disk")
+	}
 	p.stateBefore, p.stateExists, err = readOptional(p.statePath)
 	if err != nil {
 		return nil, err
@@ -141,6 +157,10 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	}
 	all := registry(base, opts.Scope)
 	selected, err := selectTargets(all, c.Settings.Harnesses, opts.Scope)
+	if err != nil {
+		return nil, err
+	}
+	p.adoption, err = prepareAdoption(c, opts, all, selected, old)
 	if err != nil {
 		return nil, err
 	}
@@ -194,9 +214,17 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 }
 
 func (p *Plan) planConfig(t target, desired map[string]map[string]any, old manifest) error {
-	before, exists, err := readOptional(t.path)
+	read := readOptional
+	if p.adoption != nil && len(p.adoption.mcp[t.path]) != 0 {
+		read = p.readAdoptionFile
+	}
+	before, exists, err := read(t.path)
 	if err != nil {
 		return err
+	}
+	previous, adopted, err := p.adoptedMCP(t, before, old.Configs[t.path])
+	if err != nil {
+		return fmt.Errorf("%s: %w", t.path, err)
 	}
 	var after []byte
 	var owned map[string]string
@@ -207,7 +235,7 @@ func (p *Plan) planConfig(t target, desired map[string]map[string]any, old manif
 			p.state.Blocks[t.path] = blockHash
 		}
 	} else {
-		after, owned, err = editJSON(before, t.key, desired, old.Configs[t.path])
+		after, owned, err = editJSON(before, t.key, desired, previous)
 	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", t.path, err)
@@ -215,12 +243,14 @@ func (p *Plan) planConfig(t target, desired map[string]map[string]any, old manif
 	if len(owned) != 0 {
 		p.state.Configs[t.path] = owned
 	}
-	if !bytes.Equal(before, after) {
+	if adopted || !bytes.Equal(before, after) {
 		action := "update MCP configuration"
 		if !exists {
 			action = "create MCP configuration"
+		} else if adopted {
+			action = "adopt existing MCP configuration"
 		}
-		p.Changes = append(p.Changes, Change{Path: t.path, Action: action, before: before, after: after, exists: exists})
+		p.Changes = append(p.Changes, Change{Path: t.path, Action: action, before: before, after: after, exists: exists, adopted: adopted})
 	}
 	return nil
 }

@@ -89,3 +89,59 @@ func TestHarnessesStillUseDirectHuhCheckboxes(t *testing.T) {
 		t.Fatalf("direct harness checkbox list unavailable: %s", rendered.String())
 	}
 }
+
+func TestCategoryAliasesPlainShowEffectiveHarnesses(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	base := filepath.Join(home, ".agentcfg")
+	if err := os.MkdirAll(filepath.Join(base, "skills", "review"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for path, contents := range map[string]string{
+		filepath.Join(base, "agentcfg.json"):                "{\"harnesses\":[\"codex\",\"cursor\"]}",
+		filepath.Join(base, "mcp.json"):                     "{\"mcpServers\":{\"review\":{\"command\":\"node\",\"harnesses\":[\"codex\"]}}}",
+		filepath.Join(base, "skills", "review", "SKILL.md"): "---\nname: review\ndescription: Review code\nmetadata:\n  harness: cursor\n---\nBody unchanged\n",
+	} {
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, group := range [][]string{{"harness", "harnesses"}, {"skill", "skills"}, {"mcp", "mcps"}} {
+		var expected string
+		for _, command := range group {
+			var output, diagnostics bytes.Buffer
+			err := run(context.Background(), []string{command, "--plain"}, strings.NewReader(""), &output, &diagnostics)
+			if err != nil {
+				t.Fatalf("agentcfg %s --plain: %v (%s)", command, err, diagnostics.String())
+			}
+			if expected == "" {
+				expected = output.String()
+			} else if expected != output.String() {
+				t.Errorf("alias %q changed output: %q != %q", command, output.String(), expected)
+			}
+		}
+		if !strings.Contains(expected, "codex") && !strings.Contains(expected, "cursor") {
+			t.Errorf("missing effective configured harnesses in: %s", expected)
+		}
+	}
+}
+
+func TestCompletionCommandIsReadOnlyForEveryShell(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell", "pwsh"} {
+		var output, diagnostics bytes.Buffer
+		err := run(context.Background(), []string{"completion", shell}, strings.NewReader(""), &output, &diagnostics)
+		if err != nil {
+			t.Fatalf("%s completion: %v", shell, err)
+		}
+		if !strings.Contains(output.String(), "agentcfg") {
+			t.Fatalf("%s completion missing command", shell)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".agentcfg")); !os.IsNotExist(err) {
+		t.Fatalf("completion created canonical configuration: %v", err)
+	}
+}

@@ -135,7 +135,7 @@ func parseServerOptions(fields map[string]json.RawMessage, server *Server) error
 		}
 	}
 	if raw, exists := fields["harnesses"]; exists {
-		server.Harnesses, err = parseHarnesses(raw)
+		server.Harnesses, err = parseServerHarnesses(raw)
 		if err != nil {
 			return err
 		}

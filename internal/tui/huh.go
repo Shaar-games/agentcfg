@@ -118,6 +118,24 @@ func Run(ctx context.Context, root string, input io.Reader, output io.Writer) er
 	return (interfaceSession{ctx: ctx, root: root, in: input, out: output}).configureHarnesses()
 }
 
+// RunMCP and RunSkills enter the corresponding configuration screens directly.
+// They share all validation, Huh forms, and safe canonical writes with RunMenu.
+func RunMCP(ctx context.Context, root string, input io.Reader, output io.Writer) error {
+	err := (interfaceSession{ctx: ctx, root: root, in: input, out: output}).configureMCP()
+	if isCancelled(err) {
+		return nil
+	}
+	return err
+}
+
+func RunSkills(ctx context.Context, root string, input io.Reader, output io.Writer) error {
+	err := (interfaceSession{ctx: ctx, root: root, in: input, out: output}).configureSkills()
+	if isCancelled(err) {
+		return nil
+	}
+	return err
+}
+
 // RunMenu is the complete user-level configuration entrypoint for "agentcfg config".
 // Multi-choice settings still use native Huh checkboxes inside their sections.
 func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer) error {
@@ -247,6 +265,7 @@ func (s interfaceSession) configureMCP() error {
 		}
 		server := cfg.Servers[name]
 		choice, err := s.selectAction(name, fmt.Sprintf("Transport: %s  ·  Sharing: %s", server.Type, sharing(server)),
+			huh.NewOption("Harness availability", "availability"),
 			huh.NewOption("Change sharing mode", "sharing"),
 			huh.NewOption("Show transport and routing details", "details"),
 			huh.NewOption("Back", "back"))
@@ -257,6 +276,10 @@ func (s interfaceSession) configureMCP() error {
 			return err
 		}
 		switch choice {
+		case "availability":
+			if err := s.configureMCPHarnesses(server, cfg.Settings.Harnesses); err != nil {
+				return err
+			}
 		case "sharing":
 			if err := s.configureMCPSharing(name, server); err != nil {
 				return err
@@ -280,6 +303,39 @@ func (s interfaceSession) configureMCP() error {
 			}
 		}
 	}
+}
+
+func (s interfaceSession) configureMCPHarnesses(server config.Server, configured []string) error {
+	if len(configured) == 0 {
+		return s.note("No harnesses configured", "Enable a harness in agentcfg config before assigning MCP availability.")
+	}
+	choices := make([]huh.Option[string], 0, len(configured))
+	for _, id := range configured {
+		for _, h := range harnesses {
+			if h.ID == id && h.UserScopeEnabled {
+				choices = append(choices, huh.NewOption(h.Label, id).
+					Selected(config.Allows(server.Harnesses, id)))
+				break
+			}
+		}
+	}
+	var selected []string
+	err := s.form(huh.NewMultiSelect[string]().
+		Title("MCP availability: " + safeHuhText(server.Name)).
+		Description("Space toggles, Enter saves. Unchecked MCPs are excluded when syncing that harness.").
+		Options(choices...).
+		Value(&selected))
+	if isCancelled(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	err = setServerHarnessSelection(s.root, server, selected, configured)
+	if errors.Is(err, errNoChange) {
+		return nil
+	}
+	return err
 }
 
 func (s interfaceSession) configureMCPSharing(name string, server config.Server) error {
@@ -363,15 +419,17 @@ func (s interfaceSession) configureSkill(name string) error {
 	if selected == nil {
 		return fmt.Errorf("skill %q no longer exists; refresh", name)
 	}
-	choices := make([]huh.Option[string], 0, len(harnesses))
+	choices := make([]huh.Option[string], 0, len(cfg.Settings.Harnesses))
 	var enabled []string
 	for _, h := range harnesses {
-		label := h.Label
-		if !h.UserScopeEnabled {
-			label = "VS Code (not supported in user-scope sync)"
+		if !h.UserScopeEnabled || !slices.Contains(cfg.Settings.Harnesses, h.ID) {
+			continue
 		}
 		active := config.Allows(selected.Harnesses, h.ID)
-		choices = append(choices, huh.NewOption(label, h.ID).Selected(active))
+		choices = append(choices, huh.NewOption(h.Label, h.ID).Selected(active))
+	}
+	if len(choices) == 0 {
+		return s.note("No harnesses configured", "Enable a harness in agentcfg config before assigning skill availability.")
 	}
 	err = s.form(huh.NewMultiSelect[string]().
 		Title("Skill availability: " + safeHuhText(name)).
@@ -384,7 +442,7 @@ func (s interfaceSession) configureSkill(name string) error {
 	if err != nil {
 		return err
 	}
-	if err := setSkillHarnessSelection(s.root, *selected, enabled); err != nil {
+	if err := setSkillHarnessForConfigured(s.root, *selected, enabled, cfg.Settings.Harnesses); err != nil {
 		if errors.Is(err, errNoChange) {
 			return nil
 		}

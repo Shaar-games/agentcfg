@@ -147,6 +147,89 @@ func setServerSharing(root, name, next, expected string) error {
 	})
 }
 
+// setServerHarnessSelection edits just the named MCP's per-harness routing in
+// canonical serverOverrides. Huh supplies an atomic selection for currently
+// configured harnesses; filters for other (currently disabled) harnesses are
+// retained. A "none" sentinel represents an explicitly disabled MCP.
+func setServerHarnessSelection(root string, snapshot config.Server, chosen, configured []string) error {
+	configured, err := config.ValidateUserHarnesses(configured)
+	if err != nil {
+		return err
+	}
+	selected := make(map[string]bool, len(chosen))
+	for _, name := range chosen {
+		if !slices.Contains(configured, name) || selected[name] {
+			return fmt.Errorf("invalid or repeated MCP harness %q", name)
+		}
+		selected[name] = true
+	}
+	return updateSettings(root, func(cfg *config.Config, fields map[string]json.RawMessage) error {
+		if !slices.Equal(cfg.Settings.Harnesses, configured) {
+			return errors.New("configured harnesses changed; refresh the MCP checklist")
+		}
+		server, exists := cfg.Servers[snapshot.Name]
+		if !exists || server.Source != snapshot.Source || !slices.Equal(server.Harnesses, snapshot.Harnesses) {
+			return fmt.Errorf("MCP %q changed since checklist opened; refresh", snapshot.Name)
+		}
+		unchanged := true
+		for _, name := range configured {
+			if config.Allows(server.Harnesses, name) != selected[name] {
+				unchanged = false
+			}
+		}
+		if unchanged {
+			return errNoChange
+		}
+		// No filter means all harnesses; "none" means explicitly none.
+		allowed := make(map[string]bool, len(knownSkillHarnesses))
+		if len(server.Harnesses) == 0 {
+			for _, name := range knownSkillHarnesses {
+				allowed[name] = true
+			}
+		} else {
+			for _, name := range server.Harnesses {
+				if name != "none" {
+					allowed[name] = true
+				}
+			}
+		}
+		for _, name := range configured {
+			allowed[name] = selected[name]
+		}
+		filter := make([]string, 0, len(knownSkillHarnesses))
+		for _, name := range knownSkillHarnesses {
+			if allowed[name] {
+				filter = append(filter, name)
+			}
+		}
+		if len(filter) == 0 {
+			filter = []string{"none"}
+		}
+		overrides := make(map[string]json.RawMessage)
+		if raw := fields["serverOverrides"]; len(raw) != 0 {
+			if err := json.Unmarshal(raw, &overrides); err != nil || overrides == nil {
+				return errors.New("serverOverrides must be a JSON object")
+			}
+		}
+		item := make(map[string]json.RawMessage)
+		if raw := overrides[snapshot.Name]; len(raw) != 0 {
+			if err := json.Unmarshal(raw, &item); err != nil || item == nil {
+				return fmt.Errorf("server override %q is not a JSON object", snapshot.Name)
+			}
+		}
+		item["harnesses"], err = json.Marshal(filter)
+		if err != nil {
+			return err
+		}
+		overrides[snapshot.Name], err = json.Marshal(item)
+		if err != nil {
+			return err
+		}
+		fields["serverOverrides"], err = json.Marshal(overrides)
+		return err
+	})
+}
+
 var errNoChange = errors.New("requested setting already has that value")
 
 // updateSettings performs a checked, backup-first atomic edit to the source

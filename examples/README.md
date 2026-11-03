@@ -2,9 +2,21 @@
 
 These files are samples, not active configuration. The canonical JSON samples have a `.example` suffix; the plugin and standalone skill live outside the user-level `~/.agentcfg/`. Merely reading or validating them starts no subprocess and contacts no remote service.
 
+For an existing user-level harness setup, begin with `agentcfg init --plain`
+to **preview discovery of installed harness MCPs and skills**. On an interactive
+terminal, `agentcfg init` offers Huh selection and asks for confirmation
+before creating canonical sources. `agentcfg init --apply` additionally
+previews and requests confirmation for native synchronization. Neither
+initialization nor the sample files silently overwrite existing entries.
+Samples remain inert and are not automatically imported during discovery.
+
 ## Chrome DevTools and Context7
 
 Review `canonical/mcp.json.example` and `canonical/agentcfg.json.example`. To use them, merge their contents into `~/.agentcfg/mcp.json` and `~/.agentcfg/agentcfg.json` (without the `.example` suffix), after backing up existing files. agentcfg then synchronizes those sources into the selected harnesses' native configuration files. Do not replace existing canonical files wholesale.
+
+After the merge, `agentcfg mcps --plain` shows effective MCP distribution;
+`agentcfg skills --plain` shows skill availability, and `agentcfg sync --plain`
+previews native changes. Review that output before `agentcfg sync --apply`.
 
 The Chrome entry uses the real `node` executable with a JavaScript entry point, so it does not require an npm shell shim. Its explicit `"cwd": "./.agentcfg"` resolves from the user home and makes relative arguments point into `~/.agentcfg/node_modules/`. Without an explicit `cwd`, canonical servers run from the home directory. To run this example, install a compatible package under `~/.agentcfg/node_modules/` yourself or replace the script argument with the absolute JavaScript entry point of your installation. Verify the entry point against [the upstream package manifest](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/package.json) for the version you pin. This example installs nothing.
 

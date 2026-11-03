@@ -28,6 +28,13 @@ mêmes commandes : flèches ↑/↓, Espace pour cocher ou décocher, Entrée po
 valider et Ctrl+C pour annuler. La configuration n'est enregistrée qu'après
 validation du formulaire concerné.
 
+Vérifier aussi les commandes directes `harness`/`harnesses`,
+`skill`/`skills`, `mcp`/`mcps` et leur mode `--plain` (inventaire
+sans écriture). Les cinq valeurs de `agentcfg completion` sont `bash`,
+`zsh`, `fish`, `powershell` et `pwsh`; la sortie doit pouvoir être
+chargée dans le shell cible sans lancer de MCP. Les commandes d'installation
+sont dans [completion.md](completion.md).
+
 ## Installateurs et binaires
 
 ```sh
@@ -53,8 +60,15 @@ installé si le téléchargement, la vérification ou la préparation échoue.
 
 ## Vérification manuelle de Huh
 
-Dans un environnement de test avec un home isolé, initialiser les sources,
-lancer `agentcfg config`, puis vérifier que :
+Dans un environnement de test avec un home isolé et des fixtures de harnesses,
+vérifier d'abord le flux `agentcfg init` :
+
+1. `agentcfg init --plain` découvre les MCP et skills natifs et affiche un plan sans créer de fichier.
+2. `agentcfg init` ouvre des listes Huh de sélection et demande une confirmation avant création des sources canoniques.
+3. `agentcfg init --apply` affiche en plus un plan de synchronisation native et demande une confirmation distincte avant application.
+4. Une annulation, un conflit d'entrée non gérée ou une modification concurrente ne doit produire aucun écrasement silencieux.
+
+Lancer ensuite `agentcfg config`, puis vérifier que :
 
 1. Le menu présente les sections harnesses, MCP, skills, plugins, diagnostics et synchronisation.
 2. Les choix cochés sont visibles dans les listes multi-sélection, et annuler une édition ne modifie rien.

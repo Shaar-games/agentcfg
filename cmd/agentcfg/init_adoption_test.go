@@ -1,0 +1,179 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"agentcfg/internal/bootstrap"
+	"agentcfg/internal/config"
+	"agentcfg/internal/syncer"
+)
+
+func TestInitNativeAdoptionRequiresExplicitProvenProofs(t *testing.T) {
+	home := t.TempDir()
+	native := filepath.Join(home, ".claude.json")
+	original := []byte(`{"unrelated":{"keep":true},"mcpServers":{"local":{"command":"node","args":["server.js"]}}}`)
+	if err := os.WriteFile(native, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	skillSource := filepath.Join(home, ".claude", "skills", "review")
+	if err := os.MkdirAll(skillSource, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	skillBytes := []byte("---\nname: review\ndescription: Inspect files\n---\n# Content is unchanged\n")
+	if err := os.WriteFile(filepath.Join(skillSource, "SKILL.md"), skillBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := bootstrap.Discover(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := proposalFromNative(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposal.Servers) != 1 || len(proposal.Skills) != 1 {
+		t.Fatalf("native sources not discovered: %+v", proposal)
+	}
+	settings := config.Settings{Harnesses: []string{"claude-code"}, Runtime: config.Runtime{IdleTimeout: "5m", RequestTimeout: "5m"}}
+	if err := writeInitialSources(home, settings, proposal.Servers, proposal.Skills); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(native)
+	if err != nil || !bytes.Equal(before, original) {
+		t.Fatalf("canonical initialization changed native MCP: %v", err)
+	}
+	mcp, skills, err := initAdoptionProofs(inventory, proposal.Servers, proposal.Skills, settings.Harnesses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mcp) != 1 || len(skills) != 1 || mcp[0].Harness != "claude-code" || skills[0].Path != skillSource {
+		t.Fatalf("unexpected adoption proof scope: %+v %+v", mcp, skills)
+	}
+	cfg, err := config.Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(home, "agentcfg.exe")
+	_, err = syncer.BuildPlan(cfg, syncer.Options{Root: home, Home: home, Scope: "user", Binary: binary})
+	if err == nil || !strings.Contains(err.Error(), "not owned") {
+		t.Fatalf("unowned native entry was not protected by default: %v", err)
+	}
+	opts := syncer.Options{
+		Root: home, Home: home, Scope: "user", Binary: binary, AdoptExisting: true,
+		AdoptMCP: mcp, AdoptSkills: skills,
+	}
+	plan, err := syncer.BuildPlan(cfg, opts)
+	if err != nil {
+		t.Fatalf("verified explicit adoption refused: %v", err)
+	}
+	if len(plan.Changes) == 0 {
+		t.Fatal("no native changes planned")
+	}
+	// Even after a reviewable plan was generated, no native file is modified
+	// until the separate confirmation authorizes Apply.
+	before, err = os.ReadFile(native)
+	if err != nil || !bytes.Equal(before, original) {
+		t.Fatal("BuildPlan wrote native configuration")
+	}
+	if err := plan.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(native)
+	if err != nil || !bytes.Contains(after, []byte("agentcfg.exe")) ||
+		!bytes.Contains(after, []byte("unrelated")) || bytes.Contains(after, []byte("server.js")) {
+		t.Fatalf("adopted MCP native config invalid: %v, %s", err, after)
+	}
+	canonical, err := os.ReadFile(filepath.Join(home, ".agentcfg", "skills", "review", "SKILL.md"))
+	if err != nil || !bytes.Equal(canonical, skillBytes) {
+		t.Fatalf("canonical source SKILL.md changed: %v", err)
+	}
+}
+
+func TestInitAdoptionProofsRejectChangedScannerSource(t *testing.T) {
+	home := t.TempDir()
+	native := filepath.Join(home, ".claude.json")
+	if err := os.WriteFile(native, []byte(`{"mcpServers":{"local":{"command":"node"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := bootstrap.Discover(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := proposalFromNative(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte(`{"mcpServers":{"local":{"command":"changed"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := initAdoptionProofs(inventory, proposal.Servers, proposal.Skills, []string{"claude-code"}); err == nil {
+		t.Fatal("stale scanner MCP proof accepted")
+	}
+}
+
+func TestInitCodexTOMLAdoptionRefusesUnownedCollision(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(home, ".codex", "config.toml")
+	if err := os.WriteFile(native, []byte("[mcp_servers.local]\ncommand = 'node'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := bootstrap.Discover(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := proposalFromNative(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeInitialSources(home, config.Settings{Harnesses: []string{"codex"}}, proposal.Servers, nil); err != nil {
+		t.Fatal(err)
+	}
+	mcp, skills, err := initAdoptionProofs(inventory, proposal.Servers, nil, []string{"codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = syncer.BuildPlan(cfg, syncer.Options{Root: home, Home: home, Scope: "user", Binary: filepath.Join(home, "agentcfg.exe"),
+		AdoptExisting: true, AdoptMCP: mcp, AdoptSkills: skills})
+	if err == nil || !strings.Contains(err.Error(), "TOML") {
+		t.Fatalf("unsafe TOML adoption was not rejected: %v", err)
+	}
+}
+
+func TestInitApplyYesWithCodexTOMLDoesNotLeavePartialCanonicalTree(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"),
+		[]byte("[mcp_servers.local]\ncommand = 'node'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := bootstrap.Discover(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := proposalFromNative(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err = runInitWizard(context.Background(), home, proposal, initOptions{Apply: true, Yes: true}, nil, &output)
+	if err == nil || !strings.Contains(err.Error(), "TOML") {
+		t.Fatalf("unsafe TOML adoption not rejected before canonical creation: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".agentcfg")); !os.IsNotExist(err) {
+		t.Fatalf("refused native adoption left a partially initialized canonical tree: %v", err)
+	}
+}

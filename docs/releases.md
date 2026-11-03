@@ -72,3 +72,7 @@ replace both. Signed provenance/attestations are potential future enhancements.
 The release workflow also accepts a manual trigger with an existing tag.
 Publishing requires GitHub Actions `contents: write` permission only for
 the publish job. Never publish artifacts built from uncommitted local changes.
+
+Once installed and available on `PATH`, the executable can generate
+[shell completion](completion.md) for Bash, Zsh, Fish, Windows PowerShell
+and PowerShell 7. The installation scripts do not edit shell profiles.

@@ -92,6 +92,28 @@ func parseHarnesses(raw json.RawMessage) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return validateHarnessNames(values)
+}
+
+// parseServerHarnesses accepts the explicit empty selection only for MCP
+// filters. User-level harness selection continues to use parseHarnesses.
+func parseServerHarnesses(raw json.RawMessage) ([]string, error) {
+	values, err := stringList(raw, "harnesses")
+	if err != nil || values == nil {
+		return values, err
+	}
+	for _, value := range values {
+		if value == "none" {
+			if len(values) != 1 {
+				return nil, fmt.Errorf("harnesses: none must be the only entry")
+			}
+			return values, nil
+		}
+	}
+	return validateHarnessNames(values)
+}
+
+func validateHarnessNames(values []string) ([]string, error) {
 	allowed := map[string]bool{"claude-code": true, "codex": true, "cursor": true, "opencode": true, "gemini": true, "antigravity": true, "vscode": true}
 	seen := map[string]bool{}
 	result := make([]string, 0, len(values))
@@ -170,7 +192,11 @@ func parseOverrides(raw json.RawMessage, skills bool) (map[string]Override, erro
 			}
 		}
 		if value, exists := entry["harnesses"]; exists {
-			override.Harnesses, err = parseHarnesses(value)
+			if skills {
+				override.Harnesses, err = parseHarnesses(value)
+			} else {
+				override.Harnesses, err = parseServerHarnesses(value)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}

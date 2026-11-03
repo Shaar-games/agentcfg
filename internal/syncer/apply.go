@@ -14,6 +14,10 @@ import (
 )
 
 func atomicWrite(path string, data []byte, mode os.FileMode) error {
+	return atomicWriteChecked(path, data, mode, nil)
+}
+
+func atomicWriteChecked(path string, data []byte, mode os.FileMode, check func() error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -38,6 +42,11 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
+	if check != nil {
+		if err := check(); err != nil {
+			return err
+		}
+	}
 	return os.Rename(temp, path)
 }
 
@@ -52,11 +61,49 @@ func fileUnchanged(path string, before []byte, existed bool) error {
 	return nil
 }
 
-func (p *Plan) preflight() error {
+func (p *Plan) checkCanonicalSource() error {
 	if p.sourceConfigDigest != "" {
 		latest, err := config.Load(p.root)
 		if err != nil || digest(latest) != p.sourceConfigDigest {
 			return fmt.Errorf("canonical MCP or harness configuration changed since planning; refresh preview")
+		}
+	}
+	return nil
+}
+
+func (p *Plan) checkAdoptionSources() error {
+	if p.adoption == nil {
+		return nil
+	}
+	if err := p.recheckAdoptionScope(); err != nil {
+		return err
+	}
+	if err := p.checkCanonicalSource(); err != nil {
+		return err
+	}
+	for _, change := range p.Changes {
+		if !change.adopted || change.skill == nil {
+			continue
+		}
+		if err := ensureNoSymlinkParents(p.root, change.skill.source); err != nil {
+			return err
+		}
+		current, err := SkillTreeSHA256(change.skill.source)
+		if err != nil || current != change.skill.adoptionHash {
+			return fmt.Errorf("canonical skill changed since adoption preview: %s", change.skill.source)
+		}
+	}
+	return nil
+}
+
+func (p *Plan) preflight() error {
+	if p.adoption == nil {
+		if err := p.checkCanonicalSource(); err != nil {
+			return err
+		}
+	} else {
+		if err := p.checkAdoptionSources(); err != nil {
+			return err
 		}
 	}
 	if err := ensureNoSymlinkParents(p.root, p.statePath); err != nil {
@@ -94,9 +141,16 @@ func (p *Plan) checkChange(change Change) error {
 		return err
 	}
 	if change.skill == nil {
+		if change.adopted {
+			return p.adoptedFileUnchanged(change.Path, change.before, change.exists)
+		}
 		return fileUnchanged(change.Path, change.before, change.exists)
 	}
-	actual, err := treeFingerprint(change.Path)
+	fingerprint := treeFingerprint
+	if change.adopted {
+		fingerprint = adoptionTreeFingerprint
+	}
+	actual, err := fingerprint(change.Path)
 	if os.IsNotExist(err) && !change.exists {
 		err = nil
 		actual = ""
@@ -107,13 +161,28 @@ func (p *Plan) checkChange(change Change) error {
 	if actual != change.skill.beforeHash {
 		return fmt.Errorf("skill changed since planning: %s", change.Path)
 	}
+	if change.adopted {
+		content, err := SkillTreeSHA256(change.Path)
+		if err != nil || content != change.skill.adoptionHash {
+			return fmt.Errorf("native skill changed since adoption preview: %s", change.Path)
+		}
+	}
 	if !change.skill.remove {
-		sourceHash, err := treeFingerprint(change.skill.source)
+		sourceHash, err := fingerprint(change.skill.source)
 		if err != nil {
 			return err
 		}
 		if sourceHash != change.skill.sourceHash {
 			return fmt.Errorf("source skill changed since planning: %s", change.skill.source)
+		}
+		if change.adopted {
+			if err := ensureNoSymlinkParents(p.root, change.skill.source); err != nil {
+				return err
+			}
+			content, err := SkillTreeSHA256(change.skill.source)
+			if err != nil || content != change.skill.adoptionHash {
+				return fmt.Errorf("source skill changed since adoption preview: %s", change.skill.source)
+			}
 		}
 	}
 	return nil
@@ -122,6 +191,9 @@ func (p *Plan) checkChange(change Change) error {
 // Apply checks every preimage before writing, locks the target scope, backs up
 // modified content, uses atomic replacements and rolls back on an I/O failure.
 func (p *Plan) Apply() error {
+	if err := p.recheckAdoptionScope(); err != nil {
+		return err
+	}
 	lockDir := filepath.Join(p.base, ".agentcfg")
 	if err := ensureNoSymlinkParents(p.base, lockDir); err != nil {
 		return err
@@ -164,10 +236,15 @@ func (p *Plan) Apply() error {
 		}
 		backup := filepath.Join(backupRoot, rawDigest([]byte(change.Path))[:16]+"-"+filepath.Base(change.Path))
 		undo, err := p.applyChange(change, backup)
+		if undo != nil {
+			undos = append(undos, undo)
+		}
 		if err != nil {
 			return rollback(err)
 		}
-		undos = append(undos, undo)
+	}
+	if err := p.checkAdoptionSources(); err != nil {
+		return rollback(err)
 	}
 	encoded, err := json.MarshalIndent(p.state, "", "  ")
 	if err != nil {
@@ -217,11 +294,24 @@ func (p *Plan) applyChange(change Change, backup string) (func() error, error) {
 			return nil
 		}, nil
 	}
-	if err := atomicWrite(change.Path, change.after, mode); err != nil {
+	var check func() error
+	if change.adopted {
+		check = func() error {
+			if err := p.checkAdoptionSources(); err != nil {
+				return err
+			}
+			return p.checkChange(change)
+		}
+	}
+	if err := atomicWriteChecked(change.Path, change.after, mode, check); err != nil {
 		return nil, err
 	}
 	return func() error {
-		if err := fileUnchanged(change.Path, change.after, true); err != nil {
+		unchanged := fileUnchanged
+		if change.adopted {
+			unchanged = p.adoptedFileUnchanged
+		}
+		if err := unchanged(change.Path, change.after, true); err != nil {
 			return err
 		}
 		if change.exists {
@@ -236,6 +326,7 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 		return nil, err
 	}
 	staged, mode := "", change.skill.mode
+	installedHash := ""
 	if !change.skill.remove {
 		var err error
 		staged, err = os.MkdirTemp(filepath.Dir(change.Path), ".agentcfg-stage-*")
@@ -257,13 +348,51 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 			}
 		}
 		if mode == "copy" {
-			if err := copySkill(change.skill.source, staged); err != nil {
+			var err error
+			if change.adopted {
+				var copied string
+				copied, _, err = skillTreeHashes(change.skill.source, staged)
+				if err == nil && copied != change.skill.adoptionHash {
+					err = errors.New("copied skill differs from the approved import")
+				}
+			} else {
+				err = copySkill(change.skill.source, staged)
+			}
+			if err != nil {
 				return nil, err
 			}
 		}
-		currentSource, err := treeFingerprint(change.skill.source)
+		sourceFingerprint := treeFingerprint
+		if change.adopted {
+			sourceFingerprint = adoptionTreeFingerprint
+		}
+		currentSource, err := sourceFingerprint(change.skill.source)
 		if err != nil || currentSource != change.skill.sourceHash {
 			return nil, fmt.Errorf("source skill changed during staging: %s", change.skill.source)
+		}
+		if change.adopted && mode == "copy" {
+			content, err := SkillTreeSHA256(staged)
+			if err != nil || content != change.skill.adoptionHash {
+				return nil, fmt.Errorf("staged skill differs from the approved import: %s", change.Path)
+			}
+		}
+		stagedFingerprint := treeFingerprint
+		if change.adopted && mode == "copy" {
+			stagedFingerprint = adoptionTreeFingerprint
+		}
+		installedHash, err = stagedFingerprint(staged)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if change.adopted {
+		if err := p.checkAdoptionSources(); err != nil {
+			return nil, err
+		}
+		// Copying can take time. Recheck the native tree immediately before
+		// moving it into the backup, including its original content proof.
+		if err := p.checkChange(change); err != nil {
+			return nil, err
 		}
 	}
 	if change.exists {
@@ -274,49 +403,54 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 			return nil, err
 		}
 	}
-	if staged != "" {
-		if err := os.Rename(staged, change.Path); err != nil {
-			if change.exists {
-				_ = os.Rename(backup, change.Path)
-			}
-			return nil, err
-		}
+	installed := false
+	installedFingerprint := treeFingerprint
+	if change.adopted && mode == "copy" {
+		installedFingerprint = adoptionTreeFingerprint
 	}
-	installedHash := ""
-	if !change.skill.remove {
-		var err error
-		installedHash, err = treeFingerprint(change.Path)
-		if err != nil {
-			_ = os.RemoveAll(change.Path)
-			if change.exists {
-				_ = os.Rename(backup, change.Path)
+	undo := func() error {
+		if installed {
+			current, err := installedFingerprint(change.Path)
+			if err != nil {
+				return err
 			}
-			return nil, err
-		}
-		record := p.state.Skills[change.Path]
-		record.Fingerprint, record.Mode = installedHash, mode
-		p.state.Skills[change.Path] = record
-	}
-	return func() error {
-		current, err := treeFingerprint(change.Path)
-		if change.skill.remove && os.IsNotExist(err) {
-			err = nil
-			current = ""
-		}
-		if err != nil {
-			return err
-		}
-		if current != installedHash {
-			return fmt.Errorf("cannot roll back externally edited skill: %s", change.Path)
-		}
-		if !change.skill.remove {
+			if current != installedHash {
+				return fmt.Errorf("cannot roll back externally edited skill: %s", change.Path)
+			}
+			if change.adopted && mode == "copy" {
+				content, err := SkillTreeSHA256(change.Path)
+				if err != nil || content != change.skill.adoptionHash {
+					return fmt.Errorf("cannot roll back externally edited adopted skill: %s", change.Path)
+				}
+			}
 			if err := os.RemoveAll(change.Path); err != nil {
 				return err
 			}
+		} else if _, err := os.Lstat(change.Path); !os.IsNotExist(err) {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("cannot restore skill backup over a new destination: %s", change.Path)
 		}
 		if change.exists {
 			return os.Rename(backup, change.Path)
 		}
 		return nil
-	}, nil
+	}
+	if staged != "" {
+		if err := os.Rename(staged, change.Path); err != nil {
+			return undo, err
+		}
+		installed = true
+	}
+	if !change.skill.remove {
+		actual, err := installedFingerprint(change.Path)
+		if err != nil || actual != installedHash {
+			return undo, fmt.Errorf("installed skill changed during replacement: %s", change.Path)
+		}
+		record := p.state.Skills[change.Path]
+		record.Fingerprint, record.Mode = installedHash, mode
+		p.state.Skills[change.Path] = record
+	}
+	return undo, nil
 }

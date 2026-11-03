@@ -72,7 +72,7 @@ func TestGlobalCLIUsesHomeWithoutProjectagentcfg(t *testing.T) {
 		}
 		return output.String()
 	}
-	runCLI("init", "--harnesses", "codex,cursor,antigravity")
+	runCLI("init", "--harnesses", "codex,cursor,antigravity", "--yes")
 	canonical := filepath.Join(home, ".agentcfg")
 	writeScopeFixture(t, filepath.Join(canonical, "mcp.json"), `{"mcpServers":{"local":{"type":"stdio","command":"go"}}}`)
 	writeScopeFixture(t, filepath.Join(canonical, "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Inspect code\nmetadata:\n  harness: codex,cursor,antigravity\n---\n# Preserve these bytes\n")

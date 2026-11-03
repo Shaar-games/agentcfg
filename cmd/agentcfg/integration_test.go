@@ -406,7 +406,7 @@ func TestInitDoesNotOverwriteCanonicalFiles(t *testing.T) {
 	t.Setenv("USERPROFILE", root)
 	t.Setenv("HOME", root)
 	var output, diagnostics bytes.Buffer
-	if err := run(context.Background(), []string{"init"}, nil, &output, &diagnostics); err != nil {
+	if err := run(context.Background(), []string{"init", "--yes"}, nil, &output, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, ".agentcfg", "mcp.json")
@@ -414,8 +414,8 @@ func TestInitDoesNotOverwriteCanonicalFiles(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(context.Background(), []string{"init"}, nil, &output, &diagnostics); err != nil {
-		t.Fatal(err)
+	if err := run(context.Background(), []string{"init", "--yes"}, nil, &output, &diagnostics); err == nil {
+		t.Fatal("reinitialization should refuse an existing canonical configuration")
 	}
 	actual, _ := os.ReadFile(path)
 	if !bytes.Equal(actual, original) {

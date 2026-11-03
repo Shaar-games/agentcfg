@@ -61,7 +61,7 @@ func TestInitSupportsExplicitlyDisabledHarnesses(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	var output, diagnostics bytes.Buffer
-	if err := run(context.Background(), []string{"init", "--harnesses", ""}, nil, &output, &diagnostics); err != nil {
+	if err := run(context.Background(), []string{"init", "--harnesses", "", "--yes"}, nil, &output, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(home)
@@ -77,7 +77,7 @@ func TestInitRefusesLinkedCanonicalDirectory(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	var output, diagnostics bytes.Buffer
-	if err := run(context.Background(), []string{"init"}, nil, &output, &diagnostics); err == nil {
+	if err := run(context.Background(), []string{"init", "--yes"}, nil, &output, &diagnostics); err == nil {
 		t.Fatal("init followed a linked canonical source outside the user home")
 	}
 	entries, err := os.ReadDir(outside)
@@ -98,7 +98,7 @@ func TestInitRefusesLinkedSkillsOrPluginsBeforeCreatingSources(t *testing.T) {
 			t.Setenv("HOME", home)
 			t.Setenv("USERPROFILE", home)
 			var output, diagnostics bytes.Buffer
-			if err := run(context.Background(), []string{"init"}, nil, &output, &diagnostics); err == nil {
+			if err := run(context.Background(), []string{"init", "--yes"}, nil, &output, &diagnostics); err == nil {
 				t.Fatalf("init accepted linked %s directory", name)
 			}
 			for _, source := range []string{"mcp.json", "agentcfg.json"} {

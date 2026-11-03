@@ -17,9 +17,35 @@ Only immediate plugin directories and immediate skill directories are discovered
 
 `agentcfg` without arguments displays help. `agentcfg config` opens the Huh
 configuration interface, with consistent selection lists for harnesses, MCP
-servers, skills, plugins and synchronization. Harness and skill availability
-use multi-select checkboxes (↑/↓ to navigate, Space to toggle, Enter to save,
-Ctrl+C to cancel). `agentcfg harnesses` opens only the harness multi-select.
+servers, skills, plugins and synchronization. Harness, skill and MCP
+availability use multi-select checkboxes (↑/↓ to navigate, Space to toggle,
+Enter to save, Ctrl+C to cancel). The direct section commands are
+`agentcfg harness` / `harnesses`, `agentcfg skill` / `skills` and
+`agentcfg mcp` / `mcps`; both spellings in each pair have the same meaning.
+Each accepts `--plain` to display effective configuration without writing.
+See [CLI usage](cli.md) for commands and [completion](completion.md) for Bash,
+Zsh, Fish and PowerShell setup.
+
+### Initial discovery
+
+`agentcfg init` discovers supported, user-level native MCP entries and skill
+directories from installed harnesses. On an interactive terminal, it displays
+Huh lists for selection, prepares an explicit preview and requests confirmation
+**before creating canonical sources**. It does not execute discovered MCPs or
+skills. `agentcfg init --plain` produces only a read-only discovery preview.
+
+`agentcfg init --apply` additionally prepares a native synchronization
+preview and asks for a separate Huh confirmation before writing those native
+files. `--yes` explicitly authorizes unattended creation and, in combination
+with `--apply`, synchronization. Only native entries selected in discovery
+with exact revalidated proofs can be adopted: supported JSON/JSONC MCP entries
+and identical skills. Unrelated native settings and files are preserved.
+Native TOML MCP adoption, ambiguous ownership, unexpected collisions or
+changed entries are refused rather than silently overwritten.
+
+The configuration loader itself remains read-only. Initialization is an
+explicit CLI operation that reads supported installed harness locations and
+asks before writing; it does not change the semantics of `config.Load`.
 
 ## Canonical MCP servers
 

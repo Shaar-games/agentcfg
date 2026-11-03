@@ -86,7 +86,7 @@ func TestHuhMCPSharingUsesPrecheckedNativeList(t *testing.T) {
 	var output bytes.Buffer
 	// Open the server -> Change sharing -> uncheck Shared -> check Isolated ->
 	// confirm -> leave server list without selecting another action.
-	sequence := "1\n0\n1\n0\n1\n2\n0\n0\n"
+	sequence := "1\n0\n2\n0\n1\n2\n0\n0\n"
 	session := interfaceSession{ctx: context.Background(), root: root, in: terminalByteReader{strings.NewReader(sequence)}, out: &output}
 	if err := session.configureMCP(); err != nil {
 		t.Fatal(err)
@@ -100,6 +100,31 @@ func TestHuhMCPSharingUsesPrecheckedNativeList(t *testing.T) {
 	}
 	if cfg.Servers["local"].Sharing != "isolated" {
 		t.Fatalf("new MCP sharing mode was not saved: %+v", cfg.Servers["local"])
+	}
+}
+
+func TestHuhMCPAvailabilityListCanDisableOneConfiguredHarness(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	root := settingsFixture(t)
+	putSettings(t, root, "{\"harnesses\":[\"codex\",\"cursor\"]}")
+	var output bytes.Buffer
+	// Select "alpha" in the server list; select "Harness availability"; uncheck
+	// Codex in the native Huh multiselect and accept; exit the server list.
+	input := terminalByteReader{strings.NewReader("1\n0\n1\n0\n1\n0\n0\n")}
+	session := interfaceSession{ctx: context.Background(), root: root, in: input, out: &output}
+	if err := session.configureMCP(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "MCP availability: alpha") || !strings.Contains(output.String(), "Confirm selection") {
+		t.Fatalf("MCP routing did not use the native Huh checkbox field: %s", output.String())
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := cfg.Servers["alpha"]
+	if config.Allows(server.Harnesses, "codex") || !config.Allows(server.Harnesses, "cursor") {
+		t.Fatalf("Huh MCP availability did not save configured harness routing: %+v; output: %s", server.Harnesses, output.String())
 	}
 }
 
@@ -245,13 +270,13 @@ func TestHuhSkillMultiSelectAccessible(t *testing.T) {
 	var output bytes.Buffer
 	session := interfaceSession{
 		ctx: context.Background(), root: root,
-		in: terminalByteReader{strings.NewReader("2\n0\n\n")}, out: &output,
+		in: terminalByteReader{strings.NewReader("1\n2\n3\n0\n")}, out: &output,
 	}
 	if err := session.configureSkill("review"); err != nil {
 		t.Fatal(err)
 	}
 	updated, err := os.ReadFile(path)
-	if err != nil || !strings.Contains(string(updated), "harness: antigravity") {
+	if err != nil || !strings.Contains(string(updated), "harness: cursor") {
 		t.Fatalf("Huh skill multi-select failed: %q (%v); output: %s", updated, err, output.String())
 	}
 	if _, err := os.Stat(filepath.Join(root, ".agentcfg", "backups", "skills")); err != nil {

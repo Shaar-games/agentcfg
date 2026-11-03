@@ -12,6 +12,28 @@ harnesses sélectionnés. Ouvrir `agentcfg config` pour choisir les destinations
 et les skills dans les listes Huh, puis examiner `agentcfg sync` avant toute
 application avec `agentcfg sync --apply`.
 
+Lors de la première configuration, `agentcfg init` découvre les MCP et skills
+présents dans les dossiers natifs des harnesses installés. Il affiche les
+éléments à sélectionner et une prévisualisation, puis exige une confirmation Huh
+avant la création de `~/.agentcfg/`. `agentcfg init --plain` montre ce plan
+en lecture seule. Avec `agentcfg init --apply`, un second plan expose les
+changements natifs ; l'interface demande une **confirmation distincte** avant
+leur application. Pour les scripts, `--yes` exprime une approbation explicite
+de la création canonique, et aussi du sync si `--apply` est présent.
+
+Les fichiers canoniques existants, les entrées natives non gérées et les skills
+déjà présents ne sont **jamais écrasés silencieusement**. Un conflit de nom ou
+une modification concurrente bloque l'opération concernée. Pour une
+prévisualisation ordinaire ultérieure, `agentcfg sync --plain` produit une
+sortie sans formulaire ; l'écriture nécessite toujours `--apply`.
+
+Lors d'un `init --apply` explicitement confirmé, seules les entrées natives
+sélectionnées et prouvées par le scanner peuvent être adoptées : MCP JSON/JSONC
+avec empreinte du fichier complet, et skills dont le contenu est identique à
+la source canonique. Une **deuxième confirmation Huh** autorise leur remplacement
+ciblé, avec sauvegarde et revalidation avant écriture. L'adoption de serveurs
+MCP en TOML Codex est refusée ; les autres entrées non prouvées restent intactes.
+
 Un serveur MCP est généré individuellement dans chaque harness sélectionné.
 Les filtres de l’entrée canonique et les overrides des plugins sont évalués
 avant la génération. Un filtre vide signifie tous les harnesses globalement

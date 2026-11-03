@@ -54,6 +54,23 @@ func loadSkillFixture(t *testing.T, root, name string) config.Skill {
 	return config.Skill{}
 }
 
+func TestSkillAvailabilityOnlyEditsConfiguredHarnesses(t *testing.T) {
+	body := "---\nname: review\ndescription: Review code\nmetadata:\n  harness: codex, antigravity\n---\nBody unchanged.\n"
+	root, path, snapshot := skillSourceFixture(t, body)
+	putSettings(t, root, "{\"harnesses\":[\"codex\",\"cursor\"]}")
+	if err := setSkillHarnessForConfigured(root, snapshot, []string{"cursor"}, []string{"codex", "cursor"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "harness: cursor, antigravity") ||
+		!strings.Contains(string(data), "Body unchanged.") {
+		t.Fatalf("unconfigured harness or SKILL.md body lost: %s", data)
+	}
+}
+
 func TestSkillCommaFilterMinimalLineEditAndBackup(t *testing.T) {
 	before := "---\nname: review # do not alter\ndescription: Checks code\nmetadata: # keep note\n  author: alice # keep this\n  harness: 'codex, antigravity' # preserve comment\n  version: '1.0'\n---\n# Review\n\nBody: keep **identical**\n"
 	root, path, skill := skillSourceFixture(t, before)

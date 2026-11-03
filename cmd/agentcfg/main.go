@@ -9,14 +9,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
 
 	"agentcfg/internal/broker"
+	"agentcfg/internal/completion"
 	"agentcfg/internal/config"
-	"agentcfg/internal/pathutil"
 	"agentcfg/internal/syncer"
 	"agentcfg/internal/tui"
 	"agentcfg/internal/updater"
@@ -42,9 +41,12 @@ Usage: agentcfg [command] [options]
 
   (no command) / help   Display this help (no configuration changes)
   config                Open complete user-level Huh configuration
-  harnesses             Open the Huh harness checkbox list directly
+  harness, harnesses    Configure enabled AI harnesses (Huh checkboxes)
+  skill, skills         Configure skill availability by harness
+  mcp, mcps             Configure MCP availability and sharing by harness
+  completion <shell>    Print Bash, Zsh, Fish or PowerShell completion
 
-  init       Create empty canonical .agentcfg files (never overwrite)
+  init       Discover native harness MCPs/skills; confirm canonical setup
   list       Show discovered MCP servers and skills
   validate   Validate canonical configuration and plugin discovery
   sync       Preview native harness changes; --apply writes them
@@ -67,6 +69,13 @@ Bidirectional sync is not implemented.`)
 	if args[0] == "version" {
 		_, err := fmt.Fprintln(output, version)
 		return err
+	}
+	if args[0] == "completion" {
+		if len(args) != 2 || args[1] == "--help" || args[1] == "-h" {
+			_, err := fmt.Fprintln(output, "Usage: agentcfg completion <bash|zsh|fish|powershell>\nPrint a sourceable completion script to stdout.")
+			return err
+		}
+		return completion.Generate(args[1], output)
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
@@ -98,11 +107,8 @@ Bidirectional sync is not implemented.`)
 		return err
 	case "auth":
 		return runAuth(ctx, home, args[1:], input, output, diagnostics)
-	case "harnesses":
-		if err := parse(flags, args[1:]); err != nil {
-			return helpResult(err)
-		}
-		return tui.Run(ctx, home, input, output)
+	case "harness", "harnesses", "skill", "skills", "mcp", "mcps":
+		return runCategory(ctx, args[0], flags, home, args[1:], input, output)
 	case "config":
 		if err := parse(flags, args[1:]); err != nil {
 			return helpResult(err)
@@ -138,6 +144,62 @@ Bidirectional sync is not implemented.`)
 	default:
 		return fmt.Errorf("unknown command %q; run agentcfg help", args[0])
 	}
+}
+
+// runCategory keeps category commands consistent: each opens its Huh screen
+// directly; --plain prints the current effective user-level state and never
+// writes files or starts an MCP process.
+func runCategory(ctx context.Context, category string, flags *flag.FlagSet, home string, args []string, input io.Reader, output io.Writer) error {
+	plain := flags.Bool("plain", false, "show current configuration without opening a Huh form")
+	if err := parse(flags, args); err != nil {
+		return helpResult(err)
+	}
+	if !*plain {
+		switch category {
+		case "harness", "harnesses":
+			return tui.Run(ctx, home, input, output)
+		case "skill", "skills":
+			return tui.RunSkills(ctx, home, input, output)
+		default:
+			return tui.RunMCP(ctx, home, input, output)
+		}
+	}
+	cfg, err := config.Load(home)
+	if err != nil {
+		return err
+	}
+	switch category {
+	case "harness", "harnesses":
+		_, err = fmt.Fprintln(output, "Enabled harnesses:", strings.Join(cfg.Settings.Harnesses, ", "))
+	case "skill", "skills":
+		for _, skill := range cfg.Skills {
+			fmt.Fprintf(output, "%s  %s\n", skill.Name, availableHarnesses(cfg.Settings.Harnesses, skill.Harnesses))
+		}
+	default:
+		names := make([]string, 0, len(cfg.Servers))
+		for name := range cfg.Servers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			server := cfg.Servers[name]
+			fmt.Fprintf(output, "%s  %s  %s\n", name, server.Type, availableHarnesses(cfg.Settings.Harnesses, server.Harnesses))
+		}
+	}
+	return err
+}
+
+func availableHarnesses(configured, filter []string) string {
+	var enabled []string
+	for _, name := range configured {
+		if config.Allows(filter, name) {
+			enabled = append(enabled, name)
+		}
+	}
+	if len(enabled) == 0 {
+		return "disabled for all configured harnesses"
+	}
+	return strings.Join(enabled, ", ")
 }
 
 func parse(flags *flag.FlagSet, args []string) error {
@@ -257,102 +319,6 @@ func printInventory(cfg *config.Config, output io.Writer) error {
 	}
 	_, err := fmt.Fprintln(output, "Harnesses:", strings.Join(cfg.Settings.Harnesses, ", "))
 	return err
-}
-
-func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []string, input io.Reader, output io.Writer) error {
-	harnesses := flags.String("harnesses", "claude-code,codex,cursor,opencode,gemini", "comma-separated native harness identifiers")
-	plain := flags.Bool("plain", false, "skip Huh interactive harness selection")
-	if err := parse(flags, args); err != nil {
-		return helpResult(err)
-	}
-	abs, err := filepath.Abs(*root)
-	if err != nil {
-		return err
-	}
-	var names []string
-	if strings.TrimSpace(*harnesses) != "" {
-		names = strings.Split(*harnesses, ",")
-		for i := range names {
-			names[i] = strings.TrimSpace(names[i])
-		}
-	}
-	explicit := false
-	flags.Visit(func(f *flag.Flag) {
-		if f.Name == "harnesses" {
-			explicit = true
-		}
-	})
-	if !explicit && terminalPresentation(input, output, *plain) {
-		names, err = terminalHarnessSelection(ctx, input, output, names)
-		if err != nil {
-			return err
-		}
-	}
-	names, err = config.ValidateUserHarnesses(names)
-	if err != nil {
-		return fmt.Errorf("init harness selection: %w", err)
-	}
-	agentDir := filepath.Join(abs, ".agentcfg")
-	if err := ensureRealCanonicalDirectory(agentDir); err != nil {
-		return fmt.Errorf("init source directory: %w", err)
-	}
-	// Preflight every canonical child directory before writing either source
-	// document, so an existing linked skills/plugins directory cannot leave a
-	// partly initialized configuration or redirect future writes outside home.
-	for _, name := range []string{"skills", "plugins"} {
-		if err := ensureRealCanonicalDirectory(filepath.Join(agentDir, name)); err != nil {
-			return fmt.Errorf("init %s directory: %w", name, err)
-		}
-	}
-	settings := config.Settings{Harnesses: names, Runtime: config.Runtime{IdleTimeout: "5m", RequestTimeout: "5m"}}
-	files := []struct {
-		name  string
-		value any
-	}{
-		{"mcp.json", map[string]any{"mcpServers": map[string]any{}}},
-		{"agentcfg.json", settings},
-	}
-	for _, source := range files {
-		path := filepath.Join(agentDir, source.name)
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if os.IsExist(err) {
-			fmt.Fprintln(output, "Preserved", path)
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		encoder := json.NewEncoder(file)
-		encoder.SetIndent("", "  ")
-		encodeErr := encoder.Encode(source.value)
-		closeErr := file.Close()
-		if encodeErr != nil {
-			return encodeErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		fmt.Fprintln(output, "Created", path)
-	}
-	return nil
-}
-
-// A symlink/junction at ~/.agentcfg must not redirect initialization into
-// some other directory (including an open project). Only real directories are
-// acceptable. The caller validates its harness selection before creating any
-// source files.
-func ensureRealCanonicalDirectory(path string) error {
-	if err := os.Mkdir(path, 0o700); err != nil && !os.IsExist(err) {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || pathutil.IsRedirected(info) {
-		return fmt.Errorf("%s is not a real directory (symlinks/junctions are refused)", path)
-	}
-	return nil
 }
 
 func synchronize(ctx context.Context, flags *flag.FlagSet, root *string, args []string, input io.Reader, output, diagnostics io.Writer) error {
