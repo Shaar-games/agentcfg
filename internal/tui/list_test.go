@@ -72,7 +72,7 @@ func TestRunListMCPAndSkillsDetailsWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestRunListHarnessesReadOnlyAndSpacedAfterReturn(t *testing.T) {
+func TestRunListHarnessesReadOnlyWithoutExtraSpacingAfterReturn(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	root := t.TempDir()
 	var output bytes.Buffer
@@ -85,8 +85,8 @@ func TestRunListHarnessesReadOnlyAndSpacedAfterReturn(t *testing.T) {
 			t.Fatalf("harness list missing %q: %s", expected, output.String())
 		}
 	}
-	if !strings.Contains(output.String(), "\n\n\n") {
-		t.Fatalf("menu transitions should include blank lines: %q", output.String())
+	if strings.Contains(output.String(), "\n\n\n") {
+		t.Fatalf("menu transitions added blank lines: %q", output.String())
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil || len(entries) != 0 {

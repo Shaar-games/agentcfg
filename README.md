@@ -1,13 +1,16 @@
 <div align="center">
 
-# agentcfg
+<img src="https://shieldcn.dev/header/glow.svg?title=agentcfg&amp;subtitle=One+MCP+process.+Every+AI+agent.&amp;logo=go&amp;theme=blue&amp;size=banner" alt="agentcfg — shared MCP processes and skills for AI coding agents" width="750" />
 
 **One MCP process. Multiple AI coding agents.**
 
 Share local MCP servers, route skills and manage user-level harness configuration from one Go CLI.
 
-[![CI](https://github.com/Shaar-games/agentcfg/actions/workflows/check.yml/badge.svg)](https://github.com/Shaar-games/agentcfg/actions/workflows/check.yml)
-[![Release](https://img.shields.io/github/v/release/Shaar-games/agentcfg)](https://github.com/Shaar-games/agentcfg/releases/latest)
+<a href="https://github.com/Shaar-games/agentcfg/actions/workflows/check.yml"><img alt="GitHub CI" src="https://shieldcn.dev/github/ci/Shaar-games/agentcfg.svg?variant=outline&amp;size=sm" /></a>
+<a href="https://github.com/Shaar-games/agentcfg"><img alt="GitHub stars" src="https://shieldcn.dev/github/stars/Shaar-games/agentcfg.svg?variant=outline&amp;size=sm" /></a>
+<a href="https://github.com/Shaar-games/agentcfg/issues"><img alt="GitHub issues" src="https://shieldcn.dev/github/issues/Shaar-games/agentcfg.svg?variant=outline&amp;size=sm" /></a>
+<img alt="Go 1.26" src="https://shieldcn.dev/badge/Go-1.26-blue.svg?variant=outline&amp;size=sm&amp;logo=go" />
+<a href="https://github.com/Shaar-games/agentcfg/releases/latest"><img alt="Latest release" src="https://shieldcn.dev/github/release/Shaar-games/agentcfg.svg?variant=outline&amp;size=sm" /></a>
 
 <img src="docs/demo/agentcfg-config.gif" width="850" alt="Animated agentcfg config menu selecting community-inspired example MCP servers" />
 

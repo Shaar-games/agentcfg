@@ -292,7 +292,7 @@ func TestHuhWindowsPathsAndControlCharactersDisplaySafely(t *testing.T) {
 	}
 }
 
-func TestHuhSelectActionEnterOpensSingleChoiceAndAddsSpacing(t *testing.T) {
+func TestHuhSelectActionEnterOpensSingleChoiceWithoutExtraSpacing(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	var output bytes.Buffer
 	s := interfaceSession{
@@ -306,8 +306,8 @@ func TestHuhSelectActionEnterOpensSingleChoiceAndAddsSpacing(t *testing.T) {
 	if strings.Contains(output.String(), "Confirm selection") || strings.Contains(output.String(), "Select up to") {
 		t.Fatalf("single action rendered a checkbox workflow: %q", output.String())
 	}
-	if !strings.HasSuffix(output.String(), "\n\n") {
-		t.Fatalf("missing blank line after leaving a menu: %q", output.String())
+	if strings.HasSuffix(output.String(), "\n\n") {
+		t.Fatalf("menu added unwanted blank lines: %q", output.String())
 	}
 	if _, err := s.selectAction("Empty", "", nil...); err == nil {
 		t.Fatal("empty action list must fail explicitly instead of panicking")
