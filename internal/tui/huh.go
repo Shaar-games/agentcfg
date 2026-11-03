@@ -100,9 +100,16 @@ func isCancelled(err error) bool {
 	return errors.Is(err, huh.ErrUserAborted) || errors.Is(err, context.Canceled)
 }
 
-// Run is the only interactive configuration entrypoint. All configuration
-// actions use Huh; static CLI/script output remains separate.
+// Run opens the simple native Huh checkbox list directly. Do not place a
+// single-choice menu in front of the multiselect: users should see the
+// available harnesses and their current checked states immediately.
 func Run(ctx context.Context, root string, input io.Reader, output io.Writer) error {
+	return (interfaceSession{ctx: ctx, root: root, in: input, out: output}).configureHarnesses()
+}
+
+// RunMenu exposes the additional management/diagnostic operations without
+// complicating the default checklist. Both use Huh; CLI pipelines stay plain.
+func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer) error {
 	s := interfaceSession{ctx: ctx, root: root, in: input, out: output}
 	for {
 		if err := ctx.Err(); err != nil {

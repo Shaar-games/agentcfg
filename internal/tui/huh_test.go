@@ -25,11 +25,11 @@ func (r terminalByteReader) Read(p []byte) (int, error) {
 	return r.Reader.Read(p[:1])
 }
 
-func TestHuhAccessibleMainMenuExitIsReadOnly(t *testing.T) {
+func TestHuhAccessibleAdvancedMenuExitIsReadOnly(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	root := t.TempDir()
 	var rendered bytes.Buffer
-	if err := Run(context.Background(), root, strings.NewReader("8\n"), &rendered); err != nil {
+	if err := RunMenu(context.Background(), root, strings.NewReader("8\n"), &rendered); err != nil {
 		t.Fatal(err)
 	}
 	for _, text := range []string{"AgentMux", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Diagnostics", "synchronization", "Refresh", "Exit"} {
@@ -40,6 +40,54 @@ func TestHuhAccessibleMainMenuExitIsReadOnly(t *testing.T) {
 	entries, err := os.ReadDir(root)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("opening Huh configuration wrote to user home: %v (%v)", entries, err)
+	}
+}
+
+func TestHuhDefaultOpensCheckboxListWithoutMenu(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex","cursor"]}`)
+	before, err := os.ReadFile(settingsFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rendered bytes.Buffer
+	if err := Run(context.Background(), root, terminalByteReader{strings.NewReader("0\n")}, &rendered); err != nil {
+		t.Fatal(err)
+	}
+	for _, label := range []string{"Harness availability", "Claude Code", "Codex", "Cursor", "Confirm selection"} {
+		if !strings.Contains(rendered.String(), label) {
+			t.Fatalf("missing checkbox content %q: %s", label, rendered.String())
+		}
+	}
+	for _, unexpected := range []string{"MCP servers", "Exit", "Back to main menu"} {
+		if strings.Contains(rendered.String(), unexpected) {
+			t.Fatalf("unexpected intermediate menu %q: %s", unexpected, rendered.String())
+		}
+	}
+	after, err := os.ReadFile(settingsFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("unchanged checkbox list unexpectedly rewrote configuration: %s", after)
+	}
+}
+
+func TestHuhDefaultCheckboxListSavesSelection(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex"]}`)
+	var output bytes.Buffer
+	if err := Run(context.Background(), root, terminalByteReader{strings.NewReader("2\n6\n0\n")}, &output); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cfg.Settings.Harnesses, []string{"antigravity"}) {
+		t.Fatalf("unexpected checklist result %v: %s", cfg.Settings.Harnesses, output.String())
 	}
 }
 

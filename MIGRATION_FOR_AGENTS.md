@@ -18,7 +18,7 @@ This file is an **operational migration playbook** for AI coding agents helping 
 | Concern | Current implementation |
 | --- | --- |
 | Canonical root | `~/.agentmux/`, always user-level |
-| CLI | `agentmux` (Huh interactive configuration), `init`, `validate`, `list`, `update`, `sync`, `sync --apply`, `status`, `stop` |
+| CLI | `agentmux` (Huh harness checklist), `agentmux menu` (advanced UI), `init`, `validate`, `list`, `update`, `sync`, `sync --apply`, `status`, `stop` |
 | Configured harnesses | `claude-code`, `codex`, `cursor`, `opencode`, `gemini`, `antigravity` |
 | Unsupported in global sync | `claude-desktop`; VS Code's adapter is project-only |
 | MCP execution | Local stdio proxies, one shared upstream or an isolated backend |
@@ -188,7 +188,7 @@ An unmanaged skill collision must likewise be resolved explicitly; do not silent
 
 ## Step 7 — Apply and verify
 
-After the user reviews the changes (the Huh configuration menus also support harness selection, skill availability, sharing preferences and a confirmed sync preview):
+After the user reviews the changes (`agentmux` opens the direct Huh harness checklist; `agentmux menu` provides the other skill, MCP sharing, and confirmed synchronization screens):
 
 ```sh
 agentmux sync --apply

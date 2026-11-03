@@ -82,13 +82,14 @@ Self-update downloads the platform's release archive and `SHA256SUMS`, verifies 
 
 ## Quick start
 
-Run these commands from **any directory**. Launch `agentmux` with no arguments to open the interactive Huh configuration menus:
+Run these commands from **any directory**. Launch `agentmux` with no arguments to open the interactive Huh checkbox list directly:
 
 ```sh
 agentmux init                  # Create ~/.agentmux/ without overwriting existing files
 # Edit ~/.agentmux/mcp.json and ~/.agentmux/agentmux.json
-agentmux                       # Huh configuration menus
-agentmux ui                    # Explicit interactive configuration
+agentmux                       # Open native Huh checkbox list directly
+agentmux ui                    # Same checkbox list, no intermediate menu
+agentmux menu                  # Advanced MCP, skill and sync management
 agentmux validate              # Validate sources, plugins, and skills
 agentmux list                  # Show discovered MCP servers and skills
 agentmux update                # Update this executable from GitHub Releases
@@ -101,7 +102,7 @@ When a harness next connects to a generated MCP entry, the proxy starts the brok
 
 ### Interactive configuration
 
-The Huh interface presents a main menu with **Harnesses**, **MCP servers**, **Skills**, **Agent Plugins**, **Diagnostics**, **Synchronization**, **Refresh**, and **Exit**. Use up/down arrows or `j`/`k` to navigate, `/` to filter choices and `Enter` to open or confirm. Huh provides a text-based accessible fallback for terminals without full-screen support. On Windows, genuine interactive consoles use the normal Huh checkbox interface even when `TERM=dumb`; set `AGENTMUX_ACCESSIBLE=1` to request numbered prompts instead. Listing status never starts MCP servers.
+Run `agentmux` or `agentmux ui` to show the **harness checkbox list immediately**, without first navigating a menu. Existing harnesses are prechecked using `huh.NewOption(...).Selected(true)`. Use the up/down arrows to navigate, Space to toggle, and Enter to save the complete selection. Use `agentmux menu` only for advanced **MCP servers**, **Skills**, **Agent Plugins**, **Diagnostics**, and **Synchronization** operations. Huh provides a text-based accessible fallback for terminals without full-screen support. On Windows, genuine interactive consoles use the normal Huh checkbox interface even when `TERM=dumb`; set `AGENTMUX_ACCESSIBLE=1` to request numbered prompts instead. Listing status never starts MCP servers.
 
 Use **Huh multi-select checkboxes** to configure the enabled harnesses and each skill's `metadata.harness` availability in one operation. Choose **shared** / **isolated** separately for an existing MCP server. The Huh sync menu first displays a read-only plan and asks before applying changes to native harness configuration files. **MCP server definitions (command, URL, credentials, arguments) and plugin package installation are not Huh editors:** configure those sources in `~/.agentmux/mcp.json` or `~/.agentmux/plugins/`, then validate before syncing. Huh inventories plugin contents. CLI scripts and pipelines retain plain output; `--plain` explicitly suppresses Huh forms. `agentmux status --json` remains machine-readable and `agentmux sync --apply --yes` skips confirmation.
 

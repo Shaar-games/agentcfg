@@ -47,7 +47,8 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 
 Usage: agentmux [command] [options]
 
-  (no command) / ui     Open Charmbracelet Huh configuration menus
+  (no command) / ui     Open the Huh harness checkbox list directly
+  menu                  Open advanced Huh management menus
 
   init       Create empty canonical .agentmux files (never overwrite)
   list       Show discovered MCP servers and skills
@@ -103,11 +104,16 @@ Bidirectional sync is not implemented.`)
 		return err
 	case "auth":
 		return runAuth(ctx, home, args[1:], input, output, diagnostics)
-	case "ui", "tui":
+	case "ui", "tui", "harnesses":
 		if err := parse(flags, args[1:]); err != nil {
 			return helpResult(err)
 		}
 		return tui.Run(ctx, home, input, output)
+	case "menu":
+		if err := parse(flags, args[1:]); err != nil {
+			return helpResult(err)
+		}
+		return tui.RunMenu(ctx, home, input, output)
 	case "init":
 		return initialize(ctx, flags, root, args[1:], input, output)
 	case "sync":
