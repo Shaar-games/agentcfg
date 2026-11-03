@@ -178,10 +178,9 @@ jobs:
           set -euo pipefail
           bash install.sh
           "$AGENTMUX_BIN_DIR/agentmux" version
-          if bash install.sh; then
-            echo 'Installer unexpectedly overwrote an existing binary' >&2
-            exit 1
-          fi
+          # Reinstallation is supported: atomically replace an existing binary.
+          bash install.sh
+          [[ "$("$AGENTMUX_BIN_DIR/agentmux" version)" == "$AGENTMUX_VERSION" ]]
       - name: PowerShell installer smoke
         if: runner.os == 'Windows'
         shell: pwsh
@@ -192,6 +191,7 @@ jobs:
           ./install.ps1
           & (Join-Path $env:AGENTMUX_BIN_DIR 'agentmux.exe') version
           if ($LASTEXITCODE -ne 0) { throw 'Installed binary smoke test failed' }
-          $overwrote = $false
-          try { ./install.ps1; $overwrote = $true } catch { Write-Host "Correctly refused existing binary: $_" }
-          if ($overwrote) { throw 'Installer unexpectedly overwrote existing binary' }
+          # Windows reinstallation replaces the existing executable too.
+          ./install.ps1
+          $installed = & (Join-Path $env:AGENTMUX_BIN_DIR 'agentmux.exe') version
+          if ($LASTEXITCODE -ne 0 -or $installed.Trim() -ne $env:AGENTMUX_VERSION) { throw 'Reinstalled binary smoke test failed' }

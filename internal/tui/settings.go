@@ -63,6 +63,49 @@ func setHarnessEnabled(root, harness string, enabled, expected bool) error {
 	})
 }
 
+// setHarnessSelection applies the entire Huh multi-select as one atomic edit.
+// The UI's snapshot is revalidated under the sync lock, avoiding a sequence of
+// partial per-harness toggles if the selection has changed elsewhere.
+func setHarnessSelection(root string, selected, expected []string) error {
+	validated, err := config.ValidateUserHarnesses(selected)
+	if err != nil {
+		return err
+	}
+	return updateSettings(root, func(cfg *config.Config, fields map[string]json.RawMessage) error {
+		if !slices.Equal(cfg.Settings.Harnesses, expected) {
+			return errors.New("harness selection changed elsewhere; refresh before editing")
+		}
+		desired := make(map[string]bool, len(validated))
+		for _, name := range validated {
+			desired[name] = true
+		}
+		current := cfg.Settings.Harnesses
+		allSame := len(validated) == len(current)
+		for _, name := range current {
+			allSame = allSame && desired[name]
+		}
+		if allSame {
+			return errNoChange
+		}
+		// Keep the original relative ordering of still-enabled harnesses.
+		merged := make([]string, 0, len(validated))
+		for _, name := range current {
+			if desired[name] {
+				merged = append(merged, name)
+				delete(desired, name)
+			}
+		}
+		for _, name := range validated {
+			if desired[name] {
+				merged = append(merged, name)
+				delete(desired, name)
+			}
+		}
+		fields["harnesses"], err = json.Marshal(merged)
+		return err
+	})
+}
+
 // setServerSharing changes the effective shared/isolated mode using a validated
 // server override; it leaves the source/plugin MCP definitions untouched.
 func setServerSharing(root, name, next, expected string) error {

@@ -46,7 +46,7 @@ OpenCode    ── context7: agentmux connect ────────┴── 
 - **Interactive Charmbracelet Huh forms** for harness selection, MCP sharing settings, skill availability, plugin inventory, diagnostics and sync confirmation.
 - **Starts on demand and stops after inactivity**; no permanently installed background service.
 - **Individual MCP entries** in each harness, not one aggregated tool catalog.
-- **Global configuration** at `~/.agentmux/`, independent of the current project.
+- **Canonical configuration** at `~/.agentmux/`, projected into each harness's native configuration files.
 - **Skills and Agent Plugins** discovered from canonical directories and installed into native harness locations.
 - **Selective distribution** using MCP harness filters and a skill's `metadata.harness`.
 - **Conservative synchronization** with dry runs, backups, ownership tracking, and conflict detection.
@@ -68,9 +68,17 @@ curl -fsSL https://raw.githubusercontent.com/Shaar-games/agentmux/main/install.s
 irm https://raw.githubusercontent.com/Shaar-games/agentmux/main/install.ps1 | iex
 ```
 
-The installer places a single executable in `~/.local/bin/agentmux` (`agentmux.exe` on Windows). No source checkout, compiler or persistent build directory is created. Add `~/.local/bin` to your `PATH` if necessary. Available release targets are Linux, macOS and Windows on AMD64 and ARM64 (where the OS supports the architecture). The scripts require `curl` and `tar` plus `sha256sum` or `shasum` on Unix; Windows PowerShell provides its own downloader, checksum and ZIP extraction.
+The installer places the executable in `~/.local/bin/agentmux` (`agentmux.exe` on Windows). No source checkout, compiler or persistent build directory is created. Add `~/.local/bin` to your `PATH` if necessary. Available release targets are Linux, macOS and Windows on AMD64 and ARM64 (where the OS supports the architecture). The scripts require `curl` and `tar` plus `sha256sum` or `shasum` on Unix; Windows PowerShell provides its own downloader, checksum and ZIP extraction.
 
-The scripts **do not modify your harness configurations**. They refuse to overwrite an existing executable, validate SHA-256 checksums, and run a post-install binary smoke test. Review the remote scripts before executing them; these one-liners follow the repository's `main` branch. Set `AGENTMUX_VERSION` to an existing published tag (for example, `v0.2.2`) to pin a release, or `AGENTMUX_BIN_DIR` for another executable directory. A checksum fetched from the same release prevents accidental corruption but is not a substitute for a cryptographically signed provenance attestation.
+The scripts **do not change MCP or harness settings during installation**. They verify SHA-256 checksums, validate the downloaded binary and **replace an existing AgentMux executable** when reinstalling. The previous binary is retained for rollback until validation succeeds; a Windows executable still in use may leave a temporary backup. Review the remote scripts before executing them; these one-liners follow the repository's `main` branch. Set `AGENTMUX_VERSION` to an existing published tag to pin a release, or `AGENTMUX_BIN_DIR` for another executable directory. A checksum fetched from the same release prevents accidental corruption but is not a substitute for a cryptographically signed provenance attestation.
+
+To update an existing installation to the **latest published stable GitHub Release built from `main`**, run:
+
+```sh
+agentmux update
+```
+
+Self-update downloads the platform's release archive and `SHA256SUMS`, verifies the checksum, tests the staged executable and replaces the running binary with rollback protection. On Windows, a previous executable still in use may be retained as a backup until it can be removed after the command exits. This updates only AgentMux itself, not MCP definitions or native harness settings.
 
 ## Quick start
 
@@ -83,6 +91,7 @@ agentmux                       # Huh configuration menus
 agentmux ui                    # Explicit interactive configuration
 agentmux validate              # Validate sources, plugins, and skills
 agentmux list                  # Show discovered MCP servers and skills
+agentmux update                # Update this executable from GitHub Releases
 agentmux sync                  # Preview user-level changes (read-only)
 agentmux sync --apply          # Apply reviewed changes
 agentmux status                # Inspect the broker (does not start it)
@@ -94,13 +103,13 @@ When a harness next connects to a generated MCP entry, the proxy starts the brok
 
 The Huh interface presents a main menu with **Harnesses**, **MCP servers**, **Skills**, **Agent Plugins**, **Diagnostics**, **Synchronization**, **Refresh**, and **Exit**. Use up/down arrows or `j`/`k` to navigate, `/` to filter choices and `Enter` to open or confirm. Huh provides a text-based accessible fallback for terminals without full-screen support. Listing status never starts MCP servers.
 
-Select a harness to enable/disable it, an existing MCP server to change **shared** / **isolated**, or a skill to toggle individual harness availability through its source `metadata.harness`. The Huh sync menu first displays a read-only plan, then requires explicit confirmation before applying native user-level changes. **MCP server definitions (command, URL, credentials, arguments) and plugin package installation are not Huh editors:** configure those sources in `~/.agentmux/mcp.json` or `~/.agentmux/plugins/`, then validate before syncing. Huh only inventories plugin contents. The CLI commands `agentmux sync` (preview) and `agentmux sync --apply` (apply) are also available. Interactive terminal commands use Huh; scripts and pipelines retain plain output, and `--plain` explicitly suppresses Huh forms. `agentmux status --json` remains machine-readable; `agentmux sync --apply --yes` skips its confirmation, while `--plain` also preserves the non-interactive execution path.
+Use **Huh multi-select checkboxes** to configure the enabled harnesses and each skill's `metadata.harness` availability in one operation. Choose **shared** / **isolated** separately for an existing MCP server. The Huh sync menu first displays a read-only plan and asks before applying changes to native harness configuration files. **MCP server definitions (command, URL, credentials, arguments) and plugin package installation are not Huh editors:** configure those sources in `~/.agentmux/mcp.json` or `~/.agentmux/plugins/`, then validate before syncing. Huh inventories plugin contents. CLI scripts and pipelines retain plain output; `--plain` explicitly suppresses Huh forms. `agentmux status --json` remains machine-readable and `agentmux sync --apply --yes` skips confirmation.
 
 > **Migrating existing setups?** Do not immediately replace your MCP configurations. The current release does not automatically import or adopt existing harness entries. Follow **[MIGRATION_FOR_AGENTS.md](MIGRATION_FOR_AGENTS.md)** for a backup-first, conflict-aware migration that an AI coding agent can execute with you.
 
 ## Global configuration
 
-Everything originates from your **home directory**, not from whichever repository is open:
+Canonical MCP definitions, harness preferences, plugins and skills live under `~/.agentmux/`:
 
 ```text
 ~/.agentmux/
@@ -119,7 +128,7 @@ Everything originates from your **home directory**, not from whichever repositor
                 └── SKILL.md
 ```
 
-The source directories are not placed inside projects. `agentmux sync --apply` writes **user-level harness configuration** only. The application may also create runtime data and synchronization state beneath `~/.agentmux/`.
+`agentmux sync --apply` writes the selected harnesses' **native configuration files** (listed below). Runtime data and synchronization state live beneath `~/.agentmux/`.
 
 ### MCP servers — `~/.agentmux/mcp.json`
 
@@ -230,7 +239,7 @@ metadata:
 Prefer small, testable changes and preserve existing project conventions.
 ```
 
-During `agentmux sync --apply`, the instruction body is installed as `~/.codex/AGENTS.md` (Codex), `~/.claude/CLAUDE.md` (Claude Code), or `~/.config/opencode/AGENTS.md` (OpenCode). The routing frontmatter is stripped from the *generated copy*; the canonical source is never rewritten. Without `metadata.harness`, all globally enabled harnesses **with verified instructions adapters** are selected. Use `metadata.harness: none` to disable distribution. Existing unmanaged destination files are never overwritten, and changes to previously managed files require an unmodified ownership record. Other clients currently receive a warning rather than a guessed global instruction location. All paths are in the user home, never in an open project.
+During `agentmux sync --apply`, the instruction body is installed as `~/.codex/AGENTS.md` (Codex), `~/.claude/CLAUDE.md` (Claude Code), or `~/.config/opencode/AGENTS.md` (OpenCode). The routing frontmatter is stripped from the *generated copy*; the canonical source is never rewritten. Without `metadata.harness`, all globally enabled harnesses **with verified instructions adapters** are selected. Use `metadata.harness: none` to disable distribution. Existing unmanaged destination files are never overwritten, and changes to previously managed files require an unmodified ownership record. Other clients currently receive a warning rather than a guessed global instruction location.
 
 ## Supported harnesses
 
@@ -245,13 +254,13 @@ During `agentmux sync --apply`, the instruction body is installed as `~/.codex/A
 
 The generated MCP entries run `agentmux connect --server <name> --harness <client>` using the **installed executable's absolute path**. Clients retain distinct MCP names and their native config formats.
 
-`claude-desktop` does **not** have an adapter yet; it is not interchangeable with Claude Code. Antigravity's CLI also discovers `~/.gemini/antigravity-cli/skills/`, but the App and CLI share the `~/.gemini/config/` personal layout; the current `antigravity` adapter targets that common layout. VS Code's existing adapter is project-scoped only and therefore unavailable in the current global-only CLI.
+`claude-desktop` does **not** have an adapter yet; it is not interchangeable with Claude Code. Antigravity's CLI also discovers `~/.gemini/antigravity-cli/skills/`, but the App and CLI share the `~/.gemini/config/` personal layout; the current `antigravity` adapter targets that common layout. VS Code does not currently have a supported global native configuration adapter.
 
 ## Migrate existing MCPs and skills
 
-Use the root-level **[AI agent migration guide](MIGRATION_FOR_AGENTS.md)**. It also explains why old project-local `.agents/` or `.agentmux/` source directories are not automatically imported. It gives an AI coding agent an explicit, safe workflow to:
+Use the root-level **[AI agent migration guide](MIGRATION_FOR_AGENTS.md)**. It explains how to reconcile existing native MCP entries and skills, with backups and conflict detection:
 
-1. Inspect **user-level** MCP and skill configurations without touching project files.
+1. Inspect native MCP and skill configuration files of the selected harnesses.
 2. Back up the originals and translate selected definitions into `~/.agentmux/`.
 3. Resolve name collisions before applying any generated entries.
 4. Run `agentmux validate`, review the `agentmux sync` preview, then apply with approval.
@@ -259,12 +268,12 @@ Use the root-level **[AI agent migration guide](MIGRATION_FOR_AGENTS.md)**. It a
 
 **Suggested prompt for your coding agent:**
 
-> Read https://github.com/Shaar-games/agentmux/blob/main/MIGRATION_FOR_AGENTS.md and migrate my existing **user-level** MCP servers and skills to agentmux. Do not change any project files. Preserve my current configurations, show conflicts and a proposed diff, and obtain my approval before replacing old MCP entries or running `agentmux sync --apply`.
+> Read https://github.com/Shaar-games/agentmux/blob/main/MIGRATION_FOR_AGENTS.md and migrate my existing MCP servers and skills to agentmux using the native configurations of my harnesses. Preserve existing settings, show conflicts and a proposed diff, and obtain my approval before replacing old MCP entries or running `agentmux sync --apply`.
 
 ## Safety and current limits
 
 - **No silent takeover:** unknown MCP names and unmanaged skill directories are preserved; collisions stop synchronization. Existing configurations are **not** imported automatically.
-- **No project changes:** the public CLI uses `~/.agentmux/` and user-level targets. There is no `--root` flag or project-scope synchronization.
+- **Native harness adapters:** synchronization writes supported user-level Claude Code, Codex, Cursor, OpenCode, Gemini and Antigravity configuration formats, retaining unrelated settings.
 - **Not a sandbox:** installed MCP servers and plugin executables run with your account's permissions. Review untrusted packages and avoid committing credentials.
 - Sharing is not isolation: the server's application state can be shared between harnesses. Use sharing: "isolated" for private state, roots, sampling, elicitation, or client-specific callbacks.
 - **Protocol scope:** MCP `2026-07-28` request-scoped metadata, `server/discover`, stateless HTTP headers, and JSON/SSE responses use the official Go MCP SDK bridge alongside legacy 2025 handshakes. Modern protocol messages are routed per request; the broker does not merge modern clients into an initialized legacy stdio session. OAuth authorization is **explicit**, not an automatic login during MCP startup. Legacy standalone SSE transport and SSE cursor resumption are not implemented. Modern subscriptions and multi-round-trip tool results depend on the capabilities of both the upstream and the calling harness.

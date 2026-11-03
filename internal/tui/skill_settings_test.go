@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -117,6 +118,67 @@ func TestSkillNoneSentinelRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(skill.Harnesses, []string{"antigravity"}) {
 		t.Fatalf("unexpected filter after enabling: %v", skill.Harnesses)
 	}
+}
+
+func TestSkillMultiSelectAtomicEditAndEmptySelection(t *testing.T) {
+	before := "---\nname: review\ndescription: Checks code\nmetadata: # retain\n  harness: 'codex, antigravity' # keep comment\n  author: alice\n---\n# Body unchanged\n"
+	root, path, snapshot := skillSourceFixture(t, before)
+	if err := setSkillHarnessSelection(root, snapshot, []string{"codex", "cursor", "gemini"}); err != nil {
+		t.Fatal(err)
+	}
+	got := string(mustReadSkill(t, path))
+	expected := strings.Replace(before, "'codex, antigravity'", "'codex, cursor, gemini'", 1)
+	if got != expected {
+		t.Fatalf("multi-select changed unrelated content:\ngot %q\nwant %q", got, expected)
+	}
+	backups, err := filepath.Glob(filepath.Join(root, ".agentmux", "backups", "skills", "review-*.bak"))
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("expected one backup for entire multi-select: %v (%v)", backups, err)
+	}
+	if err := setSkillHarnessSelection(root, snapshot, []string{"cursor"}); err == nil || !strings.Contains(err.Error(), "changed") {
+		t.Fatalf("stale multi-select unexpectedly succeeded: %v", err)
+	}
+	snapshot = loadSkillFixture(t, root, "review")
+	if err := setSkillHarnessSelection(root, snapshot, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got = string(mustReadSkill(t, path)); !strings.Contains(got, "harness: 'none' # keep comment") || !strings.HasSuffix(got, "# Body unchanged\n") {
+		t.Fatalf("clearing all harnesses failed to keep literal none and body: %q", got)
+	}
+	snapshot = loadSkillFixture(t, root, "review")
+	if err := setSkillHarnessSelection(root, snapshot, []string{"antigravity"}); err != nil {
+		t.Fatal(err)
+	}
+	if got = string(mustReadSkill(t, path)); !strings.Contains(got, "harness: 'antigravity' # keep comment") {
+		t.Fatalf("multi-select from none did not enable chosen harness: %q", got)
+	}
+}
+
+func TestSkillMultiSelectPreservesNoChangeAndRejectsBadChoices(t *testing.T) {
+	root, path, snapshot := skillSourceFixture(t, "---\nname: review\ndescription: Review source\n---\n# Keep\n")
+	if err := setSkillHarnessSelection(root, snapshot, knownSkillHarnesses); !errors.Is(err, errNoChange) {
+		t.Fatalf("all-selected default must not rewrite SKILL.md: %v", err)
+	}
+	for _, selected := range [][]string{{"unknown"}, {"codex", "codex"}} {
+		if err := setSkillHarnessSelection(root, snapshot, selected); err == nil {
+			t.Fatalf("invalid multi-select accepted: %v", selected)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agentmux", "backups")); !os.IsNotExist(err) {
+		t.Fatalf("no-op or invalid edit wrote backup directory: %v", err)
+	}
+	if got := string(mustReadSkill(t, path)); got != "---\nname: review\ndescription: Review source\n---\n# Keep\n" {
+		t.Fatal("invalid edit changed source")
+	}
+}
+
+func mustReadSkill(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestSkillToggleFromNoFilterPreservesEverythingElse(t *testing.T) {

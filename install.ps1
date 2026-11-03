@@ -26,11 +26,11 @@ switch ($architecture) {
 $asset = "agentmux_windows_$arch.zip"
 $bindir = if ($env:AGENTMUX_BIN_DIR) { $env:AGENTMUX_BIN_DIR } else { Join-Path $HOME '.local\bin' }
 $binary = Join-Path $bindir 'agentmux.exe'
-if (Test-Path -LiteralPath $binary) { throw "Refusing to overwrite existing executable: $binary" }
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ('agentmux-install-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 $stage = $null
+$backup = $null
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $archive = Join-Path $tmp $asset
@@ -75,17 +75,41 @@ try {
     New-Item -ItemType Directory -Force -Path $bindir | Out-Null
     $stage = Join-Path $bindir ('.agentmux-install-' + [guid]::NewGuid().ToString('N') + '.exe')
     Copy-Item -LiteralPath $executable -Destination $stage
-    if (Test-Path -LiteralPath $binary) { throw "Destination appeared during installation: $binary" }
-    # File.Move refuses an existing destination, including if another installer
-    # created it after the check above. Move-Item is not an exclusive install.
-    [System.IO.File]::Move($stage, $binary)
-    $stage = $null
-    & $binary version | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Remove-Item -LiteralPath $binary -Force -ErrorAction SilentlyContinue
-        throw 'Binary smoke test failed; installation rolled back.'
+    & $stage version | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Staged binary failed; previous installation kept.' }
+    $placed = $false
+    try {
+        if (Test-Path -LiteralPath $binary) {
+            $existing = Get-Item -LiteralPath $binary -Force
+            if ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Existing destination must be a regular executable: $binary"
+            }
+            $backup = Join-Path $bindir ('.agentmux-backup-' + [guid]::NewGuid().ToString('N') + '.exe')
+            # Windows can rename a running executable but cannot overwrite it
+            # in place. Keep the previous image for rollback.
+            [System.IO.File]::Move($binary, $backup)
+        }
+        [System.IO.File]::Move($stage, $binary)
+        $stage = $null
+        $placed = $true
+        & $binary version | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Installed binary smoke test failed.' }
+    } catch {
+        if ($placed -and (Test-Path -LiteralPath $binary)) {
+            Remove-Item -LiteralPath $binary -Force
+        }
+        if ($backup -and (Test-Path -LiteralPath $backup)) {
+            [System.IO.File]::Move($backup, $binary)
+            $backup = $null
+        }
+        throw
     }
-    Write-Host "Installed $binary"
+    if ($backup -and (Test-Path -LiteralPath $backup)) {
+        try { Remove-Item -LiteralPath $backup -Force; $backup = $null } catch {
+            Write-Warning "Previous executable still in use; backup retained at $backup"
+        }
+    }
+    Write-Host "Installed/updated $binary"
     Write-Host "Add $bindir to PATH if necessary."
 } finally {
     if ($stage -and (Test-Path -LiteralPath $stage)) { Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue }

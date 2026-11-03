@@ -1,6 +1,6 @@
 # Configuration and portable plugins
 
-`config.Load(root)` reads canonical sources under `<root>/.agentmux/`. The public CLI always passes the current user's home directory as `root`, never an open project. It returns resolved servers, discovered skills, settings and warnings. Loading performs no process execution, executable lookup, network access, schema download, directory creation or harness writes.
+`config.Load(root)` reads canonical sources under `<root>/.agentmux/`. The public CLI uses the user's home directory as `root` and synchronizes definitions through native harness configuration adapters. Loading returns resolved servers, discovered skills, settings and warnings without executing processes, looking up executables, contacting networks, creating directories or writing harness configuration.
 
 ## Sources
 
@@ -204,7 +204,7 @@ Standalone directories containing the reserved `.agentmux-origin.json` marker ar
 
 Explicit canonical servers load first and take precedence over colliding plugin IDs. Plugin directory names and server keys are processed lexically. Skills are returned sorted by qualified name. Duplicate keys are rejected at their owning JSON object boundary; semantic errors inside one server do not invalidate its siblings.
 
-The loader does not search ancestor projects, install packages, execute client extensions, synchronize configs in either direction, or infer secrets. Bidirectional configuration import is deferred.
+The loader does not install packages, execute client extensions, synchronize native configurations in either direction, or infer secrets. Bidirectional configuration import is deferred.
 
 ## Examples and references
 

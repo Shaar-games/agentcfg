@@ -128,18 +128,26 @@ func TestPowerShellDownloadsAndVerifiesRelease(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			server := fixtureServer(t, "agentmux_windows_"+runtime.GOARCH+".zip", data, bad)
 			dir := filepath.Join(t.TempDir(), "bin")
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(dir, "agentmux.exe")
+			if bad {
+				if err := os.WriteFile(binary, []byte("previous executable"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			args := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(root(t), "install.ps1")}
 			environment := append(os.Environ(), "AGENTMUX_VERSION=latest", "AGENTMUX_RELEASE_BASE_URL="+server.URL, "AGENTMUX_BIN_DIR="+dir)
 			command := exec.Command(shell, args...)
 			command.Env = environment
 			output, err := command.CombinedOutput()
-			binary := filepath.Join(dir, "agentmux.exe")
 			if bad {
 				if err == nil || !strings.Contains(string(output), "SHA-256 mismatch") {
 					t.Fatalf("bad SHA-256 not rejected: %v\n%s", err, output)
 				}
-				if _, err = os.Stat(binary); !os.IsNotExist(err) {
-					t.Fatal("corrupt binary was installed")
+				if existing, readErr := os.ReadFile(binary); readErr != nil || string(existing) != "previous executable" {
+					t.Fatalf("bad SHA-256 corrupted existing executable: %q (%v)", existing, readErr)
 				}
 				return
 			}
@@ -151,8 +159,11 @@ func TestPowerShellDownloadsAndVerifiesRelease(t *testing.T) {
 			}
 			again := exec.Command(shell, args...)
 			again.Env = environment
-			if output, err = again.CombinedOutput(); err == nil || !strings.Contains(string(output), "Refusing to overwrite") {
-				t.Fatalf("existing binary overwritten: %v\n%s", err, output)
+			if output, err = again.CombinedOutput(); err != nil {
+				t.Fatalf("existing binary was not replaced: %v\n%s", err, output)
+			}
+			if _, err = exec.Command(binary, "version").CombinedOutput(); err != nil {
+				t.Fatalf("reinstalled executable cannot run: %v", err)
 			}
 		})
 	}
@@ -185,6 +196,15 @@ func TestBashDownloadsAndVerifiesRelease(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			server := fixtureServer(t, asset, data, bad)
 			dir := filepath.Join(t.TempDir(), "bin")
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			installed := filepath.Join(dir, "agentmux")
+			if bad {
+				if err := os.WriteFile(installed, []byte("previous executable"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			args := []string{filepath.Join(root(t), "install.sh")}
 			environment := append(os.Environ(), "AGENTMUX_VERSION=latest", "AGENTMUX_RELEASE_BASE_URL="+server.URL, "AGENTMUX_BIN_DIR="+dir)
 			newCommand := func() *exec.Cmd { return exec.Command(bash, args...) }
@@ -204,13 +224,12 @@ func TestBashDownloadsAndVerifiesRelease(t *testing.T) {
 			command := newCommand()
 			command.Env = environment
 			output, err := command.CombinedOutput()
-			installed := filepath.Join(dir, "agentmux")
 			if bad {
 				if err == nil || !strings.Contains(string(output), "SHA-256 mismatch") {
 					t.Fatalf("bad SHA-256 not rejected: %v\n%s", err, output)
 				}
-				if _, err = os.Stat(installed); !os.IsNotExist(err) {
-					t.Fatal("corrupt binary was installed")
+				if existing, readErr := os.ReadFile(installed); readErr != nil || string(existing) != "previous executable" {
+					t.Fatalf("bad SHA-256 corrupted existing executable: %q (%v)", existing, readErr)
 				}
 				return
 			}
@@ -222,8 +241,8 @@ func TestBashDownloadsAndVerifiesRelease(t *testing.T) {
 			}
 			again := newCommand()
 			again.Env = environment
-			if output, err = again.CombinedOutput(); err == nil || !strings.Contains(string(output), "Refusing to overwrite") {
-				t.Fatalf("existing binary overwritten: %v\n%s", err, output)
+			if output, err = again.CombinedOutput(); err != nil {
+				t.Fatalf("second install could not replace binary: %v\n%s", err, output)
 			}
 		})
 	}

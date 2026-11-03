@@ -21,14 +21,37 @@ The install scripts require **Bash** on Unix or **PowerShell** on Windows.
 They never invoke Go, Git, npm, Node, Python, mise or a local build.
 They select the OS and architecture, download one archive and its checksum
 manifest from the latest GitHub Release, verify the archive, extract the
-executable, and install it into `~/.local/bin/`. They refuse to overwrite an
-existing executable and perform a binary version smoke test.
+executable, and install it into `~/.local/bin/`. Reinstalling **replaces**
+the existing executable after checking the archive and staged binary. A
+temporary backup is kept until the new binary passes its version smoke test.
+On Windows, an old running executable may leave a backup that can be removed
+after the process exits.
 
 Set `AGENTMUX_VERSION` to an existing published tag (for example,
-`AGENTMUX_VERSION=v0.2.2`) to select a specific release.
+`AGENTMUX_VERSION=v0.2.3`) to select a specific release.
 Set `AGENTMUX_BIN_DIR` for a custom user-owned destination.
 `AGENTMUX_RELEASE_BASE_URL` is used by local installer test fixtures and
 normally should remain unset.
+
+## Self-update
+
+```sh
+agentmux update
+```
+
+The command queries the latest **stable GitHub Release targeting `main`**,
+downloads the platform archive plus `SHA256SUMS`, checks the SHA-256 digest,
+extracts only the expected executable, verifies that it reports the release
+version, and replaces the executable currently running AgentMux. It does not
+touch native harness configurations, MCP definitions or skills. No Go toolchain
+is required.
+
+Unix uses a same-filesystem atomic rename and a backup for rollback. Windows
+renames the old executable before installing the replacement, so an active
+AgentMux process can keep using its already-mapped image. If Windows cannot
+delete that backup while it remains in use, its path is printed for cleanup
+after the updater exits. Failure before replacement leaves the existing binary
+untouched; a failed installed-binary smoke test triggers restoration.
 
 **Checksum verification is not publisher authentication.** Since the checksum
 comes from the same GitHub Release as the binary, a compromised release could
@@ -42,7 +65,7 @@ replace both. Signed provenance/attestations are potential future enhancements.
    `SHA256SUMS`, and attaches the assets to a GitHub Release.
 4. The release workflow runs a post-publication installer smoke matrix on
    Linux, macOS and Windows, downloading real release artifacts and checking
-   both successful installation and refusal to overwrite an existing binary.
+   both successful installation and successful replacement of an existing binary.
    The checksum and `agentmux version` are verified as part of installation.
 
 The release workflow also accepts a manual trigger with an existing tag.

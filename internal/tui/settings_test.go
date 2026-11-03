@@ -3,8 +3,10 @@ package tui
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,6 +68,52 @@ func TestHarnessSettingsAtomicBackupAndPreservation(t *testing.T) {
 	}
 	if err := setHarnessEnabled(root, "vscode", true, false); err == nil {
 		t.Fatal("unsupported user-scope VS Code was enabled")
+	}
+}
+
+func TestMultiSelectHarnessesSavedTogetherAndStaleSnapshotRejected(t *testing.T) {
+	root := settingsFixture(t)
+	original := `{"harnesses":["codex","cursor"],"runtime":{"idleTimeout":"8m"},"serverOverrides":{"alpha":{"sharing":"isolated"}}}`
+	putSettings(t, root, original)
+	if err := setHarnessSelection(root, []string{"antigravity", "codex", "gemini"}, []string{"codex", "cursor"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cfg.Settings.Harnesses, []string{"codex", "antigravity", "gemini"}) ||
+		cfg.Settings.Runtime.IdleTimeout != "8m" ||
+		cfg.Settings.ServerOverrides["alpha"].Sharing != "isolated" {
+		t.Fatalf("bulk harness selection lost settings: %+v", cfg.Settings)
+	}
+	backups, err := filepath.Glob(settingsFile(root) + ".bak-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("expected one atomic backup, found %v (%v)", backups, err)
+	}
+	if got, err := os.ReadFile(backups[0]); err != nil || string(got) != original {
+		t.Fatalf("backup changed: %q (%v)", got, err)
+	}
+	if err := setHarnessSelection(root, []string{"cursor"}, []string{"codex", "cursor"}); err == nil || !strings.Contains(err.Error(), "changed elsewhere") {
+		t.Fatalf("stale multi-select accepted: %v", err)
+	}
+	if err := setHarnessSelection(root, []string{"codex", "antigravity", "gemini"}, cfg.Settings.Harnesses); !errors.Is(err, errNoChange) {
+		t.Fatalf("unchanged multi-select unexpectedly modified settings: %v", err)
+	}
+	if err := setHarnessSelection(root, []string{"vscode"}, cfg.Settings.Harnesses); err == nil {
+		t.Fatal("unsupported harness selected")
+	}
+}
+
+func TestMultiSelectHarnessesAllowsEmpty(t *testing.T) {
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex"]}`)
+	if err := setHarnessSelection(root, []string{}, []string{"codex"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(root)
+	if err != nil || len(cfg.Settings.Harnesses) != 0 {
+		t.Fatalf("empty multi-select did not disable all harnesses: %+v (%v)", cfg, err)
 	}
 }
 

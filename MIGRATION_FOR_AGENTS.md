@@ -18,7 +18,7 @@ This file is an **operational migration playbook** for AI coding agents helping 
 | Concern | Current implementation |
 | --- | --- |
 | Canonical root | `~/.agentmux/`, always user-level |
-| CLI | `agentmux` (Huh interactive configuration), `init`, `validate`, `list`, `sync`, `sync --apply`, `status`, `stop` |
+| CLI | `agentmux` (Huh interactive configuration), `init`, `validate`, `list`, `update`, `sync`, `sync --apply`, `status`, `stop` |
 | Configured harnesses | `claude-code`, `codex`, `cursor`, `opencode`, `gemini`, `antigravity` |
 | Unsupported in global sync | `claude-desktop`; VS Code's adapter is project-only |
 | MCP execution | Local stdio proxies, one shared upstream or an isolated backend |

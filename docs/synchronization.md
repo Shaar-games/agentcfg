@@ -7,11 +7,9 @@ et les skills sous `~/.agentmux/` sont les seules sources d’autorité. `sync` 
 lecture seule. `sync --apply` applique ce plan. Il n’existe ni import implicite,
 ni mode force, ni fusion bidirectionnelle dans cette version.
 
-Les anciennes sources canoniques placées dans un projet (`.agents/`, puis
-`.agentmux/`) ne sont pas consultées. Il ne faut pas recopier un manifeste de
-propriété de portée projet dans `~/.agentmux/sync-user.json` : les identifiants
-et chemins doivent être réconciliés au cas par cas. Voir
-[`MIGRATION_FOR_AGENTS.md`](../MIGRATION_FOR_AGENTS.md).
+AgentMux projette ces sources dans les **fichiers de configuration natifs** des
+harnesses sélectionnés. Pour une migration d'anciennes sources ou de manifestes
+d'appartenance, consulter [le guide de migration](../MIGRATION_FOR_AGENTS.md).
 
 Un serveur MCP est généré individuellement dans chaque harness sélectionné.
 Les filtres de l’entrée canonique et les overrides des plugins sont évalués

@@ -19,6 +19,7 @@ import (
 	"agentmux/internal/pathutil"
 	"agentmux/internal/syncer"
 	"agentmux/internal/tui"
+	"agentmux/internal/updater"
 )
 
 // Set at release build time: -ldflags '-X main.version=vX.Y.Z'.
@@ -54,6 +55,7 @@ Usage: agentmux [command] [options]
   sync       Preview native harness changes; --apply writes them
   connect    Stdio proxy for one MCP; starts the private broker on demand
   auth       Explicit OAuth login, status, or logout for a configured MCP
+  update     Self-update this executable to the latest published release
   status     Show the broker and upstream process IDs (does not start it)
   stop       Stop this root's broker and its managed MCP children
   daemon     Run the local IPC broker in the foreground
@@ -79,6 +81,26 @@ Bidirectional sync is not implemented.`)
 	}
 	root := &home
 	switch args[0] {
+	case "update":
+		if err := parse(flags, args[1:]); err != nil {
+			return helpResult(err)
+		}
+		result, err := updater.Update(ctx, updater.Options{CurrentVersion: version})
+		if err != nil {
+			return err
+		}
+		if result.AlreadyCurrent {
+			_, err = fmt.Fprintf(output, "No update needed (installed: %s, latest stable release: %s).\n", version, result.Version)
+		} else {
+			_, err = fmt.Fprintf(output, "Updated AgentMux to %s: %s\n", result.Version, result.Path)
+		}
+		if result.BackupPath != "" {
+			fmt.Fprintf(diagnostics, "Previous executable remains in use; remove %s after exiting AgentMux.\n", result.BackupPath)
+		}
+		if err == nil && !result.AlreadyCurrent {
+			_, err = fmt.Fprintln(output, "Existing broker processes keep running until stopped; restart them when convenient with 'agentmux stop'.")
+		}
+		return err
 	case "auth":
 		return runAuth(ctx, home, args[1:], input, output, diagnostics)
 	case "ui", "tui":

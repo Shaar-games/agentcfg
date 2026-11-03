@@ -40,12 +40,9 @@ fi
 
 bindir="${AGENTMUX_BIN_DIR:-$HOME/.local/bin}"
 binary="$bindir/agentmux"
-if [[ -e "$binary" || -L "$binary" ]]; then
-  printf 'Refusing to overwrite existing executable: %s\n' "$binary" >&2
-  exit 1
-fi
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/agentmux-install.XXXXXXXX")"
 stage=""
+backup=""
 cleanup() {
   if [[ -n "$stage" ]]; then rm -f "$stage"; fi
   rm -rf "$tmp"
@@ -73,13 +70,39 @@ mkdir -p "$bindir"
 stage="$(mktemp "$bindir/.agentmux-install.XXXXXXXX")"
 cp "$tmp/agentmux" "$stage"
 chmod 755 "$stage"
-# Hardlink creation is exclusive and never overwrites an existing destination.
-ln "$stage" "$binary" || { echo 'Cannot install: destination already exists.' >&2; exit 1; }
-rm -f "$stage"
+# Verify the staged binary before touching any existing installation.
+"$stage" version >/dev/null || { echo 'Staged binary smoke test failed; keeping current installation.' >&2; exit 1; }
+if [[ -e "$binary" || -L "$binary" ]]; then
+  [[ -f "$binary" && ! -L "$binary" ]] || {
+    printf 'Existing destination is not a regular executable: %s\n' "$binary" >&2
+    exit 1
+  }
+  backup="$(mktemp "$bindir/.agentmux-backup.XXXXXXXX")"
+  cp -p "$binary" "$backup"
+fi
+# Stage and destination are on the same filesystem. Unix rename replaces the
+# destination atomically; retain a temporary backup for smoke-test rollback.
+if ! mv -f "$stage" "$binary"; then
+  [[ -z "$backup" ]] || rm -f "$backup"
+  echo 'Unable to install verified binary; previous installation retained.' >&2
+  exit 1
+fi
 stage=""
 if ! "$binary" version >/dev/null 2>&1; then
-  rm -f "$binary"
+  if [[ -n "$backup" ]]; then
+    mv -f "$backup" "$binary" || {
+      printf 'Rollback failed; previous binary retained at %s\n' "$backup" >&2
+      exit 1
+    }
+    backup=""
+  else
+    rm -f "$binary"
+  fi
   echo 'Binary smoke test failed; installation rolled back.' >&2
   exit 1
 fi
-printf 'Installed %s\nAdd %s to PATH if necessary.\n' "$binary" "$bindir"
+if [[ -n "$backup" ]]; then
+  rm -f "$backup"
+  backup=""
+fi
+printf 'Installed/updated %s\nAdd %s to PATH if necessary.\n' "$binary" "$bindir"

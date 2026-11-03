@@ -46,6 +46,38 @@ func setSkillHarness(root string, selected config.Skill, harness string, enabled
 	if !slices.Contains(current.Settings.Harnesses, harness) {
 		return fmt.Errorf("harness %q is disabled; refresh before editing skills", harness)
 	}
+	return applySkillHarnessSelection(root, selected, map[string]bool{harness: enabled})
+}
+
+// setSkillHarnessSelection applies one full NewMultiSelect result with a
+// single backup and a single checked update to the source SKILL.md. Unlike a
+// per-harness toggle, the full form can represent metadata.harness: none.
+func setSkillHarnessSelection(root string, selected config.Skill, chosen []string) error {
+	desired := make(map[string]bool, len(knownSkillHarnesses))
+	for _, harness := range chosen {
+		if !slices.Contains(knownSkillHarnesses, harness) || desired[harness] {
+			return fmt.Errorf("invalid or duplicate skill harness %q", harness)
+		}
+		desired[harness] = true
+	}
+	for _, harness := range knownSkillHarnesses {
+		if !desired[harness] {
+			desired[harness] = false
+		}
+	}
+	return applySkillHarnessSelection(root, selected, desired)
+}
+
+func applySkillHarnessSelection(root string, selected config.Skill, desired map[string]bool) error {
+	for harness := range desired {
+		if !slices.Contains(knownSkillHarnesses, harness) {
+			return fmt.Errorf("unknown skill harness %q", harness)
+		}
+	}
+	current, err := config.Load(root)
+	if err != nil {
+		return fmt.Errorf("load current skill configuration: %w", err)
+	}
 	agents := filepath.Join(current.Root, ".agentmux")
 	if err := requireRealDirectory(agents); err != nil {
 		return fmt.Errorf("source directory: %w", err)
@@ -73,9 +105,6 @@ func setSkillHarness(root string, selected config.Skill, harness string, enabled
 	if err != nil {
 		return fmt.Errorf("reload current skill configuration: %w", err)
 	}
-	if !slices.Contains(current.Settings.Harnesses, harness) {
-		return fmt.Errorf("harness %q is disabled; refresh before editing skills", harness)
-	}
 	var found *config.Skill
 	for i := range current.Skills {
 		if current.Skills[i].Name == selected.Name {
@@ -86,7 +115,13 @@ func setSkillHarness(root string, selected config.Skill, harness string, enabled
 	if found == nil || filepath.Clean(found.Path) != filepath.Clean(selected.Path) || !slices.Equal(found.Harnesses, selected.Harnesses) {
 		return fmt.Errorf("skill %q changed since it was loaded; refresh before editing", selected.Name)
 	}
-	if config.Allows(found.Harnesses, harness) == enabled {
+	unchanged := true
+	for harness, enabled := range desired {
+		if config.Allows(found.Harnesses, harness) != enabled {
+			unchanged = false
+		}
+	}
+	if unchanged {
 		return errNoChange
 	}
 	path, err := checkedSkillSource(current.Root, *found)
@@ -97,12 +132,14 @@ func setSkillHarness(root string, selected config.Skill, harness string, enabled
 	if err != nil {
 		return err
 	}
-	updated, err := editSkillFrontmatter(original, found.Harnesses, harness, enabled)
+	updated, err := editSkillFrontmatterAvailability(original, found.Harnesses, desired)
 	if err != nil {
 		return err
 	}
-	if err := validateEditedSkill(updated, harness, enabled); err != nil {
-		return err
+	for harness, enabled := range desired {
+		if err := validateEditedSkill(updated, harness, enabled); err != nil {
+			return err
+		}
 	}
 	if bytes.Equal(original, updated) {
 		return errNoChange
@@ -265,6 +302,10 @@ func skillFileUnchanged(path string, original []byte) error {
 // comments, key order and existing newline style untouched. Ambiguous YAML
 // shapes are refused rather than serialized into a different document.
 func editSkillFrontmatter(data []byte, originalFilter []string, harness string, enabled bool) ([]byte, error) {
+	return editSkillFrontmatterAvailability(data, originalFilter, map[string]bool{harness: enabled})
+}
+
+func editSkillFrontmatterAvailability(data []byte, originalFilter []string, changes map[string]bool) ([]byte, error) {
 	allowed := make(map[string]bool)
 	if len(originalFilter) == 0 {
 		for _, id := range knownSkillHarnesses {
@@ -275,7 +316,9 @@ func editSkillFrontmatter(data []byte, originalFilter []string, harness string, 
 			allowed[id] = true
 		}
 	}
-	allowed[harness] = enabled
+	for harness, enabled := range changes {
+		allowed[harness] = enabled
+	}
 	var filtered []string
 	for _, id := range knownSkillHarnesses {
 		if allowed[id] {

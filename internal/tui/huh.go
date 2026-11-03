@@ -1,6 +1,6 @@
 // Package tui provides the user-level interactive Huh configuration interface.
 // It loads the canonical home sources; neither opening a menu nor reading
-// diagnostics starts MCP processes or touches project files.
+// diagnostics starts MCP processes or rewrites native harness configuration.
 package tui
 
 import (
@@ -35,7 +35,7 @@ var harnesses = [...]harnessInfo{
 	{"opencode", "OpenCode", "~/.config/opencode/opencode.json", "~/.config/opencode/skills", true, "Existing opencode.jsonc is used when applicable."},
 	{"gemini", "Gemini CLI", "~/.gemini/settings.json", "~/.gemini/skills", true, ""},
 	{"antigravity", "Antigravity", "~/.gemini/config/mcp_config.json", "~/.gemini/config/skills", true, ""},
-	{"vscode", "VS Code (unavailable in user scope)", "Project/profile configuration", "Project/profile skills", false, "VS Code user-scope synchronization is unavailable."},
+	{"vscode", "VS Code (adapter unavailable)", "", "", false, "No supported VS Code native configuration adapter is installed."},
 }
 
 type interfaceSession struct {
@@ -150,45 +150,37 @@ func Run(ctx context.Context, root string, input io.Reader, output io.Writer) er
 }
 
 func (s interfaceSession) configureHarnesses() error {
-	for {
-		cfg, err := config.Load(s.root)
-		if err != nil {
-			return err
+	cfg, err := config.Load(s.root)
+	if err != nil {
+		return err
+	}
+	choices := make([]huh.Option[string], 0, len(harnesses))
+	for _, h := range harnesses {
+		if !h.UserScopeEnabled {
+			continue
 		}
-		choices := make([]huh.Option[string], 0, len(harnesses)+1)
-		for _, h := range harnesses {
-			state := "[ ]"
-			if !h.UserScopeEnabled {
-				state = "[×]"
-			} else if slices.Contains(cfg.Settings.Harnesses, h.ID) {
-				state = "[✓]"
-			}
-			choices = append(choices, huh.NewOption(state+"  "+h.Label, h.ID))
-		}
-		choices = append(choices, huh.NewOption("Back to main menu", "back"))
-		selected, err := s.selectAction("Harness availability", "Enabled harnesses receive generated user-level MCP and skill settings after sync.", choices...)
-		if err != nil {
-			return err
-		}
-		if selected == "back" {
+		choices = append(choices, huh.NewOption(h.Label, h.ID).
+			Selected(slices.Contains(cfg.Settings.Harnesses, h.ID)))
+	}
+	selected := append([]string(nil), cfg.Settings.Harnesses...)
+	err = s.form(huh.NewMultiSelect[string]().
+		Title("Harness availability").
+		Description("Space selects/deselects; Enter saves all choices. Esc returns without changes. Native harness settings are applied on sync.").
+		Options(choices...).
+		Value(&selected))
+	if isCancelled(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := setHarnessSelection(s.root, selected, cfg.Settings.Harnesses); err != nil {
+		if errors.Is(err, errNoChange) {
 			return nil
 		}
-		for _, h := range harnesses {
-			if selected != h.ID {
-				continue
-			}
-			if !h.UserScopeEnabled {
-				return s.note("Harness unavailable", h.Note)
-			}
-			enabled := slices.Contains(cfg.Settings.Harnesses, h.ID)
-			if err := setHarnessEnabled(s.root, h.ID, !enabled, enabled); err != nil {
-				return err
-			}
-			if err := s.note("Harness updated", fmt.Sprintf("%s is now %s.\nMCP: %s\nSkills: %s\nRun synchronization to update native files.", h.Label, map[bool]string{true: "disabled", false: "enabled"}[enabled], h.ConfigFile, h.SkillDirectory)); err != nil {
-				return err
-			}
-		}
+		return err
 	}
+	return s.note("Harnesses saved", "Harness availability updated. Run synchronization to update native harness configuration.")
 }
 
 func (s interfaceSession) configureMCP() error {
@@ -296,45 +288,51 @@ func (s interfaceSession) configureSkills() error {
 }
 
 func (s interfaceSession) configureSkill(name string) error {
-	for {
-		cfg, err := config.Load(s.root)
-		if err != nil {
-			return err
-		}
-		var selected *config.Skill
-		for i := range cfg.Skills {
-			if cfg.Skills[i].Name == name {
-				selected = &cfg.Skills[i]
-				break
-			}
-		}
-		if selected == nil {
-			return fmt.Errorf("skill %q no longer exists; refresh", name)
-		}
-		choices := make([]huh.Option[string], 0, len(cfg.Settings.Harnesses)+1)
-		for _, h := range harnesses {
-			if !h.UserScopeEnabled || !slices.Contains(cfg.Settings.Harnesses, h.ID) {
-				continue
-			}
-			mark := "[ ]"
-			if config.Allows(selected.Harnesses, h.ID) {
-				mark = "[✓]"
-			}
-			choices = append(choices, huh.NewOption(mark+" "+h.Label, h.ID))
-		}
-		choices = append(choices, huh.NewOption("Back to skills", "back"))
-		choice, err := s.selectAction("Skill availability: "+name, "Select a harness to toggle; metadata.harness: none disables all.", choices...)
-		if err != nil {
-			return err
-		}
-		if choice == "back" {
-			return nil
-		}
-		before := config.Allows(selected.Harnesses, choice)
-		if err := setSkillHarness(s.root, *selected, choice, !before); err != nil {
-			return err
+	cfg, err := config.Load(s.root)
+	if err != nil {
+		return err
+	}
+	var selected *config.Skill
+	for i := range cfg.Skills {
+		if cfg.Skills[i].Name == name {
+			selected = &cfg.Skills[i]
+			break
 		}
 	}
+	if selected == nil {
+		return fmt.Errorf("skill %q no longer exists; refresh", name)
+	}
+	choices := make([]huh.Option[string], 0, len(harnesses))
+	enabled := make([]string, 0, len(harnesses))
+	for _, h := range harnesses {
+		label := h.Label
+		if !h.UserScopeEnabled {
+			label = "VS Code (legacy filter only)"
+		}
+		active := config.Allows(selected.Harnesses, h.ID)
+		choices = append(choices, huh.NewOption(label, h.ID).Selected(active))
+		if active {
+			enabled = append(enabled, h.ID)
+		}
+	}
+	err = s.form(huh.NewMultiSelect[string]().
+		Title("Skill availability: " + safeHuhText(name)).
+		Description("Space selects/deselects, Enter saves all, Esc cancels. Empty selection writes metadata.harness: none. Global harness selection still controls sync.").
+		Options(choices...).
+		Value(&enabled))
+	if isCancelled(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := setSkillHarnessSelection(s.root, *selected, enabled); err != nil {
+		if errors.Is(err, errNoChange) {
+			return nil
+		}
+		return err
+	}
+	return s.note("Skill availability saved", "Updated only the source skill's metadata.harness. Native skill files are refreshed on synchronization.")
 }
 
 func (s interfaceSession) showPlugins() error {
