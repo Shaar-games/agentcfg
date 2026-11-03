@@ -10,8 +10,8 @@ import (
 )
 
 func TestInitReadOnlyPreviewDoesNotWriteWithoutApproval(t *testing.T) {
-	for _, opts := range []initOptions{{Plain: true}, {Plain: true, Yes: true}, {Apply: true}} {
-		t.Run(strings.Join([]string{asBool(opts.Plain), asBool(opts.Yes), asBool(opts.Apply)}, "-"), func(t *testing.T) {
+	for _, opts := range []initOptions{{Plain: true}, {Plain: true, Yes: true}, {}} {
+		t.Run(strings.Join([]string{asBool(opts.Plain), asBool(opts.Yes)}, "-"), func(t *testing.T) {
 			home := t.TempDir()
 			var output bytes.Buffer
 			proposal := initProposal{DetectedHarnesses: []string{"codex"}, Servers: map[string]map[string]any{
@@ -66,7 +66,7 @@ func TestInitCLIPlainInspectNativeHarnessDoesNotCreateSources(t *testing.T) {
 	}
 }
 
-func TestInitCLIExplicitApprovalWritesOnlyCanonical(t *testing.T) {
+func TestInitCLIExplicitApprovalNeverOverwritesExistingCanonical(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -78,30 +78,35 @@ func TestInitCLIExplicitApprovalWritesOnlyCanonical(t *testing.T) {
 	if err := os.WriteFile(native, nativeData, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	canonical := filepath.Join(home, ".agentcfg")
+	if err := os.Mkdir(canonical, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(canonical, "keep.txt")
+	if err := os.WriteFile(marker, []byte("existing canonical data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var output, diagnostics bytes.Buffer
-	if err := run(context.Background(), []string{"init", "--yes"}, nil, &output, &diagnostics); err != nil {
-		t.Fatal(err)
+	if err := run(context.Background(), []string{"init", "--yes"}, nil, &output, &diagnostics); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("--yes silently overwrote existing canonical sources: %v", err)
 	}
-	if !strings.Contains(output.String(), "Created canonical agentcfg") {
-		t.Fatalf("missing initialization result: %s", output.String())
-	}
-	if _, err := os.Stat(filepath.Join(home, ".agentcfg", "agentcfg.json")); err != nil {
-		t.Fatal(err)
+	if after, err := os.ReadFile(marker); err != nil || string(after) != "existing canonical data" {
+		t.Fatalf("--yes changed canonical data: %q, %v", after, err)
 	}
 	after, err := os.ReadFile(native)
 	if err != nil || !bytes.Equal(after, nativeData) {
-		t.Fatalf("init without --apply edited native config: %q, %v", after, err)
+		t.Fatalf("rejected init edited native config: %q, %v", after, err)
 	}
 }
 
-func TestInitRejectsPlainWithApplyWithoutWriting(t *testing.T) {
+func TestInitRejectsRemovedApplyFlagWithoutWriting(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	var output, diagnostics bytes.Buffer
 	err := run(context.Background(), []string{"init", "--plain", "--apply", "--yes"}, nil, &output, &diagnostics)
-	if err == nil || !strings.Contains(err.Error(), "read-only") {
-		t.Fatalf("--plain --apply not rejected: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("obsolete init --apply was not rejected: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".agentcfg")); !os.IsNotExist(err) {
 		t.Fatalf("invalid argument combination wrote files: %v", err)

@@ -16,11 +16,14 @@ same Huh interface:
 | `agentcfg mcp`, `agentcfg mcps` | Choose per-harness MCP availability and shared/isolated operation | `agentcfg mcps --plain` |
 | `agentcfg config` | Open the complete Huh navigation menu | Use the relevant category's `--plain` form |
 
-Huh uses the same checklist navigation in its sections: ↑/↓ moves, Space
-toggles a choice, Enter confirms, and Ctrl+C cancels. Harness and skill
-availability are multi-select; the current effective selections are prechecked.
-The interface edits the relevant canonical settings or availability rules, and
-native harness configuration is changed only through a confirmed sync.
+**All Huh navigation and action menus are Select fields.** Move with ↑/↓ and
+press **Enter** to open the highlighted section, select an MCP or skill, or
+confirm an action (including shared/isolated). No Space key is needed for a
+single selection. **Only availability involving multiple harnesses, MCPs or
+skills uses MultiSelect checkboxes**: Space checks/unchecks, Enter saves, and
+Ctrl+C cancels. Current availability selections are prechecked. The interface
+edits canonical settings; native harness files change only after an explicit
+sync confirmation.
 
 `--plain` on a category command prints its effective settings without opening
 Huh, editing sources or starting MCP processes. It is useful in scripts:
@@ -52,12 +55,16 @@ On an interactive terminal, `agentcfg init`:
 1. Identifies installed harnesses and reads their supported native MCP and
    skill sources. It presents discovered candidates and any duplicate names
    or configurations that cannot be safely resolved.
-2. Shows Huh selection lists so the user can choose harnesses and the entries
-   to include in the canonical configuration.
+2. Shows Huh Select menus for navigation/actions and MultiSelect checkboxes
+   only for multi-entry availability choices. The user chooses which
+   harnesses, MCPs and skills to include in the canonical configuration.
 3. Previews the proposed `~/.agentcfg/mcp.json`,
    `~/.agentcfg/agentcfg.json`, and skills.
 4. Requests **explicit Huh confirmation before creating canonical sources**.
-   Cancelling does not authorize any change.
+   Cancelling leaves them untouched.
+5. At the end of initialization, previews the native harness synchronization
+   plan and asks **whether to apply it**, using an explicit confirmation. The
+   user may decline and keep only the canonical configuration.
 
 The preview is available without writing anything:
 
@@ -66,35 +73,39 @@ agentcfg init --plain                  # Read-only discovery and preview
 agentcfg init --harnesses codex,cursor # Limit the selected harnesses
 ```
 
-To create the canonical sources and also synchronize supported native harness
-settings, use:
+`agentcfg init` handles both canonical creation and the **optional native
+sync prompt** within that one interactive flow. It does not need an `--apply`
+flag. Only exact native entries selected during discovery may be adopted after
+their original file/tree fingerprints have been revalidated (compare-and-swap,
+CAS). Supported JSON/JSONC MCP entries and byte-identical skill trees can be
+adopted with explicit consent and backups; unrelated settings remain untouched.
+**Native Codex TOML MCP adoption is refused**, including when the discovered
+entry appears equivalent. Unexpected collisions, changed files or unproved
+entries block the operation; no general force-overwrite mode exists.
+
+For deliberate unattended canonical setup, `--yes` skips the interactive
+creation confirmation **only**; it does not approve native synchronization:
 
 ```sh
-agentcfg init --apply
+agentcfg init --yes                   # Create canonical sources only; no native sync
 ```
 
-This runs the discovery and confirmation flow, shows a separate native sync
-plan and asks for **a second Huh confirmation** before applying native changes.
-Only the exact native entries selected during discovery may be adopted, after
-their original file/tree fingerprints have been revalidated. JSON/JSONC MCP
-entries and byte-identical skill trees can be adopted with this explicit
-consent; unrelated settings remain untouched. Native Codex TOML MCP adoption
-is deliberately refused until it can be done without risking unrelated tables.
-Unexpected name collisions, changed files and unproved entries still block
-the operation; no general force-overwrite mode exists.
-
-For deliberate unattended use, `--yes` is the explicit alternative to Huh
-confirmation:
+Review the output or run `agentcfg init --plain` first. The optional final
+native synchronization prompt exists **only in interactive initialization**.
+`agentcfg init --yes` must never silently write native harness settings. To
+apply native changes from a script, use a separate explicit command:
 
 ```sh
-agentcfg init --yes                   # Confirm canonical creation in a script
-agentcfg init --apply --yes           # Confirm creation and native sync
+agentcfg init --yes
+agentcfg sync --plain         # Review native changes without writing
+agentcfg sync --apply --yes   # Explicit noninteractive native synchronization
 ```
 
-Review the output or run `agentcfg init --plain` first. Regardless of the
-mode, **existing canonical files and any unproved or modified native entries
-must never be silently overwritten**. Resolve
-conflicts by inspecting the paths and entries reported by the preview.
+The application still checks ownership, conflicts and fingerprints (CAS) and
+creates backups as appropriate. Without the required confirmation, no writes
+occur. **Existing canonical files and any unproved or modified native entries
+must never be silently overwritten**. Resolve conflicts by inspecting the
+paths and entries reported by the preview.
 
 After configuration, `agentcfg validate` checks canonical sources, and
 `agentcfg sync` produces an independent read-only preview. For ongoing

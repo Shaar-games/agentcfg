@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestInitApplyYesAdoptsNativeMCPWithoutOverwritingUnrelatedSettings(t *testing.T) {
+func TestInitYesCreatesCanonicalWithoutSilentlyAdoptingNativeMCP(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles a real CLI executable")
 	}
@@ -37,30 +37,29 @@ func TestInitApplyYesAdoptsNativeMCPWithoutOverwritingUnrelatedSettings(t *testi
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("compile CLI fixture: %v\n%s", err, output)
 	}
-	cmd := exec.Command(executable, "init", "--apply", "--yes")
+	cmd := exec.Command(executable, "init", "--yes")
 	cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("init --apply --yes failed: %v\n%s", err, output)
+		t.Fatalf("init --yes failed: %v\n%s", err, output)
 	}
-	if !bytes.Contains(output, []byte("Applied")) || !bytes.Contains(output, []byte("adoption")) {
-		t.Fatalf("missing adoption preview or apply result: %s", output)
+	if !bytes.Contains(output, []byte("Created canonical agentcfg configuration")) ||
+		!bytes.Contains(output, []byte("Native harness configuration was not modified")) ||
+		bytes.Contains(output, []byte("Applied")) {
+		t.Fatalf("noninteractive init unexpectedly applied native changes: %s", output)
 	}
 	after, err := os.ReadFile(native)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(after, []byte("otherPreference")) ||
-		!bytes.Contains(after, []byte("keep")) ||
-		!bytes.Contains(after, []byte("agentcfg")) ||
-		bytes.Contains(after, []byte("server.js")) {
-		t.Fatalf("adopted native MCP did not preserve unrelated settings and replace just imported entry: %s", after)
+	if !bytes.Equal(after, before) {
+		t.Fatalf("noninteractive init must not alter existing native MCP settings: %s", after)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".agentcfg", "mcp.json")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".agentcfg", "sync-user.json")); err != nil {
-		t.Fatalf("missing ownership manifest after explicit apply: %v", err)
+	if _, err := os.Lstat(filepath.Join(home, ".agentcfg", "sync-user.json")); !os.IsNotExist(err) {
+		t.Fatalf("noninteractive init unexpectedly applied native ownership manifest: %v", err)
 	}
 	// A second init is not a silent overwrite or merge of existing sources.
 	repeat := exec.Command(executable, "init", "--yes")

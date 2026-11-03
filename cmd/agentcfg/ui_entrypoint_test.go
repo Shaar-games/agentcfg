@@ -36,6 +36,28 @@ func TestDefaultIsHelpAndDoesNotAccessConfiguration(t *testing.T) {
 	}
 }
 
+func TestHelpHasSpacedSectionsWithoutObsoleteBoilerplate(t *testing.T) {
+	var output, diagnostics bytes.Buffer
+	if err := run(context.Background(), []string{"help"}, nil, &output, &diagnostics); err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	for _, section := range []string{"\n\nConfiguration:\n", "\n\nSetup and inspection:\n", "\n\nRuntime:\n", "\n\nOther:\n"} {
+		if !strings.Contains(text, section) {
+			t.Fatalf("missing spacing or help section %q:\n%s", section, text)
+		}
+	}
+	for _, obsolete := range []string{
+		"All commands use the current user's",
+		"No persistent web server or TCP listener is used.",
+		"Bidirectional sync is not implemented.",
+	} {
+		if strings.Contains(text, obsolete) {
+			t.Fatalf("obsolete help text remains: %q", obsolete)
+		}
+	}
+}
+
 func TestConfigOpensFullHuhMenu(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	home := t.TempDir()
@@ -43,13 +65,13 @@ func TestConfigOpensFullHuhMenu(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	for _, args := range [][]string{{"config"}} {
 		var rendered, diagnostics bytes.Buffer
-		if err := run(context.Background(), args, oneByteReader{strings.NewReader("8\n0\n")}, &rendered, &diagnostics); err != nil {
+		if err := run(context.Background(), args, oneByteReader{strings.NewReader("8\n")}, &rendered, &diagnostics); err != nil {
 			t.Fatalf("agentcfg %v: %v (%s)", args, err, diagnostics.String())
 		}
 		if !strings.Contains(rendered.String(), "MCP servers") ||
 			!strings.Contains(rendered.String(), "Agent Plugins") ||
 			!strings.Contains(rendered.String(), "Diagnostics") ||
-			!strings.Contains(rendered.String(), "Confirm selection") {
+			!strings.Contains(rendered.String(), "Enter a number") {
 			t.Fatalf("agentcfg %v did not show full config menu: %s", args, rendered.String())
 		}
 	}

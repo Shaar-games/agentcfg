@@ -16,10 +16,18 @@ Lors de la première configuration, `agentcfg init` découvre les MCP et skills
 présents dans les dossiers natifs des harnesses installés. Il affiche les
 éléments à sélectionner et une prévisualisation, puis exige une confirmation Huh
 avant la création de `~/.agentcfg/`. `agentcfg init --plain` montre ce plan
-en lecture seule. Avec `agentcfg init --apply`, un second plan expose les
-changements natifs ; l'interface demande une **confirmation distincte** avant
-leur application. Pour les scripts, `--yes` exprime une approbation explicite
-de la création canonique, et aussi du sync si `--apply` est présent.
+en lecture seule. **À la fin de `agentcfg init` interactif, une confirmation
+distincte propose d'appliquer la synchronisation native**, après
+prévisualisation. Aucun `--apply` n'est nécessaire pour ce parcours.
+**`agentcfg init --yes` crée uniquement la configuration canonique, sans
+synchronisation native.** Pour les scripts, exécuter ensuite explicitement
+`agentcfg sync --plain` pour prévisualiser, puis `agentcfg sync --apply --yes`
+pour autoriser l'écriture native. Ces commandes conservent les protections.
+
+Les menus d'action et de navigation sont des **Huh Select** : les flèches
+choisissent et **Entrée valide directement**. Les cases à cocher (MultiSelect)
+servent uniquement à choisir plusieurs disponibilités de harnesses, skills
+ou MCP. Elles se cochent/décochent avec Espace.
 
 Les fichiers canoniques existants, les entrées natives non gérées et les skills
 déjà présents ne sont **jamais écrasés silencieusement**. Un conflit de nom ou
@@ -27,11 +35,12 @@ une modification concurrente bloque l'opération concernée. Pour une
 prévisualisation ordinaire ultérieure, `agentcfg sync --plain` produit une
 sortie sans formulaire ; l'écriture nécessite toujours `--apply`.
 
-Lors d'un `init --apply` explicitement confirmé, seules les entrées natives
+Lors de l'application de sync proposée par `init` et explicitement confirmée,
+seules les entrées natives
 sélectionnées et prouvées par le scanner peuvent être adoptées : MCP JSON/JSONC
 avec empreinte du fichier complet, et skills dont le contenu est identique à
-la source canonique. Une **deuxième confirmation Huh** autorise leur remplacement
-ciblé, avec sauvegarde et revalidation avant écriture. L'adoption de serveurs
+la source canonique. La **confirmation Huh finale** autorise leur remplacement
+ciblé, avec sauvegarde et revalidation CAS avant écriture. L'adoption de serveurs
 MCP en TOML Codex est refusée ; les autres entrées non prouvées restent intactes.
 
 Un serveur MCP est généré individuellement dans chaque harness sélectionné.

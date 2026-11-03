@@ -23,10 +23,10 @@ de la machine de développement.
 
 Les tests de la CLI vérifient notamment que `agentcfg` sans argument affiche
 l'aide et que `agentcfg config` ouvre la configuration Huh. Sur un terminal
-interactif, les listes de sélection des harnesses et des skills utilisent les
-mêmes commandes : flèches ↑/↓, Espace pour cocher ou décocher, Entrée pour
-valider et Ctrl+C pour annuler. La configuration n'est enregistrée qu'après
-validation du formulaire concerné.
+interactif, les menus de navigation et d'action utilisent **Huh Select** :
+flèches ↑/↓ pour choisir puis **Entrée pour valider**. Les cases à cocher
+avec Espace et Entrée sont réservées aux sélections de plusieurs disponibilités
+de harnesses, MCP ou skills. Ctrl+C annule. Aucune écriture sans confirmation.
 
 Vérifier aussi les commandes directes `harness`/`harnesses`,
 `skill`/`skills`, `mcp`/`mcps` et leur mode `--plain` (inventaire
@@ -65,13 +65,15 @@ vérifier d'abord le flux `agentcfg init` :
 
 1. `agentcfg init --plain` découvre les MCP et skills natifs et affiche un plan sans créer de fichier.
 2. `agentcfg init` ouvre des listes Huh de sélection et demande une confirmation avant création des sources canoniques.
-3. `agentcfg init --apply` affiche en plus un plan de synchronisation native et demande une confirmation distincte avant application.
-4. Une annulation, un conflit d'entrée non gérée ou une modification concurrente ne doit produire aucun écrasement silencieux.
+3. `agentcfg init` propose à la fin un plan de synchronisation native, puis une confirmation Huh distincte, sans exiger `--apply`.
+4. `agentcfg init --yes` crée uniquement les sources canoniques, sans synchronisation native ; `init --plain` ne modifie aucun fichier.
+5. Pour les scripts, `agentcfg sync --plain` prévisualise les changements, puis seul `agentcfg sync --apply --yes` autorise explicitement leur application.
+6. Une annulation, un conflit d'entrée non gérée ou une modification concurrente ne doit produire aucun écrasement silencieux ; les changements autorisés sont sauvegardés et soumis aux vérifications CAS, l'adoption MCP TOML est refusée.
 
 Lancer ensuite `agentcfg config`, puis vérifier que :
 
-1. Le menu présente les sections harnesses, MCP, skills, plugins, diagnostics et synchronisation.
-2. Les choix cochés sont visibles dans les listes multi-sélection, et annuler une édition ne modifie rien.
+1. Le menu présente les sections harnesses, MCP, skills, plugins, diagnostics et synchronisation via Huh Select : Entrée ouvre la section choisie.
+2. Les cases cochées apparaissent seulement dans les listes de disponibilités multiples ; annuler une édition ne modifie rien.
 3. La prévisualisation de synchronisation reste en lecture seule avant confirmation et application.
 4. Les détails, avertissements et conflits sont lisibles sur le terminal cible.
 

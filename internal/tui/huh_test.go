@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"agentcfg/internal/config"
+
+	"github.com/charmbracelet/huh"
 )
 
 // Huh's accessible numeric prompt constructs a new buffered reader for each
@@ -29,7 +31,7 @@ func TestHuhAccessibleAdvancedMenuExitIsReadOnly(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	root := t.TempDir()
 	var rendered bytes.Buffer
-	if err := RunMenu(context.Background(), root, terminalByteReader{strings.NewReader("8\n0\n")}, &rendered); err != nil {
+	if err := RunMenu(context.Background(), root, terminalByteReader{strings.NewReader("8\n")}, &rendered); err != nil {
 		t.Fatal(err)
 	}
 	for _, text := range []string{"agentcfg", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Diagnostics", "synchronization", "Refresh", "Exit"} {
@@ -37,8 +39,8 @@ func TestHuhAccessibleAdvancedMenuExitIsReadOnly(t *testing.T) {
 			t.Fatalf("Huh main menu missing %q: %s", text, rendered.String())
 		}
 	}
-	if !strings.Contains(rendered.String(), "Select up to 1 option") || !strings.Contains(rendered.String(), "Confirm selection") {
-		t.Fatalf("configuration navigation must use the same native Huh checkbox list as harnesses: %s", rendered.String())
+	if !strings.Contains(rendered.String(), "Enter a number between 1 and 8") || strings.Contains(rendered.String(), "Confirm selection") {
+		t.Fatalf("configuration navigation must be a single-choice Huh Select: %s", rendered.String())
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil || len(entries) != 0 {
@@ -55,9 +57,8 @@ func TestHuhConfigMenuOpensNativeHarnessCheckboxes(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	// Check Harnesses and submit; accept its prechecked values unchanged;
-	// then submit an empty top-level selection to exit.
-	in := terminalByteReader{strings.NewReader("1\n0\n0\n0\n")}
+	// Enter Harnesses directly, accept prechecked values, then select Exit.
+	in := terminalByteReader{strings.NewReader("1\n0\n8\n")}
 	if err := RunMenu(context.Background(), root, in, &output); err != nil {
 		t.Fatal(err)
 	}
@@ -84,15 +85,15 @@ func TestHuhMCPSharingUsesPrecheckedNativeList(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	// Open the server -> Change sharing -> uncheck Shared -> check Isolated ->
-	// confirm -> leave server list without selecting another action.
-	sequence := "1\n0\n2\n0\n1\n2\n0\n0\n"
+	// Open server -> Change sharing -> Isolated -> Back. Each action selection
+	// now completes on Enter; no checkbox confirmation is needed.
+	sequence := "1\n2\n2\n2\n"
 	session := interfaceSession{ctx: context.Background(), root: root, in: terminalByteReader{strings.NewReader(sequence)}, out: &output}
 	if err := session.configureMCP(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "MCP sharing") || !strings.Contains(output.String(), "Confirm selection") {
-		t.Fatalf("MCP sharing did not use a Huh checkbox list: %s", output.String())
+	if !strings.Contains(output.String(), "MCP sharing") || strings.Contains(output.String(), "Confirm selection") {
+		t.Fatalf("MCP sharing must use a single-choice Huh Select: %s", output.String())
 	}
 	cfg, err := config.Load(root)
 	if err != nil {
@@ -108,9 +109,9 @@ func TestHuhMCPAvailabilityListCanDisableOneConfiguredHarness(t *testing.T) {
 	root := settingsFixture(t)
 	putSettings(t, root, "{\"harnesses\":[\"codex\",\"cursor\"]}")
 	var output bytes.Buffer
-	// Select "alpha" in the server list; select "Harness availability"; uncheck
-	// Codex in the native Huh multiselect and accept; exit the server list.
-	input := terminalByteReader{strings.NewReader("1\n0\n1\n0\n1\n0\n0\n")}
+	// Open alpha, open the actual multiselect availability field, uncheck
+	// Codex, confirm, then Back to the parent screen.
+	input := terminalByteReader{strings.NewReader("1\n1\n1\n0\n2\n")}
 	session := interfaceSession{ctx: context.Background(), root: root, in: input, out: &output}
 	if err := session.configureMCP(); err != nil {
 		t.Fatal(err)
@@ -288,5 +289,47 @@ func TestHuhWindowsPathsAndControlCharactersDisplaySafely(t *testing.T) {
 	value := safeHuhText("C:\\Users\\demo\\.agentcfg\\skills\\review\x1b[2J\nNext")
 	if value != "C:/Users/demo/.agentcfg/skills/review [2J\nNext" {
 		t.Fatalf("unexpected terminal-safe text: %q", value)
+	}
+}
+
+func TestHuhSelectActionEnterOpensSingleChoiceAndAddsSpacing(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	var output bytes.Buffer
+	s := interfaceSession{
+		ctx: context.Background(), in: terminalByteReader{strings.NewReader("2\n")}, out: &output,
+	}
+	selected, err := s.selectAction("Menu", "Enter opens the selected action",
+		huh.NewOption("First", "first"), huh.NewOption("Second", "second"))
+	if err != nil || selected != "second" {
+		t.Fatalf("Select did not trigger selected action on Enter: %q (%v)", selected, err)
+	}
+	if strings.Contains(output.String(), "Confirm selection") || strings.Contains(output.String(), "Select up to") {
+		t.Fatalf("single action rendered a checkbox workflow: %q", output.String())
+	}
+	if !strings.HasSuffix(output.String(), "\n\n") {
+		t.Fatalf("missing blank line after leaving a menu: %q", output.String())
+	}
+	if _, err := s.selectAction("Empty", "", nil...); err == nil {
+		t.Fatal("empty action list must fail explicitly instead of panicking")
+	}
+}
+
+func TestHuhMCPSharingSelectUnchangedByEnter(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex"]}`)
+	before, err := os.ReadFile(settingsFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	s := interfaceSession{ctx: context.Background(), root: root,
+		in: terminalByteReader{strings.NewReader("1\n")}, out: &output}
+	if err := s.configureMCPSharing("alpha", config.Server{Sharing: "shared"}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(settingsFile(root))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("same sharing mode should not rewrite settings: %v; before=%s after=%s", err, before, after)
 	}
 }

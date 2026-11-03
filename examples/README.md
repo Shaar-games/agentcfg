@@ -4,10 +4,17 @@ These files are samples, not active configuration. The canonical JSON samples ha
 
 For an existing user-level harness setup, begin with `agentcfg init --plain`
 to **preview discovery of installed harness MCPs and skills**. On an interactive
-terminal, `agentcfg init` offers Huh selection and asks for confirmation
-before creating canonical sources. `agentcfg init --apply` additionally
-previews and requests confirmation for native synchronization. Neither
-initialization nor the sample files silently overwrite existing entries.
+terminal, `agentcfg init` uses Huh Select for actions/navigation (Enter
+validates) and checkboxes only for selecting multiple availabilities. It asks
+for confirmation before creating canonical sources, then **offers to apply
+native synchronization after a separate preview and confirmation**. No
+`--apply` flag is needed for `init`. `--plain` stays read-only, and
+**`agentcfg init --yes` creates only canonical sources; it never synchronizes
+native harness settings**. Scripts must separately preview with
+`agentcfg sync --plain`, then explicitly run `agentcfg sync --apply --yes`
+to apply native changes. Neither initialization nor the sample files silently
+overwrite existing entries; verified adoption
+requires backup and CAS checks, and native TOML MCP adoption is refused.
 Samples remain inert and are not automatically imported during discovery.
 
 ## Chrome DevTools and Context7

@@ -33,14 +33,10 @@ type initProposal struct {
 type initOptions struct {
 	Harnesses []string // explicit choice, or nil to use autodetected defaults
 	Plain     bool
-	Apply     bool // additionally preview/synchronize native harness files
-	Yes       bool // explicit non-interactive approval
+	Yes       bool // explicit non-interactive approval of canonical creation only
 }
 
 func runInitWizard(ctx context.Context, home string, proposal initProposal, opts initOptions, input io.Reader, output io.Writer) error {
-	if opts.Plain && opts.Apply {
-		return errors.New("--plain is a read-only preview and cannot be combined with --apply")
-	}
 	configured := append([]string(nil), proposal.DetectedHarnesses...)
 	if opts.Harnesses != nil {
 		configured = append([]string(nil), opts.Harnesses...)
@@ -108,11 +104,7 @@ func runInitWizard(ctx context.Context, home string, proposal initProposal, opts
 	fmt.Fprintf(&preview, "Importable MCP servers: %d (selected %d)\n", len(proposal.Servers), len(servers))
 	fmt.Fprintf(&preview, "Importable native skills: %d (selected %d)\n", len(proposal.Skills), len(skills))
 	fmt.Fprintln(&preview, "Canonical target: ~/.agentcfg/ (new user-level sources only)")
-	if opts.Apply {
-		fmt.Fprintln(&preview, "After creation, preview native synchronization and ask separately before applying.")
-	} else {
-		fmt.Fprintln(&preview, "Native harness configuration remains unchanged until agentcfg sync --apply.")
-	}
+	fmt.Fprintln(&preview, "After creation, review native synchronization and confirm once before applying.")
 	if len(proposal.Warnings) > 0 {
 		fmt.Fprintf(&preview, "Skipped/unsupported sources (%d):\n", len(proposal.Warnings))
 		for index, warning := range proposal.Warnings {
@@ -165,43 +157,18 @@ func runInitWizard(ctx context.Context, home string, proposal initProposal, opts
 		if !reflect.DeepEqual(proposal.Inventory, current) {
 			return errors.New("native harness configuration changed after the init preview; rerun agentcfg init before applying")
 		}
-		if opts.Apply {
-			adoptions, _, err := initAdoptionProofs(proposal.Inventory, servers, skills, configured)
-			if err != nil {
-				return fmt.Errorf("native adoption preflight: %w", err)
-			}
-			for _, proof := range adoptions {
-				if proof.Harness == "codex" && strings.EqualFold(filepath.Ext(proof.Path), ".toml") {
-					return errors.New("native Codex TOML MCP entries cannot yet be adopted safely; no canonical files created. Use agentcfg init without --apply, then review Codex MCP entries manually")
-				}
-			}
-		}
 	}
 	if err := writeInitialSources(home, settings, servers, skills); err != nil {
 		return err
 	}
 	fmt.Fprintf(output, "Created canonical agentcfg configuration for %d harness(es), %d MCP(s) and %d skill(s).\n",
 		len(configured), len(servers), len(skills))
-	if !opts.Apply {
-		if !interactive {
-			return nil
-		}
-		// The ordinary interactive "agentcfg init" flow offers native apply
-		// without requiring the user to know a second command-line flag.
-		// The actual native diff still gets its own review and confirmation.
-		syncNow, err := terminalConfirm(ctx, input, output,
-			"Preview native harness synchronization now?",
-			"Inspect the changes first; existing native entries are never silently replaced.")
-		if err != nil {
-			if errors.Is(err, huh.ErrUserAborted) {
-				return nil
-			}
-			return err
-		}
-		if !syncNow {
-			fmt.Fprintln(output, "Canonical sources created. Run agentcfg sync to preview native changes later.")
-			return nil
-		}
+	// --yes is limited to canonical creation: a non-interactive confirmation
+	// must not become implicit permission to replace native MCP or skill data.
+	// The interactive flow offers one separate, final approval after preview.
+	if !interactive {
+		fmt.Fprintln(output, "Native harness configuration was not modified. Run agentcfg sync to preview later changes.")
+		return nil
 	}
 	return previewAndApplyInitSync(ctx, home, input, output, interactive, proposal.Inventory, servers, skills, configured)
 }
@@ -308,20 +275,20 @@ func previewAndApplyInitSync(ctx context.Context, home string, input io.Reader, 
 		fmt.Fprintln(output, "No native harness changes required.")
 		return nil
 	}
+	fmt.Fprintln(output, "\n"+preview.String())
 	if interactive {
-		if err := terminalNote(ctx, input, output, "Native synchronization preview", preview.String()); err != nil {
-			return err
-		}
-		confirmed, err := terminalConfirm(ctx, input, output, "Adopt selected native entries and apply changes?", "This is a separate confirmation. Only scanner-proven entries may be replaced. Native files are rechecked and backed up before writing.")
+		confirmed, err := terminalConfirm(ctx, input, output, "Apply native harness changes?", "Only the selected entries will be changed. Native files are rechecked and backed up. Choose Cancel to keep canonical sources without syncing.")
 		if err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Fprintln(output, "Native synchronization cancelled; canonical sources were created.")
+				return nil
+			}
 			return err
 		}
 		if !confirmed {
 			fmt.Fprintln(output, "Native synchronization cancelled; canonical sources were created.")
 			return nil
 		}
-	} else {
-		fmt.Fprintln(output, preview.String())
 	}
 	if err := plan.Apply(); err != nil {
 		return fmt.Errorf("canonical created but native sync failed: %w", err)

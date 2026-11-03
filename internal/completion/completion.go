@@ -17,7 +17,7 @@ var Commands = []string{
 }
 
 var options = map[string][]string{
-	"init":       {"--harnesses", "--apply", "--yes", "--plain", "--help"},
+	"init":       {"--harnesses", "--yes", "--plain", "--help"},
 	"harness":    {"--plain", "--help"},
 	"harnesses":  {"--plain", "--help"},
 	"skill":      {"--plain", "--help"},

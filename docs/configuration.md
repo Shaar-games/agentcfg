@@ -16,9 +16,9 @@
 Only immediate plugin directories and immediate skill directories are discovered. The manifest name, rather than the installation folder name, supplies a plugin's namespace. Missing optional sources are valid. The source root itself must exist and be a directory.
 
 `agentcfg` without arguments displays help. `agentcfg config` opens the Huh
-configuration interface, with consistent selection lists for harnesses, MCP
-servers, skills, plugins and synchronization. Harness, skill and MCP
-availability use multi-select checkboxes (↑/↓ to navigate, Space to toggle,
+configuration interface. **Navigation and action choices use Huh Select**
+(↑/↓ to navigate, **Enter to validate**). **Only multi-value availability**
+for harnesses, MCPs and skills uses MultiSelect checkboxes (Space to toggle,
 Enter to save, Ctrl+C to cancel). The direct section commands are
 `agentcfg harness` / `harnesses`, `agentcfg skill` / `skills` and
 `agentcfg mcp` / `mcps`; both spellings in each pair have the same meaning.
@@ -29,19 +29,24 @@ Zsh, Fish and PowerShell setup.
 ### Initial discovery
 
 `agentcfg init` discovers supported, user-level native MCP entries and skill
-directories from installed harnesses. On an interactive terminal, it displays
-Huh lists for selection, prepares an explicit preview and requests confirmation
-**before creating canonical sources**. It does not execute discovered MCPs or
-skills. `agentcfg init --plain` produces only a read-only discovery preview.
+directories from installed harnesses. On an interactive terminal, it uses
+Huh Select for navigation/actions and checkboxes only for multi-availability
+choices, previews the proposal, and requests confirmation **before creating
+canonical sources**. It does not execute discovered MCPs or skills.
+`agentcfg init --plain` produces only a read-only discovery preview.
 
-`agentcfg init --apply` additionally prepares a native synchronization
-preview and asks for a separate Huh confirmation before writing those native
-files. `--yes` explicitly authorizes unattended creation and, in combination
-with `--apply`, synchronization. Only native entries selected in discovery
-with exact revalidated proofs can be adopted: supported JSON/JSONC MCP entries
-and identical skills. Unrelated native settings and files are preserved.
-Native TOML MCP adoption, ambiguous ownership, unexpected collisions or
-changed entries are refused rather than silently overwritten.
+At the end of **interactive** `agentcfg init`, a separate native
+synchronization preview is shown and Huh confirmation **offers to apply it**.
+No `--apply` flag is required for initialization. **`agentcfg init --yes`
+confirms canonical creation only and never performs native synchronization.**
+For scripts, preview with `agentcfg sync --plain` and invoke
+`agentcfg sync --apply --yes` separately to authorize native changes. Neither
+command bypasses conflict or compare-and-swap (CAS) checks.
+Only native entries selected in discovery with exact revalidated proofs can be
+adopted: supported JSON/JSONC MCP entries and identical skill trees, with
+backups before authorized changes. Unrelated native settings and files are
+preserved. **Native TOML MCP adoption is refused**; ambiguous ownership,
+unexpected collisions or concurrent changes are never silently overwritten.
 
 The configuration loader itself remains read-only. Initialization is an
 explicit CLI operation that reads supported installed harness locations and

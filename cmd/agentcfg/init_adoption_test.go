@@ -164,13 +164,14 @@ func TestInitCodexTOMLAdoptionRefusesUnownedCollision(t *testing.T) {
 	}
 }
 
-func TestInitApplyYesWithCodexTOMLDoesNotLeavePartialCanonicalTree(t *testing.T) {
+func TestInitYesWithCodexTOMLCreatesCanonicalButDoesNotAdoptNative(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"),
-		[]byte("[mcp_servers.local]\ncommand = 'node'\n"), 0o600); err != nil {
+	native := filepath.Join(home, ".codex", "config.toml")
+	original := []byte("[mcp_servers.local]\ncommand = 'node'\n")
+	if err := os.WriteFile(native, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	inventory, err := bootstrap.Discover(home)
@@ -182,12 +183,18 @@ func TestInitApplyYesWithCodexTOMLDoesNotLeavePartialCanonicalTree(t *testing.T)
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	err = runInitWizard(context.Background(), home, proposal, initOptions{Apply: true, Yes: true}, nil, &output)
-	if err == nil || !strings.Contains(err.Error(), "TOML") {
-		t.Fatalf("unsafe TOML adoption not rejected before canonical creation: %v", err)
+	err = runInitWizard(context.Background(), home, proposal, initOptions{Yes: true}, nil, &output)
+	if err != nil {
+		t.Fatalf("canonical import of native TOML must remain allowed: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".agentcfg")); !os.IsNotExist(err) {
-		t.Fatalf("refused native adoption left a partially initialized canonical tree: %v", err)
+	if _, err := os.Stat(filepath.Join(home, ".agentcfg", "mcp.json")); err != nil {
+		t.Fatalf("canonical import not created: %v", err)
+	}
+	if after, err := os.ReadFile(native); err != nil || !bytes.Equal(after, original) {
+		t.Fatalf("native Codex TOML was modified: %s, %v", after, err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".agentcfg", "sync-user.json")); !os.IsNotExist(err) {
+		t.Fatalf("native adoption occurred without consent: %v", err)
 	}
 }
 

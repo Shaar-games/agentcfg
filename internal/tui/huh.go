@@ -62,25 +62,29 @@ func (s interfaceSession) form(fields ...huh.Field) error {
 			form.WithAccessible(false)
 		}
 	}
-	return form.RunWithContext(s.ctx)
+	err := form.RunWithContext(s.ctx)
+	// Huh keeps the previous field visible when it exits. Add breathing room
+	// before the next menu, including after applying changes or going back.
+	if _, writeErr := fmt.Fprint(s.out, "\n\n"); err == nil && writeErr != nil {
+		return writeErr
+	}
+	return err
 }
 
 func (s interfaceSession) selectAction(title, description string, choices ...huh.Option[string]) (string, error) {
-	// Navigation uses the same native Huh checkbox list as harness and skill
-	// settings. Only one destination may be checked, because these are actions
-	// rather than settings. An empty selection returns to the parent screen.
-	var selected []string
-	err := s.form(huh.NewMultiSelect[string]().
+	// Navigation is single-choice: arrows move and Enter activates immediately.
+	// Checkboxes are reserved for actual multi-harness availability settings.
+	if len(choices) == 0 {
+		return "", fmt.Errorf("%s: no action is available", title)
+	}
+	selected := choices[0].Value
+	err := s.form(huh.NewSelect[string]().
 		Title(title).
 		Description(description).
 		Options(choices...).
-		Limit(1).
 		Height(max(5, min(len(choices)+2, 12))).
 		Value(&selected))
-	if err != nil || len(selected) == 0 {
-		return "", err
-	}
-	return selected[0], nil
+	return selected, err
 }
 
 func (s interfaceSession) note(title, description string) error {
@@ -158,7 +162,7 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 		} else if status.Running {
 			state = fmt.Sprintf("broker PID %d", status.PID)
 		}
-		choice, err := s.selectAction("agentcfg  ·  Configuration", "Space checks a section, Enter opens it, Ctrl+C exits  ·  "+state,
+		choice, err := s.selectAction("agentcfg  ·  Configuration", "↑↓ navigate, Enter opens, Ctrl+C exits  ·  "+state,
 			huh.NewOption("Harnesses  ·  enable / disable", "harnesses"),
 			huh.NewOption(fmt.Sprintf("MCP servers  ·  %d configured", len(cfg.Servers)), "mcp"),
 			huh.NewOption(fmt.Sprintf("Skills  ·  %d available", len(cfg.Skills)), "skills"),
@@ -253,7 +257,7 @@ func (s interfaceSession) configureMCP() error {
 			choices = append(choices, huh.NewOption(fmt.Sprintf("%s  ·  %s  ·  %s", safeHuhText(name), cfg.Servers[name].Type, sharing(cfg.Servers[name])), name))
 		}
 		choices = append(choices, huh.NewOption("Back to main menu", "back"))
-		name, err := s.selectAction("MCP servers", "Space selects a server; Enter opens details. Shared reduces processes.", choices...)
+		name, err := s.selectAction("MCP servers", "↑↓ navigate, Enter opens a server. Shared reduces processes.", choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -340,26 +344,25 @@ func (s interfaceSession) configureMCPHarnesses(server config.Server, configured
 
 func (s interfaceSession) configureMCPSharing(name string, server config.Server) error {
 	current := sharing(server)
-	var selected []string
-	err := s.form(huh.NewMultiSelect[string]().
+	selected := current
+	err := s.form(huh.NewSelect[string]().
 		Title("MCP sharing: "+safeHuhText(name)).
-		Description("Space toggles, Enter saves. Shared reuses the upstream process; isolated keeps session state separate.").
+		Description("↑↓ selects, Enter saves. Shared reuses the upstream process; isolated keeps session state separate.").
 		Options(
 			huh.NewOption("Shared", "shared").Selected(current == "shared"),
 			huh.NewOption("Isolated", "isolated").Selected(current == "isolated"),
 		).
-		Limit(1).
 		Value(&selected))
-	if isCancelled(err) || (err == nil && len(selected) == 0) {
+	if isCancelled(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if selected[0] == current {
+	if selected == current {
 		return nil
 	}
-	return setServerSharing(s.root, name, selected[0], current)
+	return setServerSharing(s.root, name, selected, current)
 }
 
 func sharing(server config.Server) string {
@@ -388,7 +391,7 @@ func (s interfaceSession) configureSkills() error {
 			choices = append(choices, huh.NewOption(fmt.Sprintf("%s  ·  %d harness(es)", safeHuhText(skill.Name), count), skill.Name))
 		}
 		choices = append(choices, huh.NewOption("Back to main menu", "back"))
-		name, err := s.selectAction("Agent Skills", "Space selects a skill, Enter opens its harness checkboxes. Source edits only.", choices...)
+		name, err := s.selectAction("Agent Skills", "↑↓ navigate, Enter opens a skill's harness checkboxes. Source edits only.", choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -467,7 +470,7 @@ func (s interfaceSession) showPlugins() error {
 	}
 	choices = append(choices, huh.NewOption("Back", "back"))
 	for {
-		choice, err := s.selectAction("Portable Agent Plugins", "Space selects a plugin; Enter shows details. Package files stay untouched.", choices...)
+		choice, err := s.selectAction("Portable Agent Plugins", "↑↓ navigate, Enter shows details. Package files stay untouched.", choices...)
 		if isCancelled(err) {
 			return nil
 		}

@@ -39,31 +39,32 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 
 Usage: agentcfg [command] [options]
 
-  (no command) / help   Display this help (no configuration changes)
-  config                Open complete user-level Huh configuration
-  harness, harnesses    Configure enabled AI harnesses (Huh checkboxes)
-  skill, skills         Configure skill availability by harness
-  mcp, mcps             Configure MCP availability and sharing by harness
-  completion <shell>    Print Bash, Zsh, Fish or PowerShell completion
+Configuration:
+  config                Open the configuration menu
+  harness, harnesses    Configure enabled AI harnesses
+  skill, skills         Configure skill availability
+  mcp, mcps             Configure MCP availability and sharing
 
-  init       Discover native harness MCPs/skills; confirm canonical setup
-  list       Show discovered MCP servers and skills
-  validate   Validate canonical configuration and plugin discovery
-  sync       Preview native harness changes; --apply writes them
-  connect    Stdio proxy for one MCP; starts the private broker on demand
-  auth       Explicit OAuth login, status, or logout for a configured MCP
-  update     Self-update this executable to the latest published release
-  status     Show the broker and upstream process IDs (does not start it)
-  stop       Stop this root's broker and its managed MCP children
-  daemon     Run the local IPC broker in the foreground
-  version    Print version
+Setup and inspection:
+  init                  Discover existing harnesses, then confirm setup and sync
+  list                  Browse configured MCP servers, skills and harnesses
+  validate              Validate the configuration
+  sync                  Preview changes; --apply synchronizes native settings
 
-All commands use the current user's ~/.agentcfg configuration.
-Human-facing CLI commands use Huh forms in a TTY; --plain keeps script output.
-Use agentcfg <command> --help for command-specific options.
-No persistent web server or TCP listener is used. OAuth login may temporarily
-listen on a loopback callback address when explicitly invoked.
-Bidirectional sync is not implemented.`)
+Runtime:
+  connect               Stdio proxy for one MCP
+  auth                  OAuth login, status or logout
+  status                Show broker and process status
+  stop                  Stop broker and managed MCP processes
+  daemon                Run local IPC broker
+
+Other:
+  completion <shell>    Generate Bash, Zsh, Fish or PowerShell completion
+  update                Update the executable
+  version               Print the installed version
+  help                  Show this help (also displayed without arguments)
+
+Use agentcfg <command> --help for options.`)
 		return err
 	}
 	if args[0] == "version" {
@@ -275,11 +276,7 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 		}
 		if command == "list" {
 			if interactive {
-				var inventory strings.Builder
-				if err := printInventory(cfg, &inventory); err != nil {
-					return err
-				}
-				return terminalNote(ctx, input, output, "Discovered MCPs and skills", inventory.String())
+				return tui.RunList(ctx, root, input, output)
 			}
 			return printInventory(cfg, output)
 		}
