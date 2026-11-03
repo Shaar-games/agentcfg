@@ -39,8 +39,11 @@ func Discover(home string) (*Plan, error) {
 	if err != nil {
 		return nil, errors.New("invalid discovery home")
 	}
-	absolute, err = pathutil.Resolve(absolute)
-	if err != nil {
+	// Preserve the caller's spelling for reviewable source paths. On macOS
+	// /var is a system alias of /private/var; replacing it here would make
+	// scanner proofs and their displayed origins disagree with native paths.
+	// anchoredPath compares the physically resolved root and candidate instead.
+	if _, err = pathutil.Resolve(absolute); err != nil {
 		return nil, errors.New("discovery home must exist")
 	}
 	info, err := os.Stat(absolute)
@@ -112,14 +115,25 @@ func Discover(home string) (*Plan, error) {
 }
 
 func contained(root, path string) (string, error) {
+	physicalRoot, err := pathutil.Resolve(root)
+	if err != nil {
+		return "", err
+	}
 	resolved, err := pathutil.Resolve(path)
 	if err != nil {
 		return "", err
 	}
-	if !within(root, resolved) {
+	if !within(physicalRoot, resolved) {
 		return "", errors.New("path escapes discovery boundary")
 	}
-	return resolved, nil
+	// Reexpress the verified physical target under the caller's root spelling.
+	// This preserves macOS /var aliases and Windows native source paths shown
+	// in scanner proofs without permitting an actual escape from that root.
+	relative, err := filepath.Rel(physicalRoot, resolved)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, relative), nil
 }
 
 func within(root, path string) bool {

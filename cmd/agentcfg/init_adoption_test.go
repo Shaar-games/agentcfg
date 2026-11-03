@@ -177,3 +177,53 @@ func TestInitApplyYesWithCodexTOMLDoesNotLeavePartialCanonicalTree(t *testing.T)
 		t.Fatalf("refused native adoption left a partially initialized canonical tree: %v", err)
 	}
 }
+
+func TestInitAdoptionThroughSymlinkedParentKeepsNativeOrigins(t *testing.T) {
+	base := t.TempDir()
+	parent := filepath.Join(base, "real")
+	home := filepath.Join(parent, "user")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(parent, alias); err != nil {
+		t.Skipf("cannot create system-style path alias on this filesystem: %v", err)
+	}
+	aliasHome := filepath.Join(alias, "user")
+	path := filepath.Join(home, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"local":{"command":"node"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := bootstrap.Discover(aliasHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := proposalFromNative(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposal.Servers) != 1 || len(inventory.Servers) != 1 ||
+		inventory.Servers[0].Origins[0].Source != filepath.Join(aliasHome, ".cursor", "mcp.json") {
+		t.Fatalf("native aliases became an unreviewed different source: %+v", inventory.Servers)
+	}
+	if err := writeInitialSources(aliasHome, config.Settings{Harnesses: []string{"cursor"}}, proposal.Servers, nil); err != nil {
+		t.Fatal(err)
+	}
+	mcp, _, err := initAdoptionProofs(inventory, proposal.Servers, nil, []string{"cursor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(aliasHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := syncer.BuildPlan(cfg, syncer.Options{
+		Root: aliasHome, Home: aliasHome, Scope: "user", Binary: filepath.Join(aliasHome, "agentcfg"),
+		AdoptExisting: true, AdoptMCP: mcp,
+	}); err != nil {
+		t.Fatalf("safe native alias was incorrectly rejected: %v; scanner=%+v; canonical=%+v", err, inventory.Servers[0].Server, cfg.Servers["local"])
+	}
+}

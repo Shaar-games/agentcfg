@@ -45,6 +45,17 @@ type SkillAdoption struct {
 func ServerSHA256(server config.Server) string {
 	server.Name, server.Source, server.Sharing = "", "", ""
 	server.Harnesses = nil
+	// Scanner origins retain the user's native spelling (/var on macOS,
+	// short NTFS aliases on Windows), while canonical config loading resolves
+	// filesystem paths. Hash physical working directories and executables so
+	// the same upstream cannot acquire a different identity through an alias.
+	for _, path := range []*string{&server.Cwd, &server.Command} {
+		if filepath.IsAbs(*path) {
+			if resolved, err := pathutil.Resolve(*path); err == nil {
+				*path = resolved
+			}
+		}
+	}
 	return digest(server)
 }
 
@@ -256,15 +267,19 @@ func prepareAdoption(c *config.Config, opts Options, all []target, selected map[
 	if err != nil {
 		return nil, err
 	}
-	for _, path := range []string{opts.Home, opts.Root, c.Root} {
-		resolved, err := pathutil.Resolve(path)
-		if err != nil || !sameAdoptionPath(resolved, home) || !sameAdoptionPath(path, resolved) {
-			return nil, errors.New("adoption requires the canonical root and target home to be the same physical directory")
-		}
-	}
 	homeInfo, err := os.Lstat(home)
 	if err != nil || redirected(homeInfo) || !homeInfo.IsDir() {
 		return nil, errors.New("adoption requires a physical target home")
+	}
+	for _, path := range []string{opts.Home, opts.Root, c.Root} {
+		resolved, err := pathutil.Resolve(path)
+		if err != nil || !sameAdoptionPath(resolved, home) {
+			return nil, errors.New("adoption requires the canonical root and target home to be the same physical directory")
+		}
+		info, err := os.Lstat(path)
+		if err != nil || redirected(info) || !info.IsDir() || !os.SameFile(homeInfo, info) {
+			return nil, errors.New("adoption root must be a real directory referring to the exact target home")
+		}
 	}
 	// Windows FileInfo may load its file ID lazily. Force that read while the
 	// preview's path still exists, before retaining the identity for Apply.
