@@ -107,6 +107,30 @@ func parseHarnesses(raw json.RawMessage) ([]string, error) {
 	return result, nil
 }
 
+// ValidateUserHarnesses is used when initializing user-global configuration.
+// Unlike the read-only loader (which recognizes legacy VS Code settings), the
+// initializer must not create a harness selection it cannot synchronize.
+// It applies the same validation and stable duplicate removal as config.Load.
+func ValidateUserHarnesses(values []string) ([]string, error) {
+	if values == nil {
+		values = []string{}
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return nil, err
+	}
+	selected, err := parseHarnesses(encoded)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range selected {
+		if name == "vscode" {
+			return nil, fmt.Errorf("vscode cannot be synchronized in user scope; no files created")
+		}
+	}
+	return selected, nil
+}
+
 func parseSharing(value string) (string, error) {
 	if value != "shared" && value != "isolated" {
 		return "", fmt.Errorf("sharing must be shared or isolated")

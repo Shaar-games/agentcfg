@@ -43,7 +43,7 @@ OpenCode    ── context7: agentmux connect ────────┴── 
 ### Features
 
 - **One upstream per shared MCP configuration**, even with multiple connected harnesses.
-- **Interactive Charmbracelet Huh forms** for all configuration: harness selection, MCP sharing, skills, plugins, diagnostics and sync confirmation.
+- **Interactive Charmbracelet Huh forms** for harness selection, MCP sharing settings, skill availability, plugin inventory, diagnostics and sync confirmation.
 - **Starts on demand and stops after inactivity**; no permanently installed background service.
 - **Individual MCP entries** in each harness, not one aggregated tool catalog.
 - **Global configuration** at `~/.agentmux/`, independent of the current project.
@@ -94,7 +94,7 @@ When a harness next connects to a generated MCP entry, the proxy starts the brok
 
 The Huh interface presents a main menu with **Harnesses**, **MCP servers**, **Skills**, **Agent Plugins**, **Diagnostics**, **Synchronization**, **Refresh**, and **Exit**. Use up/down arrows or `j`/`k` to navigate, `/` to filter choices and `Enter` to open or confirm. Huh provides a text-based accessible fallback for terminals without full-screen support. Listing status never starts MCP servers.
 
-Select a harness to enable/disable it, a MCP server to change **shared** / **isolated**, or a skill to toggle individual harness availability through its source `metadata.harness`. The Huh sync menu first displays a read-only plan, then requires explicit confirmation before applying native user-level changes. The CLI commands `agentmux sync` (preview) and `agentmux sync --apply` (apply) are also available. Interactive terminal commands use Huh; scripts and pipelines retain plain output, and `--plain` explicitly suppresses Huh forms. `agentmux status --json` remains machine-readable.
+Select a harness to enable/disable it, an existing MCP server to change **shared** / **isolated**, or a skill to toggle individual harness availability through its source `metadata.harness`. The Huh sync menu first displays a read-only plan, then requires explicit confirmation before applying native user-level changes. **MCP server definitions (command, URL, credentials, arguments) and plugin package installation are not Huh editors:** configure those sources in `~/.agentmux/mcp.json` or `~/.agentmux/plugins/`, then validate before syncing. Huh only inventories plugin contents. The CLI commands `agentmux sync` (preview) and `agentmux sync --apply` (apply) are also available. Interactive terminal commands use Huh; scripts and pipelines retain plain output, and `--plain` explicitly suppresses Huh forms. `agentmux status --json` remains machine-readable; `agentmux sync --apply --yes` skips its confirmation, while `--plain` also preserves the non-interactive execution path.
 
 > **Migrating existing setups?** Do not immediately replace your MCP configurations. The current release does not automatically import or adopt existing harness entries. Follow **[MIGRATION_FOR_AGENTS.md](MIGRATION_FOR_AGENTS.md)** for a backup-first, conflict-aware migration that an AI coding agent can execute with you.
 
@@ -249,7 +249,7 @@ The generated MCP entries run `agentmux connect --server <name> --harness <clien
 
 ## Migrate existing MCPs and skills
 
-Use the root-level **[AI agent migration guide](MIGRATION_FOR_AGENTS.md)**. It gives an AI coding agent an explicit, safe workflow to:
+Use the root-level **[AI agent migration guide](MIGRATION_FOR_AGENTS.md)**. It also explains why old project-local `.agents/` or `.agentmux/` source directories are not automatically imported. It gives an AI coding agent an explicit, safe workflow to:
 
 1. Inspect **user-level** MCP and skill configurations without touching project files.
 2. Back up the originals and translate selected definitions into `~/.agentmux/`.

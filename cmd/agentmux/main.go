@@ -16,11 +16,12 @@ import (
 
 	"agentmux/internal/broker"
 	"agentmux/internal/config"
+	"agentmux/internal/pathutil"
 	"agentmux/internal/syncer"
 	"agentmux/internal/tui"
 )
 
-// Set at release build time: -ldflags '-X main.version=v0.2.1'.
+// Set at release build time: -ldflags '-X main.version=vX.Y.Z'.
 var version = "dev"
 
 func main() {
@@ -246,9 +247,12 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 	if err != nil {
 		return err
 	}
-	names := strings.Split(*harnesses, ",")
-	for i := range names {
-		names[i] = strings.TrimSpace(names[i])
+	var names []string
+	if strings.TrimSpace(*harnesses) != "" {
+		names = strings.Split(*harnesses, ",")
+		for i := range names {
+			names[i] = strings.TrimSpace(names[i])
+		}
 	}
 	explicit := false
 	flags.Visit(func(f *flag.Flag) {
@@ -262,13 +266,32 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 			return err
 		}
 	}
-	settings := config.Settings{Harnesses: names, Runtime: config.Runtime{IdleTimeout: "5m", RequestTimeout: "5m"}}
-	files := map[string]any{"mcp.json": map[string]any{"mcpServers": map[string]any{}}, "agentmux.json": settings}
-	for name, value := range files {
-		path := filepath.Join(abs, ".agentmux", name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			return err
+	names, err = config.ValidateUserHarnesses(names)
+	if err != nil {
+		return fmt.Errorf("init harness selection: %w", err)
+	}
+	agentDir := filepath.Join(abs, ".agentmux")
+	if err := ensureRealCanonicalDirectory(agentDir); err != nil {
+		return fmt.Errorf("init source directory: %w", err)
+	}
+	// Preflight every canonical child directory before writing either source
+	// document, so an existing linked skills/plugins directory cannot leave a
+	// partly initialized configuration or redirect future writes outside home.
+	for _, name := range []string{"skills", "plugins"} {
+		if err := ensureRealCanonicalDirectory(filepath.Join(agentDir, name)); err != nil {
+			return fmt.Errorf("init %s directory: %w", name, err)
 		}
+	}
+	settings := config.Settings{Harnesses: names, Runtime: config.Runtime{IdleTimeout: "5m", RequestTimeout: "5m"}}
+	files := []struct {
+		name  string
+		value any
+	}{
+		{"mcp.json", map[string]any{"mcpServers": map[string]any{}}},
+		{"agentmux.json", settings},
+	}
+	for _, source := range files {
+		path := filepath.Join(agentDir, source.name)
 		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if os.IsExist(err) {
 			fmt.Fprintln(output, "Preserved", path)
@@ -279,7 +302,7 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 		}
 		encoder := json.NewEncoder(file)
 		encoder.SetIndent("", "  ")
-		encodeErr := encoder.Encode(value)
+		encodeErr := encoder.Encode(source.value)
 		closeErr := file.Close()
 		if encodeErr != nil {
 			return encodeErr
@@ -289,10 +312,23 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 		}
 		fmt.Fprintln(output, "Created", path)
 	}
-	for _, name := range []string{"skills", "plugins"} {
-		if err := os.MkdirAll(filepath.Join(abs, ".agentmux", name), 0o700); err != nil {
-			return err
-		}
+	return nil
+}
+
+// A symlink/junction at ~/.agentmux must not redirect initialization into
+// some other directory (including an open project). Only real directories are
+// acceptable. The caller validates its harness selection before creating any
+// source files.
+func ensureRealCanonicalDirectory(path string) error {
+	if err := os.Mkdir(path, 0o700); err != nil && !os.IsExist(err) {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || pathutil.IsRedirected(info) {
+		return fmt.Errorf("%s is not a real directory (symlinks/junctions are refused)", path)
 	}
 	return nil
 }

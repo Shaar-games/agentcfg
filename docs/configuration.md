@@ -65,7 +65,7 @@ The default settings are:
 }
 ~~~
 
-`antigravity` is also accepted and targets `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/`, the Google Antigravity personal layout. `vscode` is recognized but user-scope VS Code synchronization remains unsupported by the global-only CLI. Duplicate harness names are removed while retaining their order. Unknown names are errors.
+`antigravity` is also accepted and targets `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/`, the Google Antigravity personal layout. `vscode` is recognized when loading legacy settings but user-scope VS Code synchronization remains unsupported by the global-only CLI: `agentmux init --harnesses vscode` refuses to create that unsupported selection. Duplicate harness names are removed while retaining their order. Unknown names are errors.
 
 Runtime durations use Go duration syntax, such as `30s` or `5m`, and must be positive. An omitted field retains its default.
 
@@ -75,7 +75,7 @@ Use fully qualified plugin IDs in overrides:
 
 ~~~json
 {
-  "harnesses": ["claude-code", "codex", "vscode"],
+  "harnesses": ["claude-code", "codex", "antigravity"],
   "serverOverrides": {
     "docs-helper.context7": {
       "harnesses": ["codex", "claude-code"],

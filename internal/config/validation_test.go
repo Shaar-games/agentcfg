@@ -214,6 +214,9 @@ func TestCheckedInExamplesAreInactiveAndValidWhenCopied(t *testing.T) {
 	if !reflect.DeepEqual(serverNames(config), []string{"chrome-devtools", "context7", "docs-helper.context7"}) {
 		t.Fatal(config.Servers)
 	}
+	if got, want := config.Servers["chrome-devtools"].Cwd, filepath.Join(config.Root, ".agentmux"); got != want {
+		t.Fatalf("example Chrome cwd = %q; want %q", got, want)
+	}
 	if !reflect.DeepEqual(skillNames(config), []string{"docs-helper.documentation-check", "quick-review"}) {
 		t.Fatal(config.Skills)
 	}

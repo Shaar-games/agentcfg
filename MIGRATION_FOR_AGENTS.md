@@ -29,6 +29,29 @@ This file is an **operational migration playbook** for AI coding agents helping 
 
 There is **no `--root` CLI flag** and no project synchronization option. Do not use commands from older agentmux documentation that include them.
 
+## Moving from the original project-local source layout
+
+Early development revisions used **`<project>/.agents/`**, followed by
+**`<project>/.agentmux/`**, before the public interface became exclusively
+user-level. The current program neither loads nor migrates these project
+sources. The repository itself does not ship a live `.agentmux/` directory.
+
+**Never copy an old project manifest or delete old managed entries
+automatically.** If the user explicitly authorizes a migration of an archived
+project-local source, inspect only the specified archive, **read-only**; back it
+up; then *propose* a mapping of each MCP, plugin, skill and instruction into
+`~/.agentmux/`. Check old relative `command`, `cwd`, `args` and script
+paths: they may have been resolved from the project rather than the home and
+must not be carried over blindly. Ask approval before writing the new
+user-level sources. Do not mistake native `~/.agents/skills/` (used by Codex)
+for the old canonical source.
+
+The old project-scoped sync ownership file is **not interchangeable** with
+`~/.agentmux/sync-user.json`. Do not rename or copy it into the new home.
+Individually reconcile any old native generated MCP entries against their
+actual contents and backups before running a user-scope sync. No automated
+rollback of the old project layout is implemented.
+
 ## Step 1 — Inventory the current user setup
 
 Inspect **only** supported user-level files, if present:

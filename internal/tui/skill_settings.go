@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"agentmux/internal/config"
+	"agentmux/internal/pathutil"
 
 	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
@@ -188,7 +189,7 @@ func requireRealDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() || pathutil.IsRedirected(info) {
 		return errors.New("expected a real, non-linked directory")
 	}
 	return nil

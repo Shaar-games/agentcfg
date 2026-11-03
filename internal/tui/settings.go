@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"agentmux/internal/config"
+	"agentmux/internal/pathutil"
 
 	"github.com/gofrs/flock"
 )
@@ -120,13 +121,16 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() || pathutil.IsRedirected(info) {
 		return fmt.Errorf("settings directory must be a real directory within %s", absolute)
 	}
 	// Serialize edits with syncer.Plan.Apply, which projects these canonical
 	// settings while holding the same lock. Separate TUI-only locks allowed
 	// a source change in the middle of a multi-file synchronization.
 	lock := flock.New(filepath.Join(agentDir, "sync.lock"))
+	if err := rejectLinkedFile(filepath.Join(agentDir, "sync.lock")); err != nil {
+		return err
+	}
 	defer lock.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

@@ -14,11 +14,24 @@ présentés dans un plan explicite. Aucun « dernier écrivain gagne » silencie
 
 ## Autres améliorations possibles
 
+Un mode `doctor` pourrait comparer les chemins natifs détectés avec les
+projections attendues et signaler les entrées orphelines, permissions, binaires
+manquants et erreurs de broker sans lancer de MCP. Le `sync` actuel fournit
+déjà un **dry-run en lecture seule** ; une évolution utile serait une
+prévisualisation structurée des différences, ligne par ligne, avec
+classification des risques. Une restauration guidée depuis les sauvegardes
+existantes demanderait une validation des empreintes avant tout remplacement,
+sans effacer les modifications postérieures. Un export de diagnostics pourrait
+regrouper les résultats de validation, versions, événements et statuts en
+masquant les secrets, headers et données des serveurs.
+
+Ces possibilités sont **proposées, pas implémentées** dans la version actuelle.
+
 Tests de conformité approfondis du MCP 2026-07-28 (MRTR, tâches,
 subscriptions, fournisseurs réels) ; stockage natif OAuth Keychain macOS et
 Secret Service Linux en complément du chiffrement explicite actuel ; profils et
 chemins personnalisés par harness ; mécanisme d’import explicite ; mode watch
-unidirectionnel ; restauration guidée des sauvegardes ; métriques RAM/processus ;
+unidirectionnel ; métriques RAM/processus ;
 politique de rétention des logs ; compatibilité skills avec liens internes
 contrôlés ; provenance signée des binaires de release.
 

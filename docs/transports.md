@@ -78,7 +78,7 @@ from breaking its own command invocation.
 
 ## Outbound Streamable HTTP
 
-Both `type: "http"` and `type: "streamable-http"` select this transport. The URL
+`type: "streamable-http"` selects this transport. The URL
 must be one absolute HTTP(S) MCP endpoint without URL userinfo or fragments. All
 POST, GET and DELETE requests use that endpoint. Redirects are rejected, including
 same-origin redirects; authentication headers are never forwarded to a redirect
