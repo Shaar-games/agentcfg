@@ -25,21 +25,4 @@ Wait+Screen /Back to inventory/
 Sleep 500 ms
 Enter
 Wait+Screen /Available to/
-Sleep 1 s
-Enter
-Sleep 250 ms
-Ctrl+C
-Sleep 300 ms
-Down
-Enter
-Wait+Screen /MCP servers/
-Sleep 500 ms
-Enter
-Wait+Screen /HTTP endpoint/
-Sleep 1 s
-Enter
-Sleep 300 ms
-Ctrl+C
-Sleep 300 ms
-Ctrl+C
-Sleep 500 ms
+Sleep 2 s
