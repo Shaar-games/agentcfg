@@ -24,7 +24,7 @@ Enter
 Wait+Screen /Back to inventory/
 Sleep 500 ms
 Enter
-Wait+Screen /Skill: react-best-practices/
+Wait+Screen /Available to/
 Sleep 1 s
 Enter
 Sleep 250 ms
@@ -35,7 +35,7 @@ Enter
 Wait+Screen /MCP servers/
 Sleep 500 ms
 Enter
-Wait+Screen /MCP: context7/
+Wait+Screen /HTTP endpoint/
 Sleep 1 s
 Enter
 Sleep 300 ms

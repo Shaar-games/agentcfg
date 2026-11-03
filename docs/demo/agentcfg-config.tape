@@ -28,7 +28,7 @@ Wait+Screen /Change sharing mode/
 Sleep 700 ms
 Down 2
 Enter
-Wait+Screen /MCP details/
+Wait+Screen /Enabled harnesses/
 Sleep 1 s
 Enter
 Sleep 300 ms
