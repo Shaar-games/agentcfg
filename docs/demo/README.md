@@ -13,8 +13,8 @@ They are **not installed from these projects**. VHS uses an isolated `.demo/home
 To reproduce on Linux with Go and Docker:
 
 ```bash
-go build -trimpath -o .demo/bin/agentcfg ./cmd/agentcfg
 bash docs/demo/prepare.sh
+go build -trimpath -o .demo/bin/agentcfg ./cmd/agentcfg
 docker run --rm --network none -v "$PWD:/vhs" ghcr.io/charmbracelet/vhs docs/demo/agentcfg-config.tape
 docker run --rm --network none -v "$PWD:/vhs" ghcr.io/charmbracelet/vhs docs/demo/agentcfg-list.tape
 ```

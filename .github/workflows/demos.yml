@@ -58,12 +58,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker pull ghcr.io/charmbracelet/vhs:latest
+          # Pin the image validated by the first successful recording.
+          image="ghcr.io/charmbracelet/vhs@sha256:ea49a6a1c529be83153e88321892b5585964418f0b9055e8c1e0d732194234a3"
+          docker pull "$image"
           for tape in docs/demo/agentcfg-config.tape docs/demo/agentcfg-list.tape; do
             # The container has no external network. The application only
             # reads copied fixture definitions: no MCP or skill is executed.
             docker run --rm --network none -e VHS_HOST=127.0.0.1 \
-              -v "$PWD:/vhs" ghcr.io/charmbracelet/vhs:latest "$tape"
+              -v "$PWD:/vhs" "$image" "$tape"
           done
 
       - name: Validate generated images
