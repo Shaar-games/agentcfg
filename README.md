@@ -17,7 +17,7 @@
 <p align="center">
   <a href="#installation">Install</a> ·
   <a href="#quick-start">Quick start</a> ·
-  <a href="MIGRATION_FOR_AGENTS.md">Migrate with an AI agent</a> ·
+  <a href="docs/configuration.md">Configuration</a> ·
   <a href="docs/architecture.md">Architecture</a>
 </p>
 
@@ -70,7 +70,7 @@ irm https://raw.githubusercontent.com/Shaar-games/agentcfg/main/install.ps1 | ie
 
 The installer places the executable in `~/.local/bin/agentcfg` (`agentcfg.exe` on Windows). No source checkout, compiler or persistent build directory is created. Add `~/.local/bin` to your `PATH` if necessary. Available release targets are Linux, macOS and Windows on AMD64 and ARM64 (where the OS supports the architecture). The scripts require `curl` and `tar` plus `sha256sum` or `shasum` on Unix; Windows PowerShell provides its own downloader, checksum and ZIP extraction.
 
-The scripts **do not change MCP or harness settings during installation**. They verify SHA-256 checksums, validate the downloaded binary and **replace an existing agentcfg executable** when reinstalling. The previous binary is retained for rollback until validation succeeds; a Windows executable still in use may leave a temporary backup. **An existing `agentmux` executable and its `~/.agentmux/` configuration remain untouched**: installing the renamed CLI does not migrate or uninstall the previous application. Review the remote scripts before executing them; these one-liners follow the repository's `main` branch. Set `AGENTCFG_VERSION` to an existing published tag to pin a release, or `AGENTCFG_BIN_DIR` for another executable directory. A checksum fetched from the same release prevents accidental corruption but is not a substitute for a cryptographically signed provenance attestation.
+The scripts **do not change MCP or harness settings during installation**. They verify SHA-256 checksums, validate the downloaded binary and **replace an existing agentcfg executable** when reinstalling. The previous binary is retained for rollback until validation succeeds; a Windows executable still in use may leave a temporary backup. Review the remote scripts before executing them; these one-liners follow the repository's `main` branch. Set `AGENTCFG_VERSION` to an existing published tag to pin a release, or `AGENTCFG_BIN_DIR` for another executable directory. A checksum fetched from the same release prevents accidental corruption but is not a substitute for a cryptographically signed provenance attestation.
 
 To update an existing installation to the **latest published stable GitHub Release built from `main`**, run:
 
@@ -101,11 +101,9 @@ When a harness next connects to a generated MCP entry, the proxy starts the brok
 
 ### Interactive configuration
 
-Run `agentcfg config` to manage **harnesses, MCP sharing, skills, Agent Plugins, diagnostics and synchronization** through the Huh interface. `agentcfg harnesses` opens the harness checklist directly; the currently enabled harnesses are preselected. Use the up/down arrows to navigate, Space to toggle entries, and Enter to confirm a multi-selection. Run `agentcfg` or `agentcfg help` to see the command reference. Huh provides a text-based accessible fallback for terminals without full-screen support. On Windows, genuine interactive consoles use the normal Huh checkbox interface even when `TERM=dumb`; set `AGENTCFG_ACCESSIBLE=1` to request numbered prompts instead. Listing status never starts MCP servers.
+Run `agentcfg config` to manage **harnesses, MCP servers, skills, Agent Plugins, diagnostics and synchronization** through consistent native Huh checkbox lists, including the top-level navigation and MCP sharing choices. Use ↑/↓ to navigate, **Space to check a section, then Enter to open it**. Navigation allows one checked section at a time; Enter with no section checked returns to the previous screen. Harness and skill availability allow multiple checked values, with the current settings prechecked; Enter saves, Ctrl+C cancels. MCP servers and skills can be selected from the same style of list to view details or change supported settings; `agentcfg harnesses` opens the harness multi-select directly. Run `agentcfg` or `agentcfg help` to see the command reference. Huh provides an accessible numbered prompt fallback for terminals without full-screen support. On Windows, genuine interactive consoles use the normal Huh interface even when `TERM=dumb`; set `AGENTCFG_ACCESSIBLE=1` to request numbered prompts instead. Listing status never starts MCP servers.
 
 Use **Huh multi-select checkboxes** to configure enabled harnesses and the availability of each skill. Choose **shared** / **isolated** separately for an existing MCP server. The Huh sync menu first displays a read-only plan and asks before applying changes to native harness configuration files. **Raw MCP definitions (command, URL, credentials, arguments) and plugin package installation still require editing `~/.agentcfg/mcp.json` or `~/.agentcfg/plugins/`**; validate these sources before syncing. Huh inventories plugin contents. CLI scripts and pipelines retain plain output; `--plain` explicitly suppresses Huh forms. `agentcfg status --json` remains machine-readable and `agentcfg sync --apply --yes` skips confirmation.
-
-> **Renamed from agentmux?** First run `agentcfg migrate` to preview the eligible sources in `~/.agentmux/`, then `agentcfg migrate --apply` only after reviewing the plan. The original directory and binary remain available. This operation does not import native MCP definitions from Claude Code, Codex or other harnesses, nor does it run `sync --apply`. Follow **[MIGRATION_FOR_AGENTS.md](MIGRATION_FOR_AGENTS.md)** for conflict-aware migration of existing harness entries.
 
 ## Global configuration
 
@@ -181,7 +179,7 @@ agentcfg auth status private-docs       # Local credentials status, without expo
 agentcfg auth logout private-docs       # Forget cached credentials (not remote revocation)
 ```
 
-Use `agentcfg auth login private-docs --no-browser` to display the authorization URL without launching a browser; a complete callback URL can be entered manually when a local callback listener cannot be opened. Accounts can be separated with distinct `oauth.account` names and server definitions. **OAuth token values and client secrets must never be stored in `mcp.json`**. On Windows, credentials are encrypted for the user with DPAPI. On Linux/macOS, specify a 32-byte secret encryption key via `AGENTCFG_OAUTH_KEY` (base64 encoded), supplied by your password manager or secrets facility; agentcfg will not write the encryption key to disk or fall back to plaintext. Do not change this key without first migrating existing credentials.
+Use `agentcfg auth login private-docs --no-browser` to display the authorization URL without launching a browser; a complete callback URL can be entered manually when a local callback listener cannot be opened. Accounts can be separated with distinct `oauth.account` names and server definitions. **OAuth token values and client secrets must never be stored in `mcp.json`**. On Windows, credentials are encrypted for the user with DPAPI. On Linux/macOS, specify a 32-byte secret encryption key via `AGENTCFG_OAUTH_KEY` (base64 encoded), supplied by your password manager or secrets facility; agentcfg will not write the encryption key to disk or fall back to plaintext. Keep this encryption key available to access stored credentials.
 
 OAuth support is for HTTP upstream MCPs, not OAuth configuration embedded in portable Agent Plugins. Authorization success depends on each provider supporting the configured client registration, redirect URI, scopes and official MCP OAuth discovery endpoints. See the [configuration reference](docs/configuration.md) for validation rules and [transport details](docs/transports.md) for protocol limits.
 
@@ -256,22 +254,6 @@ The generated MCP entries run `agentcfg connect --server <name> --harness <clien
 
 `claude-desktop` does **not** have an adapter yet; it is not interchangeable with Claude Code. Antigravity's CLI also discovers `~/.gemini/antigravity-cli/skills/`, but the App and CLI share the `~/.gemini/config/` personal layout; the current `antigravity` adapter targets that common layout. VS Code does not currently have a supported global native configuration adapter.
 
-## Migrate existing MCPs and skills
-
-For an existing **agentmux** installation, run `agentcfg migrate` to preview migration of the old canonical `~/.agentmux/` files to `~/.agentcfg/`. `agentcfg migrate --apply` explicitly applies the reviewed migration without deleting the old configuration or the `agentmux` executable. Review any conflicts before applying. Neither command automatically edits native harness configurations; use `agentcfg sync` to preview those changes separately.
-
-Use the root-level **[AI agent migration guide](MIGRATION_FOR_AGENTS.md)**. It explains how to reconcile existing native MCP entries and skills, with backups and conflict detection:
-
-1. Inspect native MCP and skill configuration files of the selected harnesses.
-2. Back up the originals and translate selected definitions into `~/.agentcfg/`.
-3. Resolve name collisions before applying any generated entries.
-4. Run `agentcfg validate`, review the `agentcfg sync` preview, then apply with approval.
-5. Verify clients, MCP startup, process reuse, and the rollback path.
-
-**Suggested prompt for your coding agent:**
-
-> Read https://github.com/Shaar-games/agentcfg/blob/main/MIGRATION_FOR_AGENTS.md and migrate my existing MCP servers and skills to agentcfg using the native configurations of my harnesses. Preserve existing settings, show conflicts and a proposed diff, and obtain my approval before replacing old MCP entries or running `agentcfg sync --apply`.
-
 ## Safety and current limits
 
 - **No silent takeover:** unknown MCP names and unmanaged skill directories are preserved; collisions stop synchronization. Existing configurations are **not** imported automatically.
@@ -279,7 +261,7 @@ Use the root-level **[AI agent migration guide](MIGRATION_FOR_AGENTS.md)**. It e
 - **Not a sandbox:** installed MCP servers and plugin executables run with your account's permissions. Review untrusted packages and avoid committing credentials.
 - Sharing is not isolation: the server's application state can be shared between harnesses. Use sharing: "isolated" for private state, roots, sampling, elicitation, or client-specific callbacks.
 - **Protocol scope:** MCP `2026-07-28` request-scoped metadata, `server/discover`, stateless HTTP headers, and JSON/SSE responses use the official Go MCP SDK bridge alongside legacy 2025 handshakes. Modern protocol messages are routed per request; the broker does not merge modern clients into an initialized legacy stdio session. OAuth authorization is **explicit**, not an automatic login during MCP startup. Legacy standalone SSE transport and SSE cursor resumption are not implemented. Modern subscriptions and multi-round-trip tool results depend on the capabilities of both the upstream and the calling harness.
-- **Not implemented:** bidirectional sync and automatic migration/import of existing MCP definitions. Global instructions are supported only for verified user-scope Codex, Claude Code and OpenCode destinations; other instruction targets are not guessed.
+- **Not implemented:** bidirectional sync and automatic import of existing MCP definitions. Global instructions are supported only for verified user-scope Codex, Claude Code and OpenCode destinations; other instruction targets are not guessed.
 
 ## Development and documentation
 

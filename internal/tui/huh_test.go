@@ -29,7 +29,7 @@ func TestHuhAccessibleAdvancedMenuExitIsReadOnly(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	root := t.TempDir()
 	var rendered bytes.Buffer
-	if err := RunMenu(context.Background(), root, strings.NewReader("8\n"), &rendered); err != nil {
+	if err := RunMenu(context.Background(), root, terminalByteReader{strings.NewReader("8\n0\n")}, &rendered); err != nil {
 		t.Fatal(err)
 	}
 	for _, text := range []string{"agentcfg", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Diagnostics", "synchronization", "Refresh", "Exit"} {
@@ -37,9 +37,69 @@ func TestHuhAccessibleAdvancedMenuExitIsReadOnly(t *testing.T) {
 			t.Fatalf("Huh main menu missing %q: %s", text, rendered.String())
 		}
 	}
+	if !strings.Contains(rendered.String(), "Select up to 1 option") || !strings.Contains(rendered.String(), "Confirm selection") {
+		t.Fatalf("configuration navigation must use the same native Huh checkbox list as harnesses: %s", rendered.String())
+	}
 	entries, err := os.ReadDir(root)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("opening Huh configuration wrote to user home: %v (%v)", entries, err)
+	}
+}
+
+func TestHuhConfigMenuOpensNativeHarnessCheckboxes(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex","cursor"]}`)
+	before, err := os.ReadFile(settingsFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	// Check Harnesses and submit; accept its prechecked values unchanged;
+	// then submit an empty top-level selection to exit.
+	in := terminalByteReader{strings.NewReader("1\n0\n0\n0\n")}
+	if err := RunMenu(context.Background(), root, in, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"agentcfg", "Harness availability", "Claude Code", "Codex", "Confirm selection"} {
+		if !strings.Contains(output.String(), marker) {
+			t.Fatalf("missing menu or harness checkbox content %q: %s", marker, output.String())
+		}
+	}
+	after, err := os.ReadFile(settingsFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("unchanged checklist rewrote settings: %s", after)
+	}
+}
+
+func TestHuhMCPSharingUsesPrecheckedNativeList(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex"]}`)
+	source := filepath.Join(root, ".agentcfg", "mcp.json")
+	if err := os.WriteFile(source, []byte(`{"mcpServers":{"local":{"command":"node","sharing":"shared"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	// Open the server -> Change sharing -> uncheck Shared -> check Isolated ->
+	// confirm -> leave server list without selecting another action.
+	sequence := "1\n0\n1\n0\n1\n2\n0\n0\n"
+	session := interfaceSession{ctx: context.Background(), root: root, in: terminalByteReader{strings.NewReader(sequence)}, out: &output}
+	if err := session.configureMCP(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "MCP sharing") || !strings.Contains(output.String(), "Confirm selection") {
+		t.Fatalf("MCP sharing did not use a Huh checkbox list: %s", output.String())
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Servers["local"].Sharing != "isolated" {
+		t.Fatalf("new MCP sharing mode was not saved: %+v", cfg.Servers["local"])
 	}
 }
 

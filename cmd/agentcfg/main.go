@@ -16,7 +16,6 @@ import (
 
 	"agentcfg/internal/broker"
 	"agentcfg/internal/config"
-	"agentcfg/internal/migrate"
 	"agentcfg/internal/pathutil"
 	"agentcfg/internal/syncer"
 	"agentcfg/internal/tui"
@@ -46,7 +45,6 @@ Usage: agentcfg [command] [options]
   harnesses             Open the Huh harness checkbox list directly
 
   init       Create empty canonical .agentcfg files (never overwrite)
-  migrate    Preview legacy ~/.agentmux migration; --apply copies securely
   list       Show discovered MCP servers and skills
   validate   Validate canonical configuration and plugin discovery
   sync       Preview native harness changes; --apply writes them
@@ -60,7 +58,6 @@ Usage: agentcfg [command] [options]
 
 All commands use the current user's ~/.agentcfg configuration.
 Human-facing CLI commands use Huh forms in a TTY; --plain keeps script output.
-Existing ~/.agentmux data is never migrated or overwritten automatically.
 Use agentcfg <command> --help for command-specific options.
 No persistent web server or TCP listener is used. OAuth login may temporarily
 listen on a loopback callback address when explicitly invoked.
@@ -76,11 +73,6 @@ Bidirectional sync is not implemented.`)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
-	}
-	if args[0] != "migrate" && args[0] != "update" {
-		if err := requireMigration(home); err != nil {
-			return err
-		}
 	}
 	root := &home
 	switch args[0] {
@@ -111,13 +103,11 @@ Bidirectional sync is not implemented.`)
 			return helpResult(err)
 		}
 		return tui.Run(ctx, home, input, output)
-	case "config", "menu", "ui", "tui":
+	case "config":
 		if err := parse(flags, args[1:]); err != nil {
 			return helpResult(err)
 		}
 		return tui.RunMenu(ctx, home, input, output)
-	case "migrate":
-		return migrateLegacy(flags, home, args[1:], output)
 	case "init":
 		return initialize(ctx, flags, root, args[1:], input, output)
 	case "sync":
@@ -148,59 +138,6 @@ Bidirectional sync is not implemented.`)
 	default:
 		return fmt.Errorf("unknown command %q; run agentcfg help", args[0])
 	}
-}
-
-// Do not silently start a second configuration while native adapters may
-// still point at an unmigrated legacy installation.
-func requireMigration(home string) error {
-	_, legacyErr := os.Lstat(filepath.Join(home, ".agentmux"))
-	_, currentErr := os.Lstat(filepath.Join(home, ".agentcfg"))
-	if legacyErr == nil && errors.Is(currentErr, os.ErrNotExist) {
-		return errors.New("legacy ~/.agentmux exists but ~/.agentcfg does not; preview 'agentcfg migrate' then use 'agentcfg migrate --apply' before configuring or syncing (nothing changed)")
-	}
-	if legacyErr != nil && !errors.Is(legacyErr, os.ErrNotExist) {
-		return legacyErr
-	}
-	if currentErr != nil && !errors.Is(currentErr, os.ErrNotExist) {
-		return currentErr
-	}
-	return nil
-}
-
-func migrateLegacy(flags *flag.FlagSet, home string, args []string, output io.Writer) error {
-	apply := flags.Bool("apply", false, "copy legacy sources securely to ~/.agentcfg (without removing ~/.agentmux)")
-	if err := parse(flags, args); err != nil {
-		return helpResult(err)
-	}
-	var (
-		report migrate.Report
-		err    error
-	)
-	if *apply {
-		report, err = migrate.Apply(home)
-	} else {
-		report, err = migrate.Preview(home)
-	}
-	if err != nil {
-		return err
-	}
-	action := "Preview only; nothing written."
-	if *apply {
-		action = "New canonical configuration copied and verified. Original kept intact."
-	}
-	fmt.Fprintf(output, "%s\nFrom: %s\nTo:   %s\n%d files, %d directories, %d bytes\n",
-		action, report.Legacy, report.Destination, report.Files, report.Directories, report.Bytes)
-	for index, path := range report.Paths {
-		if index >= 100 {
-			fmt.Fprintf(output, "  ... and %d additional paths (all validated before applying)\n", len(report.Paths)-index)
-			break
-		}
-		fmt.Fprintf(output, "  copy %s\n", path)
-	}
-	for _, warning := range report.Warnings {
-		fmt.Fprintf(output, "Note: %s\n", warning)
-	}
-	return nil
 }
 
 func parse(flags *flag.FlagSet, args []string) error {

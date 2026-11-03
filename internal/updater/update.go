@@ -79,11 +79,6 @@ func Update(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("locate installed executable: %w", err)
 	}
-	// Rebranding cannot safely update an old executable in place: native MCP
-	// proxies may still depend on the old command name during migration.
-	if name := strings.ToLower(filepath.Base(executable)); name == "agentmux" || name == "agentmux.exe" {
-		return Result{}, errors.New("cannot replace a legacy agentmux executable with agentcfg; install agentcfg under its new name, then explicitly migrate")
-	}
 	info, err := os.Lstat(executable)
 	if err != nil || !info.Mode().IsRegular() {
 		return Result{}, fmt.Errorf("installed executable is not a regular file: %s: %v", executable, err)

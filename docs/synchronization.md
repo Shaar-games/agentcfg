@@ -8,15 +8,9 @@ lecture seule. `sync --apply` applique ce plan. Il n’existe ni import implicit
 ni mode force, ni fusion bidirectionnelle dans cette version.
 
 agentcfg projette ces sources dans les **fichiers de configuration natifs** des
-harnesses sélectionnés. Pour une migration d'anciennes sources ou de manifestes
-d'appartenance, consulter [le guide de migration](../MIGRATION_FOR_AGENTS.md).
-
-Pour passer de l'ancien nom au nouveau, `agentcfg migrate` prévisualise en
-lecture seule une copie de `~/.agentmux/` vers `~/.agentcfg/` ; seul
-`agentcfg migrate --apply` publie la nouvelle configuration canonique. Le
-répertoire d'origine et son exécutable restent intacts. Cette migration ne
-réécrit aucune configuration native : il faut examiner séparément le résultat
-de `agentcfg sync` avant d'utiliser `agentcfg sync --apply`.
+harnesses sélectionnés. Ouvrir `agentcfg config` pour choisir les destinations
+et les skills dans les listes Huh, puis examiner `agentcfg sync` avant toute
+application avec `agentcfg sync --apply`.
 
 Un serveur MCP est généré individuellement dans chaque harness sélectionné.
 Les filtres de l’entrée canonique et les overrides des plugins sont évalués

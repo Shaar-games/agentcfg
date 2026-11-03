@@ -67,15 +67,6 @@ type envelope struct {
 // An empty home uses os.UserHomeDir; tests should always provide a temp home.
 func NewSystemStore(home string) (Store, error) {
 	value, exists := os.LookupEnv("AGENTCFG_OAUTH_KEY")
-	legacy, legacyExists := os.LookupEnv("AGENTMUX_OAUTH_KEY")
-	if exists && legacyExists {
-		return nil, fmt.Errorf("both AGENTCFG_OAUTH_KEY and legacy AGENTMUX_OAUTH_KEY are set; select one without changing the encryption key")
-	}
-	if !exists && legacyExists {
-		// Existing installations may have sourced the key from their secret
-		// manager under its former name. Never silently switch encryption keys.
-		value, exists = legacy, true
-	}
 	if exists {
 		key, err := base64.StdEncoding.DecodeString(value)
 		if err != nil || len(key) != 32 {

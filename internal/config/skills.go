@@ -58,10 +58,8 @@ func (l *loader) loadSkills(location, plugin, boundary string, standalone bool) 
 }
 
 func (l *loader) generatedSkill(directory string) bool {
-	for _, marker := range []string{originMarker, ".agentmux-origin.json"} {
-		if _, err := os.Lstat(filepath.Join(directory, marker)); err == nil {
-			return true
-		}
+	if _, err := os.Lstat(filepath.Join(directory, originMarker)); err == nil {
+		return true
 	}
 	plugins, err := resolvePotential(filepath.Join(l.agents, "plugins"))
 	if err == nil && within(plugins, directory) {

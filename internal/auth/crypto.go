@@ -43,9 +43,7 @@ func sealAES(key []byte, identity string, plain []byte) ([]byte, error) {
 	if _, err = rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	// The opaque authenticated-data domain is deliberately stable for legacy
-	// encrypted records copied from ~/.agentmux during explicit migration.
-	return aead.Seal(nonce, nonce, plain, []byte("agentmux.oauth.v1\x00"+identity)), nil
+	return aead.Seal(nonce, nonce, plain, []byte("agentcfg.oauth.v1\x00"+identity)), nil
 }
 
 func openAES(key []byte, identity string, encrypted []byte) ([]byte, error) {
@@ -57,5 +55,5 @@ func openAES(key []byte, identity string, encrypted []byte) ([]byte, error) {
 		return nil, ErrStoreCorrupt
 	}
 	nonce := encrypted[:aead.NonceSize()]
-	return aead.Open(nil, nonce, encrypted[aead.NonceSize():], []byte("agentmux.oauth.v1\x00"+identity))
+	return aead.Open(nil, nonce, encrypted[aead.NonceSize():], []byte("agentcfg.oauth.v1\x00"+identity))
 }

@@ -26,12 +26,10 @@ the existing executable after checking the archive and staged binary. A
 temporary backup is kept until the new binary passes its version smoke test.
 On Windows, an old running executable may leave a backup that can be removed
 after the process exits. The installer targets only `agentcfg` (`agentcfg.exe`
-on Windows): a previously installed `agentmux` (`agentmux.exe`) and
-`~/.agentmux/` remain intact, and no configuration migration is triggered.
+on Windows), without modifying MCP or harness configuration.
 
-Set `AGENTCFG_VERSION` to an existing published **agentcfg** release tag to
-select a specific version. Old agentmux tags are not automatically agentcfg
-releases; publish the renamed binaries before using the installer URL.
+Set `AGENTCFG_VERSION` to an existing published release tag to select a
+specific version.
 Set `AGENTCFG_BIN_DIR` for a custom user-owned destination.
 `AGENTCFG_RELEASE_BASE_URL` is used by local installer test fixtures and
 normally should remain unset.

@@ -226,24 +226,6 @@ func TestStableVersionOrdering(t *testing.T) {
 	}
 }
 
-func TestSelfUpdateRefusesOverwritingLegacyExecutable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agentmux")
-	if runtime.GOOS == "windows" {
-		path += ".exe"
-	}
-	original := []byte("legacy executable must remain unchanged")
-	if err := os.WriteFile(path, original, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Update(context.Background(), Options{Executable: path, CurrentVersion: oldVersion})
-	if err == nil || !strings.Contains(err.Error(), "legacy agentmux") {
-		t.Fatalf("unsafe update not rejected: %v", err)
-	}
-	if actual := readFixture(t, path); !bytes.Equal(actual, original) {
-		t.Fatal("legacy executable was overwritten")
-	}
-}
-
 func TestSelfUpdateWhileExecutableIsRunning(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

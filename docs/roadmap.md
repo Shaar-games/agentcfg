@@ -30,8 +30,7 @@ Ces possibilités sont **proposées, pas implémentées** dans la version actuel
 Tests de conformité approfondis du MCP 2026-07-28 (MRTR, tâches,
 subscriptions, fournisseurs réels) ; stockage natif OAuth Keychain macOS et
 Secret Service Linux en complément du chiffrement explicite actuel ; profils et
-chemins personnalisés par harness ; import explicite des configurations natives
-(distinct de `agentcfg migrate`, limité aux anciennes sources canoniques) ; mode watch
+chemins personnalisés par harness ; import explicite des configurations natives ; mode watch
 unidirectionnel ; métriques RAM/processus ;
 politique de rétention des logs ; compatibilité skills avec liens internes
 contrôlés ; provenance signée des binaires de release.

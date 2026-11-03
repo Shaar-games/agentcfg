@@ -16,11 +16,10 @@
 Only immediate plugin directories and immediate skill directories are discovered. The manifest name, rather than the installation folder name, supplies a plugin's namespace. Missing optional sources are valid. The source root itself must exist and be a directory.
 
 `agentcfg` without arguments displays help. `agentcfg config` opens the Huh
-configuration interface (including harness and skill multi-select lists);
-`agentcfg harnesses` opens only the harness list. On systems with old canonical
-sources under `~/.agentmux/`, run `agentcfg migrate` for a read-only preview
-before `agentcfg migrate --apply`. The migration leaves the old installation
-intact and does not import native harness entries or run synchronization.
+configuration interface, with consistent selection lists for harnesses, MCP
+servers, skills, plugins and synchronization. Harness and skill availability
+use multi-select checkboxes (↑/↓ to navigate, Space to toggle, Enter to save,
+Ctrl+C to cancel). `agentcfg harnesses` opens only the harness multi-select.
 
 ## Canonical MCP servers
 
@@ -72,7 +71,7 @@ The default settings are:
 }
 ~~~
 
-`antigravity` is also accepted and targets `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/`, the Google Antigravity personal layout. `vscode` is recognized when loading legacy settings but user-scope VS Code synchronization remains unsupported by the global-only CLI: `agentcfg init --harnesses vscode` refuses to create that unsupported selection. Duplicate harness names are removed while retaining their order. Unknown names are errors.
+`antigravity` is also accepted and targets `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/`, the Google Antigravity personal layout. VS Code has no supported user-scope adapter: `agentcfg init --harnesses vscode` refuses this selection. Duplicate harness names are removed while retaining their order. Unknown names are errors.
 
 Runtime durations use Go duration syntax, such as `30s` or `5m`, and must be positive. An omitted field retains its default.
 
@@ -211,7 +210,7 @@ Standalone directories containing the reserved `.agentcfg-origin.json` marker ar
 
 Explicit canonical servers load first and take precedence over colliding plugin IDs. Plugin directory names and server keys are processed lexically. Skills are returned sorted by qualified name. Duplicate keys are rejected at their owning JSON object boundary; semantic errors inside one server do not invalidate its siblings.
 
-The loader does not install packages, execute client extensions, synchronize native configurations in either direction, or infer secrets. Bidirectional configuration import is deferred; the separate `agentcfg migrate` command only handles old canonical agentmux sources.
+The loader does not install packages, execute client extensions, synchronize native configurations in either direction, or infer secrets. Bidirectional configuration import is not implemented.
 
 ## Examples and references
 

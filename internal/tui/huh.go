@@ -66,10 +66,21 @@ func (s interfaceSession) form(fields ...huh.Field) error {
 }
 
 func (s interfaceSession) selectAction(title, description string, choices ...huh.Option[string]) (string, error) {
-	var selected string
-	err := s.form(huh.NewSelect[string]().
-		Title(title).Description(description).Options(choices...).Height(12).Value(&selected))
-	return selected, err
+	// Navigation uses the same native Huh checkbox list as harness and skill
+	// settings. Only one destination may be checked, because these are actions
+	// rather than settings. An empty selection returns to the parent screen.
+	var selected []string
+	err := s.form(huh.NewMultiSelect[string]().
+		Title(title).
+		Description(description).
+		Options(choices...).
+		Limit(1).
+		Height(max(5, min(len(choices)+2, 12))).
+		Value(&selected))
+	if err != nil || len(selected) == 0 {
+		return "", err
+	}
+	return selected[0], nil
 }
 
 func (s interfaceSession) note(title, description string) error {
@@ -129,7 +140,7 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 		} else if status.Running {
 			state = fmt.Sprintf("broker PID %d", status.PID)
 		}
-		choice, err := s.selectAction("agentcfg  ·  Configuration", "User-level settings  ·  "+state+"  ·  ↑↓ select, / filter, Enter open, Ctrl+C exit",
+		choice, err := s.selectAction("agentcfg  ·  Configuration", "Space checks a section, Enter opens it, Ctrl+C exits  ·  "+state,
 			huh.NewOption("Harnesses  ·  enable / disable", "harnesses"),
 			huh.NewOption(fmt.Sprintf("MCP servers  ·  %d configured", len(cfg.Servers)), "mcp"),
 			huh.NewOption(fmt.Sprintf("Skills  ·  %d available", len(cfg.Skills)), "skills"),
@@ -143,6 +154,9 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 		}
 		if err != nil {
 			return err
+		}
+		if choice == "" {
+			return nil
 		}
 		switch choice {
 		case "harnesses":
@@ -221,32 +235,30 @@ func (s interfaceSession) configureMCP() error {
 			choices = append(choices, huh.NewOption(fmt.Sprintf("%s  ·  %s  ·  %s", safeHuhText(name), cfg.Servers[name].Type, sharing(cfg.Servers[name])), name))
 		}
 		choices = append(choices, huh.NewOption("Back to main menu", "back"))
-		name, err := s.selectAction("MCP servers", "Shared reduces processes; isolated is required for private session state.", choices...)
+		name, err := s.selectAction("MCP servers", "Space selects a server; Enter opens details. Shared reduces processes.", choices...)
+		if isCancelled(err) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		if name == "back" {
+		if name == "back" || name == "" {
 			return nil
 		}
 		server := cfg.Servers[name]
 		choice, err := s.selectAction(name, fmt.Sprintf("Transport: %s  ·  Sharing: %s", server.Type, sharing(server)),
-			huh.NewOption("Toggle shared / isolated", "toggle"),
+			huh.NewOption("Change sharing mode", "sharing"),
 			huh.NewOption("Show transport and routing details", "details"),
 			huh.NewOption("Back", "back"))
+		if isCancelled(err) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
 		switch choice {
-		case "toggle":
-			current := sharing(server)
-			next := "isolated"
-			if current == "isolated" {
-				next = "shared"
-			}
-			if err := setServerSharing(s.root, name, next, current); err != nil {
-				return err
-			}
-			if err := s.note("MCP sharing updated", fmt.Sprintf("%s: %s → %s\nChange saved to canonical serverOverrides. Running connections keep their existing mode.", name, current, next)); err != nil {
+		case "sharing":
+			if err := s.configureMCPSharing(name, server); err != nil {
 				return err
 			}
 		case "details":
@@ -268,6 +280,30 @@ func (s interfaceSession) configureMCP() error {
 			}
 		}
 	}
+}
+
+func (s interfaceSession) configureMCPSharing(name string, server config.Server) error {
+	current := sharing(server)
+	var selected []string
+	err := s.form(huh.NewMultiSelect[string]().
+		Title("MCP sharing: "+safeHuhText(name)).
+		Description("Space toggles, Enter saves. Shared reuses the upstream process; isolated keeps session state separate.").
+		Options(
+			huh.NewOption("Shared", "shared").Selected(current == "shared"),
+			huh.NewOption("Isolated", "isolated").Selected(current == "isolated"),
+		).
+		Limit(1).
+		Value(&selected))
+	if isCancelled(err) || (err == nil && len(selected) == 0) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if selected[0] == current {
+		return nil
+	}
+	return setServerSharing(s.root, name, selected[0], current)
 }
 
 func sharing(server config.Server) string {
@@ -296,11 +332,14 @@ func (s interfaceSession) configureSkills() error {
 			choices = append(choices, huh.NewOption(fmt.Sprintf("%s  ·  %d harness(es)", safeHuhText(skill.Name), count), skill.Name))
 		}
 		choices = append(choices, huh.NewOption("Back to main menu", "back"))
-		name, err := s.selectAction("Agent Skills", "Select a source skill to edit metadata.harness; installed copies are never rewritten.", choices...)
+		name, err := s.selectAction("Agent Skills", "Space selects a skill, Enter opens its harness checkboxes. Source edits only.", choices...)
+		if isCancelled(err) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		if name == "back" {
+		if name == "back" || name == "" {
 			return nil
 		}
 		if err := s.configureSkill(name); err != nil {
@@ -329,7 +368,7 @@ func (s interfaceSession) configureSkill(name string) error {
 	for _, h := range harnesses {
 		label := h.Label
 		if !h.UserScopeEnabled {
-			label = "VS Code (legacy filter only)"
+			label = "VS Code (not supported in user-scope sync)"
 		}
 		active := config.Allows(selected.Harnesses, h.ID)
 		choices = append(choices, huh.NewOption(label, h.ID).Selected(active))
@@ -370,11 +409,14 @@ func (s interfaceSession) showPlugins() error {
 	}
 	choices = append(choices, huh.NewOption("Back", "back"))
 	for {
-		choice, err := s.selectAction("Portable Agent Plugins", "Plugin manifests remain portable; no changes are made to plugin files.", choices...)
+		choice, err := s.selectAction("Portable Agent Plugins", "Space selects a plugin; Enter shows details. Package files stay untouched.", choices...)
+		if isCancelled(err) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		if choice == "back" {
+		if choice == "back" || choice == "" {
 			return nil
 		}
 		for _, p := range items {

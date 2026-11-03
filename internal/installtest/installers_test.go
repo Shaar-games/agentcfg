@@ -48,23 +48,6 @@ func fixtureServer(t *testing.T, asset string, data []byte, badHash bool) *httpt
 	return server
 }
 
-// A renamed installation must never clobber an existing agentmux binary.
-func legacyExecutableCheck(t *testing.T, dir, filename string) func() {
-	t.Helper()
-	const original = "pre-existing agentmux executable"
-	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(original), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return func() {
-		t.Helper()
-		contents, err := os.ReadFile(path)
-		if err != nil || string(contents) != original {
-			t.Fatalf("legacy agentmux installation changed: %q (%v)", contents, err)
-		}
-	}
-}
-
 func windowsArchive(t *testing.T) []byte {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "agentcfg.exe")
@@ -148,8 +131,6 @@ func TestPowerShellDownloadsAndVerifiesRelease(t *testing.T) {
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-				checkLegacy := legacyExecutableCheck(t, dir, "agentmux.exe")
-				defer checkLegacy()
 			binary := filepath.Join(dir, "agentcfg.exe")
 			if bad {
 				if err := os.WriteFile(binary, []byte("previous executable"), 0o700); err != nil {
@@ -176,9 +157,9 @@ func TestPowerShellDownloadsAndVerifiesRelease(t *testing.T) {
 			if _, err = exec.Command(binary, "version").CombinedOutput(); err != nil {
 				t.Fatalf("installed executable cannot run: %v", err)
 			}
-				if help, err := exec.Command(binary).CombinedOutput(); err != nil || !bytes.Contains(help, []byte("Usage: agentcfg")) {
-					t.Fatalf("no-argument help failed: %v\n%s", err, help)
-				}
+			if help, err := exec.Command(binary).CombinedOutput(); err != nil || !bytes.Contains(help, []byte("Usage: agentcfg")) {
+				t.Fatalf("no-argument help failed: %v\n%s", err, help)
+			}
 			again := exec.Command(shell, args...)
 			again.Env = environment
 			if output, err = again.CombinedOutput(); err != nil {
@@ -221,8 +202,6 @@ func TestBashDownloadsAndVerifiesRelease(t *testing.T) {
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-				checkLegacy := legacyExecutableCheck(t, dir, "agentmux")
-				defer checkLegacy()
 			installed := filepath.Join(dir, "agentcfg")
 			if bad {
 				if err := os.WriteFile(installed, []byte("previous executable"), 0o700); err != nil {
@@ -263,11 +242,11 @@ func TestBashDownloadsAndVerifiesRelease(t *testing.T) {
 			if _, err = os.Stat(installed); err != nil {
 				t.Fatal(err)
 			}
-				if runtime.GOOS != "windows" {
-					if help, err := exec.Command(installed).CombinedOutput(); err != nil || !bytes.Contains(help, []byte("Usage: agentcfg")) {
-						t.Fatalf("no-argument help failed: %v\n%s", err, help)
-					}
+			if runtime.GOOS != "windows" {
+				if help, err := exec.Command(installed).CombinedOutput(); err != nil || !bytes.Contains(help, []byte("Usage: agentcfg")) {
+					t.Fatalf("no-argument help failed: %v\n%s", err, help)
 				}
+			}
 			again := newCommand()
 			again.Env = environment
 			if output, err = again.CombinedOutput(); err != nil {
