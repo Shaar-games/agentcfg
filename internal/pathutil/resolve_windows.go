@@ -41,11 +41,37 @@ func Resolve(path string) (string, error) {
 			return "", &os.PathError{Op: "resolve", Path: path, Err: err}
 		}
 		if length < size {
-			return filepath.Clean(normalWindowsPath(windows.UTF16ToString(buffer[:length]))), nil
+			// GetFinalPathNameByHandle may return a valid NTFS 8.3 alias (for
+			// example RUNNER~1) even when callers used the long user-profile
+			// spelling. Expand existing path components before containment and
+			// identity comparisons; the handle has already resolved all junctions.
+			return expandLongWindowsPath(filepath.Clean(normalWindowsPath(windows.UTF16ToString(buffer[:length])))), nil
 		}
 		size = length + 1
 	}
 	return "", fmt.Errorf("resolved Windows path exceeds 32768 UTF-16 code units")
+}
+
+// Expand a resolved filesystem path without changing which object was opened.
+// On filesystems where long-name expansion is unsupported, retain the handle
+// spelling rather than treating an optional API failure as a missing file.
+func expandLongWindowsPath(path string) string {
+	name, err := windows.UTF16PtrFromString(extendedWindowsPath(path))
+	if err != nil {
+		return path
+	}
+	for size := uint32(512); size <= 32768; {
+		buffer := make([]uint16, size)
+		length, err := windows.GetLongPathName(name, &buffer[0], size)
+		if err != nil || length == 0 {
+			return path
+		}
+		if length < size {
+			return filepath.Clean(normalWindowsPath(windows.UTF16ToString(buffer[:length])))
+		}
+		size = length + 1
+	}
+	return path
 }
 
 func extendedWindowsPath(path string) string {
