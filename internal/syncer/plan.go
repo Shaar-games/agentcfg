@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"agentcfg/internal/config"
-	"agentcfg/internal/pathutil"
 )
 
 type Options struct {
@@ -96,23 +95,6 @@ func normalizeOptions(c *config.Config, opts Options) (Options, error) {
 	if opts.Home, err = filepath.Abs(opts.Home); err != nil {
 		return opts, err
 	}
-	if opts.AdoptExisting {
-		// Do not follow a symlink or junction at the selected home itself.
-		// System-provided aliases in a *parent* path are allowed, but only
-		// after both roots have been proven to be real final directories.
-		for _, path := range []string{opts.Home, opts.Root} {
-			info, err := os.Lstat(path)
-			if err != nil || !info.IsDir() || redirected(info) {
-				return opts, errors.New("native adoption requires real user-home directories (linked roots are refused)")
-			}
-		}
-		if opts.Home, err = pathutil.Resolve(opts.Home); err != nil {
-			return opts, err
-		}
-		if opts.Root, err = pathutil.Resolve(opts.Root); err != nil {
-			return opts, err
-		}
-	}
 	if opts.Binary == "" {
 		opts.Binary, err = os.Executable()
 		if err != nil {
@@ -127,6 +109,17 @@ func normalizeOptions(c *config.Config, opts Options) (Options, error) {
 	}
 	if opts.Scope != "project" && opts.Scope != "user" {
 		return opts, errors.New("scope must be project or user")
+	}
+	// Use one target-key spelling for adoption and subsequent ordinary sync.
+	// Otherwise /var or NTFS aliases can make an existing ownership record
+	// disappear from the lookup even though the physical destination is equal.
+	if opts.Root, err = normalizeScopeRoot(opts.Root); err != nil {
+		return opts, err
+	}
+	if opts.Scope == "user" {
+		if opts.Home, err = normalizeScopeRoot(opts.Home); err != nil {
+			return opts, err
+		}
 	}
 	if opts.SkillMode == "" {
 		opts.SkillMode = "auto"
@@ -172,6 +165,10 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 		if old.Version != 1 {
 			return nil, fmt.Errorf("unsupported sync ownership manifest version %d", old.Version)
 		}
+	}
+	old, err = normalizeManifestPaths(old, base)
+	if err != nil {
+		return nil, err
 	}
 	all := registry(base, opts.Scope)
 	selected, err := selectTargets(all, c.Settings.Harnesses, opts.Scope)
@@ -276,11 +273,19 @@ func (p *Plan) planConfig(t target, desired map[string]map[string]any, old manif
 // Refuse reparse/symlink traversals in generated target paths, including the
 // file itself. The source tree can be resolved independently by discovery.
 func ensureNoSymlinkParents(base, path string) error {
-	rel, err := filepath.Rel(base, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("target escapes selected scope: %s", path)
+	root, err := normalizeScopeRoot(base)
+	if err != nil {
+		return err
 	}
-	current := base
+	normalized, err := scopePath(root, path)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(root, normalized)
+	if err != nil {
+		return err
+	}
+	current := root
 	parts := strings.Split(rel, string(filepath.Separator))
 	for _, part := range parts {
 		current = filepath.Join(current, part)

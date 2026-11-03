@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 )
 
-// SourceSHA256 returns the raw native MCP file hash captured during Discover.
-// It does not read the file again; it is suitable for a subsequent consent proof.
+// SourceSHA256 returns the raw MCP file hash captured during Discover. Both the
+// native spelling and its root-resolved/target-resolved spellings are captured.
+// Lookup is exact: it never resolves new aliases, cleans parent traversals, or
+// reads file contents again. Freshness is checked separately by Revalidate.
 func (p *Plan) SourceSHA256(path string) (string, bool) {
 	if p == nil {
 		return "", false
@@ -25,7 +27,7 @@ func (p *Plan) SourceSHA256(path string) (string, bool) {
 // currently selected candidates. It neither applies the plan nor freezes disk:
 // callers still need containment-safe reads during the subsequent atomic copy.
 // Keep the original Plan returned by Discover; reconstructed plans lack the
-// private source fingerprints and cannot validate selected server imports.
+// private home identity and source fingerprints required for validation.
 func (p *Plan) Revalidate() error {
 	if p == nil || !filepath.IsAbs(p.Home) {
 		return errors.New("invalid discovery plan")
@@ -35,6 +37,13 @@ func (p *Plan) Revalidate() error {
 		return errors.New("discovery home changed or is unreadable")
 	}
 	defer root.Close()
+	opened, err := root.Stat(".")
+	if err != nil || p.homeIdentity == nil || !os.SameFile(p.homeIdentity, opened) {
+		return errors.New("discovery home no longer identifies the scanned directory")
+	}
+	if _, err := anchoredRootPath(root); err != nil {
+		return errors.New("discovery home changed or is unreadable")
+	}
 	checked := map[string]bool{}
 	for _, candidate := range p.Servers {
 		if !candidate.Selected {

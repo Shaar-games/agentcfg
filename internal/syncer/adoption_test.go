@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 )
 
 type adoptionFixture struct {
@@ -21,7 +22,12 @@ type adoptionFixture struct {
 
 func newAdoptionFixture(t *testing.T, harness string, skills bool) adoptionFixture {
 	t.Helper()
-	home := t.TempDir()
+	// These tests assert canonical plan/manifest keys. Mixed native aliases are
+	// exercised separately by the path-alias regression tests.
+	home, err := pathutil.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeTestFile(t, filepath.Join(home, ".agentcfg", "mcp.json"), `{"mcpServers":{"echo":{"command":"node","args":["server.js"]}}}`)
 	settings, _ := json.Marshal(map[string]any{"harnesses": []string{harness}})
 	writeTestFile(t, filepath.Join(home, ".agentcfg", "agentcfg.json"), string(settings))

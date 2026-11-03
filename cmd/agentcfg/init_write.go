@@ -195,7 +195,10 @@ func copyNativeSkill(source, dest string) error {
 		if pathutil.IsRedirected(info) || (!info.IsDir() && !info.Mode().IsRegular()) {
 			return fmt.Errorf("linked or special native skill entry refused: %s", relative)
 		}
-		file, err := root.OpenFile(relative, os.O_RDONLY, 0)
+		// Between Lstat and OpenFile a native asset may be replaced by a FIFO.
+		// Nonblocking open on Unix prevents an indefinite wait for a writer;
+		// the file identity/type check below then refuses the replacement.
+		file, err := root.OpenFile(relative, os.O_RDONLY|initNonblockRead, 0)
 		if err != nil {
 			return err
 		}

@@ -10,6 +10,7 @@ import (
 
 	"agentcfg/internal/bootstrap"
 	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 	"agentcfg/internal/syncer"
 )
 
@@ -51,7 +52,19 @@ func TestInitNativeAdoptionRequiresExplicitProvenProofs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(mcp) != 1 || len(skills) != 1 || mcp[0].Harness != "claude-code" || skills[0].Path != skillSource {
+	// Scanner origins retain their native spelling, while adoption proofs use
+	// the physical target path. These can differ on macOS (/var aliases) and
+	// Windows (NTFS short names) without changing the adopted native entry.
+	physicalSkill, err := pathutil.Resolve(skillSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	physicalNative, err := pathutil.Resolve(native)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mcp) != 1 || len(skills) != 1 || mcp[0].Harness != "claude-code" ||
+		skills[0].Path != physicalSkill || mcp[0].Path != physicalNative {
 		t.Fatalf("unexpected adoption proof scope: %+v %+v", mcp, skills)
 	}
 	cfg, err := config.Load(home)

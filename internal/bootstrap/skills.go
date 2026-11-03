@@ -36,17 +36,16 @@ func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
 			break
 		}
 		plan.budget.skills--
-		native := filepath.Join(root.Name(), path, entry.Name())
-		resolved, err := contained(root.Name(), native)
+		// The configured skills root may itself be an alias. Its native path is
+		// provenance; the anchored relative path is only for reading the target.
+		native := filepath.Join(source, entry.Name())
+		relative, err := anchoredPath(root, native)
 		if err != nil {
 			plan.warn(harness, native, "skill source is unreadable or escapes the discovery home")
 			continue
 		}
+		resolved := filepath.Join(root.Name(), relative)
 		if within(filepath.Join(root.Name(), ".agentcfg"), resolved) {
-			continue
-		}
-		relative, err := filepath.Rel(root.Name(), resolved)
-		if err != nil {
 			continue
 		}
 		info, err := root.Stat(relative)

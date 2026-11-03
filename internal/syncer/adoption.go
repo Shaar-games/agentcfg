@@ -297,7 +297,8 @@ func prepareAdoption(c *config.Config, opts Options, all []target, selected map[
 		if !ok || !selected[proof.Harness] {
 			return nil, fmt.Errorf("MCP adoption names an unselected or unknown harness %q", proof.Harness)
 		}
-		if !filepath.IsAbs(proof.Path) || !sameAdoptionPath(proof.Path, t.path) {
+		nativePath, pathErr := scopePath(home, proof.Path)
+		if pathErr != nil || !sameAdoptionPath(nativePath, t.path) {
 			return nil, fmt.Errorf("MCP adoption path is not the active native configuration for %s: %s", proof.Harness, proof.Path)
 		}
 		if t.toml {
@@ -350,7 +351,8 @@ func prepareAdoption(c *config.Config, opts Options, all []target, selected map[
 			return nil, fmt.Errorf("skill adoption has no enabled canonical skill %q for %s", proof.CanonicalName, t.name)
 		}
 		destination := filepath.Join(t.skills, filepath.Base(canonical.Path))
-		if !filepath.IsAbs(proof.Path) || !sameAdoptionPath(proof.Path, destination) || sameAdoptionPath(destination, canonical.Path) {
+		nativePath, pathErr := scopePath(home, proof.Path)
+		if pathErr != nil || !sameAdoptionPath(nativePath, destination) || sameAdoptionPath(destination, canonical.Path) {
 			return nil, fmt.Errorf("skill adoption path is not the generated native destination for %q: %s", proof.CanonicalName, proof.Path)
 		}
 		if !validSHA256(proof.TreeSHA256) {

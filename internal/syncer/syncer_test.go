@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 )
 
 func writeTestFile(t *testing.T, path, data string) {
@@ -264,8 +265,12 @@ func TestUserScopeUsesInjectedHomeOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	physicalHome, err := pathutil.Resolve(opts.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, change := range plan.Changes {
-		rel, err := filepath.Rel(opts.Home, change.Path)
+		rel, err := filepath.Rel(physicalHome, change.Path)
 		if err != nil || strings.HasPrefix(rel, "..") {
 			t.Fatalf("escaped fake home: %s", change.Path)
 		}

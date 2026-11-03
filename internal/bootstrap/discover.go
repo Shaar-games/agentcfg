@@ -55,7 +55,14 @@ func Discover(home string) (*Plan, error) {
 		return nil, errors.New("cannot open discovery home")
 	}
 	defer root.Close()
-	plan := &Plan{Home: absolute, Harnesses: []Harness{}, Servers: []ServerCandidate{}, Skills: []SkillCandidate{}, Warnings: []Warning{}, sourceHashes: map[string][32]byte{}, budget: newScanBudget()}
+	opened, err := root.Stat(".")
+	if err != nil || !os.SameFile(info, opened) {
+		return nil, errors.New("discovery home changed while opening it")
+	}
+	if _, err := anchoredRootPath(root); err != nil {
+		return nil, errors.New("discovery home changed while opening it")
+	}
+	plan := &Plan{Home: absolute, Harnesses: []Harness{}, Servers: []ServerCandidate{}, Skills: []SkillCandidate{}, Warnings: []Warning{}, sourceHashes: map[string][32]byte{}, homeIdentity: opened, budget: newScanBudget()}
 	for _, target := range targets {
 		harness := Harness{Name: target.name, Evidence: []string{}}
 		var configs []string
@@ -110,6 +117,9 @@ func Discover(home string) (*Plan, error) {
 		harness.Selected = harness.Detected
 		plan.Harnesses = append(plan.Harnesses, harness)
 	}
+	if _, err := anchoredRootPath(root); err != nil {
+		return nil, errors.New("discovery home changed during discovery")
+	}
 	mergeCandidates(plan)
 	return plan, nil
 }
@@ -123,13 +133,9 @@ func contained(root, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !within(physicalRoot, resolved) {
-		return "", errors.New("path escapes discovery boundary")
-	}
-	// Reexpress the verified physical target under the caller's root spelling.
-	// This preserves macOS /var aliases and Windows native source paths shown
-	// in scanner proofs without permitting an actual escape from that root.
-	relative, err := filepath.Rel(physicalRoot, resolved)
+	// Presentation keeps the caller's root spelling. Actual access separately
+	// verifies the opened root identity in anchoredPath before deriving a path.
+	relative, err := relativeWithin(physicalRoot, resolved)
 	if err != nil {
 		return "", err
 	}
@@ -137,8 +143,16 @@ func contained(root, path string) (string, error) {
 }
 
 func within(root, path string) bool {
+	_, err := relativeWithin(root, path)
+	return err == nil
+}
+
+func relativeWithin(root, path string) (string, error) {
 	relative, err := filepath.Rel(root, path)
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return "", errors.New("path escapes discovery boundary")
+	}
+	return relative, nil
 }
 
 func (p *Plan) warn(harness, source, message string) {

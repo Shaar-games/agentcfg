@@ -27,7 +27,10 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 		plan.warn(target.name, source, "native config is unreadable, nonregular, invalid UTF-8 or larger than 1 MiB")
 		return
 	}
-	plan.sourceHashes[source] = sha256.Sum256(data)
+	if err := captureSourceHash(root, plan, source, path, sha256.Sum256(data)); err != nil {
+		plan.warn(target.name, source, "native source changed during discovery; refresh the import preview")
+		return
+	}
 	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
 	if target.toml {
 		var document map[string]any

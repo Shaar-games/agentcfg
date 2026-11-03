@@ -2,18 +2,24 @@
 // executing commands or changing files. The caller owns confirmation and writes.
 package bootstrap
 
-import "agentcfg/internal/config"
+import (
+	"os"
+
+	"agentcfg/internal/config"
+)
 
 // Plan is a reviewable import inventory. Discover never applies it. Selected
 // fields are initial suggestions; the confirmation UI may change them.
 type Plan struct {
-	Home         string
-	Harnesses    []Harness
-	Servers      []ServerCandidate
-	Skills       []SkillCandidate
-	Warnings     []Warning
-	sourceHashes map[string][32]byte
-	budget       *scanBudget
+	Home                  string
+	Harnesses             []Harness
+	Servers               []ServerCandidate
+	Skills                []SkillCandidate
+	Warnings              []Warning
+	sourceHashes          map[string][32]byte
+	ambiguousSourceHashes map[string]bool
+	homeIdentity          os.FileInfo
+	budget                *scanBudget
 }
 
 type Harness struct {
