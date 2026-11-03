@@ -82,7 +82,6 @@ func (s interfaceSession) selectAction(title, description string, choices ...huh
 		Title(title).
 		Description(description).
 		Options(choices...).
-		Height(max(5, min(len(choices)+2, 12))).
 		Value(&selected))
 	return selected, err
 }
@@ -104,11 +103,37 @@ func safeHuhText(value string) string {
 	}, value)
 }
 
-func (s interfaceSession) confirm(title, description string) (bool, error) {
-	var yes bool
-	err := s.form(huh.NewConfirm().Title(title).Description(description).
-		Affirmative("Apply").Negative("Cancel").Value(&yes))
-	return yes, err
+// confirmChange is the only approval prompt for a changed canonical setting.
+// No callers write user settings or SKILL.md before receiving a Yes! result.
+func (s interfaceSession) confirmChange() (bool, error) {
+	var confirm bool
+	err := s.form(huh.NewConfirm().
+		Title("Are you sure?").
+		Affirmative("Yes!").
+		Negative("No.").
+		Value(&confirm))
+	return confirm, err
+}
+
+func sameChoiceSet(selected, current []string) bool {
+	if len(selected) != len(current) {
+		return false
+	}
+	for _, id := range selected {
+		if !slices.Contains(current, id) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameHarnessAvailability(selected, configured, filter []string) bool {
+	for _, id := range configured {
+		if slices.Contains(selected, id) != config.Allows(filter, id) {
+			return false
+		}
+	}
+	return true
 }
 
 func isCancelled(err error) bool {
@@ -168,7 +193,7 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 			huh.NewOption(fmt.Sprintf("Skills  ·  %d available", len(cfg.Skills)), "skills"),
 			huh.NewOption(fmt.Sprintf("Agent Plugins  ·  %d folders", len(discoverPlugins(root, cfg))), "plugins"),
 			huh.NewOption(fmt.Sprintf("Diagnostics and broker status  ·  %d warning(s)", len(cfg.Warnings)), "diagnostics"),
-			huh.NewOption("Preview and apply user-level synchronization", "sync"),
+			huh.NewOption("Synchronize native harnesses", "sync"),
 			huh.NewOption("Refresh configuration and status", "refresh"),
 			huh.NewOption("Exit", "exit"))
 		if isCancelled(err) {
@@ -223,7 +248,7 @@ func (s interfaceSession) configureHarnesses() error {
 	var selected []string
 	err = s.form(huh.NewMultiSelect[string]().
 		Title("Harness availability").
-		Description("Space toggles, Enter saves, Ctrl+C cancels. Run sync to apply changes to native harness settings.").
+		Description("Space toggles, Enter reviews changes, Ctrl+C cancels.").
 		Options(choices...).
 		Value(&selected))
 	if isCancelled(err) {
@@ -231,6 +256,19 @@ func (s interfaceSession) configureHarnesses() error {
 	}
 	if err != nil {
 		return err
+	}
+	if sameChoiceSet(selected, cfg.Settings.Harnesses) {
+		return nil
+	}
+	confirmed, err := s.confirmChange()
+	if isCancelled(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return nil
 	}
 	if err := setHarnessSelection(s.root, selected, cfg.Settings.Harnesses); err != nil {
 		if errors.Is(err, errNoChange) {
@@ -326,7 +364,7 @@ func (s interfaceSession) configureMCPHarnesses(server config.Server, configured
 	var selected []string
 	err := s.form(huh.NewMultiSelect[string]().
 		Title("MCP availability: " + safeHuhText(server.Name)).
-		Description("Space toggles, Enter saves. Unchecked MCPs are excluded when syncing that harness.").
+		Description("Space toggles, Enter reviews changes. Unchecked MCPs are unavailable for that harness.").
 		Options(choices...).
 		Value(&selected))
 	if isCancelled(err) {
@@ -334,6 +372,19 @@ func (s interfaceSession) configureMCPHarnesses(server config.Server, configured
 	}
 	if err != nil {
 		return err
+	}
+	if sameHarnessAvailability(selected, configured, server.Harnesses) {
+		return nil
+	}
+	confirmed, err := s.confirmChange()
+	if isCancelled(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return nil
 	}
 	err = setServerHarnessSelection(s.root, server, selected, configured)
 	if errors.Is(err, errNoChange) {
@@ -360,6 +411,16 @@ func (s interfaceSession) configureMCPSharing(name string, server config.Server)
 		return err
 	}
 	if selected == current {
+		return nil
+	}
+	confirmed, err := s.confirmChange()
+	if isCancelled(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !confirmed {
 		return nil
 	}
 	return setServerSharing(s.root, name, selected, current)
@@ -436,7 +497,7 @@ func (s interfaceSession) configureSkill(name string) error {
 	}
 	err = s.form(huh.NewMultiSelect[string]().
 		Title("Skill availability: " + safeHuhText(name)).
-		Description("Space toggles, Enter saves, Ctrl+C cancels. No selection means metadata.harness: none.").
+		Description("Space toggles, Enter reviews changes, Ctrl+C cancels. No selection means metadata.harness: none.").
 		Options(choices...).
 		Value(&enabled))
 	if isCancelled(err) {
@@ -444,6 +505,19 @@ func (s interfaceSession) configureSkill(name string) error {
 	}
 	if err != nil {
 		return err
+	}
+	if sameHarnessAvailability(enabled, cfg.Settings.Harnesses, selected.Harnesses) {
+		return nil
+	}
+	confirmed, err := s.confirmChange()
+	if isCancelled(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return nil
 	}
 	if err := setSkillHarnessForConfigured(s.root, *selected, enabled, cfg.Settings.Harnesses); err != nil {
 		if errors.Is(err, errNoChange) {
@@ -555,7 +629,7 @@ func (s interfaceSession) configureSync() error {
 	if len(plan.Changes) == 0 {
 		return nil
 	}
-	yes, err := s.confirm("Apply synchronized harness configuration?", "Recheck all sources and native files before writing; preserve unmanaged entries.")
+	yes, err := s.confirmChange()
 	if err != nil {
 		return err
 	}
@@ -565,7 +639,7 @@ func (s interfaceSession) configureSync() error {
 	if err := plan.Apply(); err != nil {
 		return err
 	}
-	return s.note("Sync completed", fmt.Sprintf("Applied %d change(s). All changes were limited to the user home; skills were symlinked or copied without rewriting their content.", len(plan.Changes)))
+	return s.note("Sync completed", fmt.Sprintf("Synchronized %d change(s). All changes were limited to the user home; skills were symlinked or copied without rewriting their content.", len(plan.Changes)))
 }
 
 func stableExecutable() (string, error) {

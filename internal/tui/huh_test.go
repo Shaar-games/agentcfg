@@ -34,7 +34,7 @@ func TestHuhAccessibleAdvancedMenuExitIsReadOnly(t *testing.T) {
 	if err := RunMenu(context.Background(), root, terminalByteReader{strings.NewReader("8\n")}, &rendered); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"agentcfg", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Diagnostics", "synchronization", "Refresh", "Exit"} {
+	for _, text := range []string{"agentcfg", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Diagnostics", "Synchronize", "Refresh", "Exit"} {
 		if !strings.Contains(rendered.String(), text) {
 			t.Fatalf("Huh main menu missing %q: %s", text, rendered.String())
 		}
@@ -87,7 +87,7 @@ func TestHuhMCPSharingUsesPrecheckedNativeList(t *testing.T) {
 	var output bytes.Buffer
 	// Open server -> Change sharing -> Isolated -> Back. Each action selection
 	// now completes on Enter; no checkbox confirmation is needed.
-	sequence := "1\n2\n2\n2\n"
+	sequence := "1\n2\n2\ny\n2\n"
 	session := interfaceSession{ctx: context.Background(), root: root, in: terminalByteReader{strings.NewReader(sequence)}, out: &output}
 	if err := session.configureMCP(); err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestHuhMCPAvailabilityListCanDisableOneConfiguredHarness(t *testing.T) {
 	var output bytes.Buffer
 	// Open alpha, open the actual multiselect availability field, uncheck
 	// Codex, confirm, then Back to the parent screen.
-	input := terminalByteReader{strings.NewReader("1\n1\n1\n0\n2\n")}
+	input := terminalByteReader{strings.NewReader("1\n1\n1\n0\ny\n2\n")}
 	session := interfaceSession{ctx: context.Background(), root: root, in: input, out: &output}
 	if err := session.configureMCP(); err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestHuhDefaultCheckboxListSavesSelection(t *testing.T) {
 	root := settingsFixture(t)
 	putSettings(t, root, `{"harnesses":["codex"]}`)
 	var output bytes.Buffer
-	if err := Run(context.Background(), root, terminalByteReader{strings.NewReader("2\n6\n0\n")}, &output); err != nil {
+	if err := Run(context.Background(), root, terminalByteReader{strings.NewReader("2\n6\n0\ny\n")}, &output); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(root)
@@ -184,7 +184,7 @@ func TestHuhHarnessMultiSelectAccessible(t *testing.T) {
 	var output bytes.Buffer
 	session := interfaceSession{
 		ctx: context.Background(), root: root,
-		in: terminalByteReader{strings.NewReader("3\n6\n0\n\n")}, out: &output,
+		in: terminalByteReader{strings.NewReader("3\n6\n0\ny\n")}, out: &output,
 	}
 	if err := session.configureHarnesses(); err != nil {
 		t.Fatal(err)
@@ -208,7 +208,7 @@ func TestHuhHarnessMultiSelectAllowsEmptySelection(t *testing.T) {
 	var output bytes.Buffer
 	session := interfaceSession{
 		ctx: context.Background(), root: root,
-		in: terminalByteReader{strings.NewReader("2\n0\n")}, out: &output,
+		in: terminalByteReader{strings.NewReader("2\n0\ny\n")}, out: &output,
 	}
 	if err := session.configureHarnesses(); err != nil {
 		t.Fatal(err)
@@ -271,7 +271,7 @@ func TestHuhSkillMultiSelectAccessible(t *testing.T) {
 	var output bytes.Buffer
 	session := interfaceSession{
 		ctx: context.Background(), root: root,
-		in: terminalByteReader{strings.NewReader("1\n2\n3\n0\n")}, out: &output,
+		in: terminalByteReader{strings.NewReader("1\n2\n3\n0\ny\n")}, out: &output,
 	}
 	if err := session.configureSkill("review"); err != nil {
 		t.Fatal(err)
