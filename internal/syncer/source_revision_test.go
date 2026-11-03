@@ -6,19 +6,19 @@ import (
 	"strings"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 func TestPlanRejectsCanonicalSettingsChangedAfterPreview(t *testing.T) {
 	home := t.TempDir()
-	canonical := filepath.Join(home, ".agentmux")
+	canonical := filepath.Join(home, ".agentcfg")
 	if err := os.MkdirAll(canonical, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(canonical, "mcp.json"), []byte(`{"mcpServers":{"test":{"type":"stdio","command":"node"}}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	settings := filepath.Join(canonical, "agentmux.json")
+	settings := filepath.Join(canonical, "agentcfg.json")
 	if err := os.WriteFile(settings, []byte(`{"harnesses":["cursor"]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestPlanRejectsCanonicalSettingsChangedAfterPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := BuildPlan(cfg, Options{Root: home, Home: home, Binary: filepath.Join(home, "agentmux"), Scope: "user"})
+	plan, err := BuildPlan(cfg, Options{Root: home, Home: home, Binary: filepath.Join(home, "agentcfg"), Scope: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}

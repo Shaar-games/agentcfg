@@ -6,12 +6,12 @@ GitHub Actions builds precompiled, CGO-free binaries:
 
 | OS | CPU | Release asset |
 | --- | --- | --- |
-| Linux | AMD64 | `agentmux_linux_amd64.tar.gz` |
-| Linux | ARM64 | `agentmux_linux_arm64.tar.gz` |
-| macOS | AMD64 | `agentmux_darwin_amd64.tar.gz` |
-| macOS | ARM64 | `agentmux_darwin_arm64.tar.gz` |
-| Windows | AMD64 | `agentmux_windows_amd64.zip` |
-| Windows | ARM64 | `agentmux_windows_arm64.zip` |
+| Linux | AMD64 | `agentcfg_linux_amd64.tar.gz` |
+| Linux | ARM64 | `agentcfg_linux_arm64.tar.gz` |
+| macOS | AMD64 | `agentcfg_darwin_amd64.tar.gz` |
+| macOS | ARM64 | `agentcfg_darwin_arm64.tar.gz` |
+| Windows | AMD64 | `agentcfg_windows_amd64.zip` |
+| Windows | ARM64 | `agentcfg_windows_arm64.zip` |
 
 Each release includes `SHA256SUMS` with the SHA-256 of every archive.
 
@@ -25,30 +25,33 @@ executable, and install it into `~/.local/bin/`. Reinstalling **replaces**
 the existing executable after checking the archive and staged binary. A
 temporary backup is kept until the new binary passes its version smoke test.
 On Windows, an old running executable may leave a backup that can be removed
-after the process exits.
+after the process exits. The installer targets only `agentcfg` (`agentcfg.exe`
+on Windows): a previously installed `agentmux` (`agentmux.exe`) and
+`~/.agentmux/` remain intact, and no configuration migration is triggered.
 
-Set `AGENTMUX_VERSION` to an existing published tag (for example,
-`AGENTMUX_VERSION=v0.2.3`) to select a specific release.
-Set `AGENTMUX_BIN_DIR` for a custom user-owned destination.
-`AGENTMUX_RELEASE_BASE_URL` is used by local installer test fixtures and
+Set `AGENTCFG_VERSION` to an existing published **agentcfg** release tag to
+select a specific version. Old agentmux tags are not automatically agentcfg
+releases; publish the renamed binaries before using the installer URL.
+Set `AGENTCFG_BIN_DIR` for a custom user-owned destination.
+`AGENTCFG_RELEASE_BASE_URL` is used by local installer test fixtures and
 normally should remain unset.
 
 ## Self-update
 
 ```sh
-agentmux update
+agentcfg update
 ```
 
 The command queries the latest **stable GitHub Release targeting `main`**,
 downloads the platform archive plus `SHA256SUMS`, checks the SHA-256 digest,
 extracts only the expected executable, verifies that it reports the release
-version, and replaces the executable currently running AgentMux. It does not
+version, and replaces the executable currently running agentcfg. It does not
 touch native harness configurations, MCP definitions or skills. No Go toolchain
 is required.
 
 Unix uses a same-filesystem atomic rename and a backup for rollback. Windows
 renames the old executable before installing the replacement, so an active
-AgentMux process can keep using its already-mapped image. If Windows cannot
+agentcfg process can keep using its already-mapped image. If Windows cannot
 delete that backup while it remains in use, its path is printed for cleanup
 after the updater exits. Failure before replacement leaves the existing binary
 untouched; a failed installed-binary smoke test triggers restoration.
@@ -65,8 +68,8 @@ replace both. Signed provenance/attestations are potential future enhancements.
    `SHA256SUMS`, and attaches the assets to a GitHub Release.
 4. The release workflow runs a post-publication installer smoke matrix on
    Linux, macOS and Windows, downloading real release artifacts and checking
-   both successful installation and successful replacement of an existing binary.
-   The checksum and `agentmux version` are verified as part of installation.
+   both successful installation and successful replacement of an existing agentcfg binary.
+   The checksum, `agentcfg version` and no-argument CLI help are verified as part of installation.
 
 The release workflow also accepts a manual trigger with an existing tag.
 Publishing requires GitHub Actions `contents: write` permission only for

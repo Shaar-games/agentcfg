@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 // Installing a skill must not rewrite its content, remove routing metadata,
@@ -14,7 +14,7 @@ import (
 func TestSkillInstallationPreservesOriginalSKILLmdBytes(t *testing.T) {
 	root, home := t.TempDir(), t.TempDir()
 	original := []byte("---\r\nname: review\r\ndescription: Review source code.\r\nmetadata:\r\n  harness: codex,antigravity\r\n  custom: untouched\r\n---\r\n\r\n# Review\r\nPreserve formatting exactly.\r\n")
-	source := filepath.Join(root, ".agentmux", "skills", "review", "SKILL.md")
+	source := filepath.Join(root, ".agentcfg", "skills", "review", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestSkillInstallationPreservesOriginalSKILLmdBytes(t *testing.T) {
 		Root: root, Skills: []config.Skill{{Name: "review", Path: filepath.Dir(source), Harnesses: []string{"codex", "antigravity"}}},
 		Settings: config.Settings{Harnesses: []string{"codex", "antigravity"}},
 	}
-	plan, err := BuildPlan(cfg, Options{Root: root, Home: home, Scope: "user", Binary: filepath.Join(root, "agentmux.exe"), SkillMode: "copy"})
+	plan, err := BuildPlan(cfg, Options{Root: root, Home: home, Scope: "user", Binary: filepath.Join(root, "agentcfg.exe"), SkillMode: "copy"})
 	if err != nil {
 		t.Fatal(err)
 	}

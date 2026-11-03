@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 func TestInitRejectsInvalidHarnessesBeforeCreatingSources(t *testing.T) {
@@ -23,7 +23,7 @@ func TestInitRejectsInvalidHarnessesBeforeCreatingSources(t *testing.T) {
 			if err == nil {
 				t.Fatalf("invalid user-level harness selection %q was accepted", input)
 			}
-			if _, statErr := os.Lstat(filepath.Join(home, ".agentmux")); !os.IsNotExist(statErr) {
+			if _, statErr := os.Lstat(filepath.Join(home, ".agentcfg")); !os.IsNotExist(statErr) {
 				t.Fatalf("init created sources after invalid selection: %v", statErr)
 			}
 		})
@@ -32,11 +32,11 @@ func TestInitRejectsInvalidHarnessesBeforeCreatingSources(t *testing.T) {
 
 func TestInitInvalidHarnessesPreserveExistingSources(t *testing.T) {
 	home := t.TempDir()
-	canonical := filepath.Join(home, ".agentmux")
+	canonical := filepath.Join(home, ".agentcfg")
 	if err := os.Mkdir(canonical, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(canonical, "agentmux.json")
+	path := filepath.Join(canonical, "agentcfg.json")
 	original := []byte(`{"harnesses":["codex"],"runtime":{"idleTimeout":"3m"}}`)
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestInitSupportsExplicitlyDisabledHarnesses(t *testing.T) {
 
 func TestInitRefusesLinkedCanonicalDirectory(t *testing.T) {
 	home, outside := t.TempDir(), t.TempDir()
-	location := filepath.Join(home, ".agentmux")
+	location := filepath.Join(home, ".agentcfg")
 	linkInitDirectory(t, location, outside)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -90,7 +90,7 @@ func TestInitRefusesLinkedSkillsOrPluginsBeforeCreatingSources(t *testing.T) {
 	for _, name := range []string{"skills", "plugins"} {
 		t.Run(name, func(t *testing.T) {
 			home, outside := t.TempDir(), t.TempDir()
-			canonical := filepath.Join(home, ".agentmux")
+			canonical := filepath.Join(home, ".agentcfg")
 			if err := os.Mkdir(canonical, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -101,7 +101,7 @@ func TestInitRefusesLinkedSkillsOrPluginsBeforeCreatingSources(t *testing.T) {
 			if err := run(context.Background(), []string{"init"}, nil, &output, &diagnostics); err == nil {
 				t.Fatalf("init accepted linked %s directory", name)
 			}
-			for _, source := range []string{"mcp.json", "agentmux.json"} {
+			for _, source := range []string{"mcp.json", "agentcfg.json"} {
 				if _, err := os.Lstat(filepath.Join(canonical, source)); !os.IsNotExist(err) {
 					t.Fatalf("init created %s before rejecting linked directory: %v", source, err)
 				}

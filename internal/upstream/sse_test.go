@@ -10,7 +10,7 @@ import (
 	"testing/iotest"
 	"time"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 )
 
 func TestSSEFraming(t *testing.T) {

@@ -17,7 +17,7 @@ func TestSettingsAndSkillEditsRespectActiveSyncLock(t *testing.T) {
 		root := settingsFixture(t)
 		original := `{"harnesses":["codex"],"serverOverrides":{}}`
 		putSettings(t, root, original)
-		lock := flock.New(filepath.Join(root, ".agentmux", "sync.lock"))
+		lock := flock.New(filepath.Join(root, ".agentcfg", "sync.lock"))
 		locked, err := lock.TryLock()
 		if err != nil || !locked {
 			t.Fatalf("acquire synchronization lock: %v", err)
@@ -44,7 +44,7 @@ func TestSettingsAndSkillEditsRespectActiveSyncLock(t *testing.T) {
 	t.Run("skill", func(t *testing.T) {
 		original := "---\nname: review\ndescription: Review code\nmetadata:\n  harness: codex\n---\n# Keep me\n"
 		root, source, skill := skillSourceFixture(t, original)
-		lock := flock.New(filepath.Join(root, ".agentmux", "sync.lock"))
+		lock := flock.New(filepath.Join(root, ".agentcfg", "sync.lock"))
 		locked, err := lock.TryLock()
 		if err != nil || !locked {
 			t.Fatalf("acquire synchronization lock: %v", err)

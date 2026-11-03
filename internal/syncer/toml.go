@@ -7,8 +7,8 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 )
 
-const beginMarker = "# agentmux:begin managed MCP servers"
-const endMarker = "# agentmux:end managed MCP servers"
+const beginMarker = "# agentcfg:begin managed MCP servers"
+const endMarker = "# agentcfg:end managed MCP servers"
 
 func splitBlock(data []byte) ([]byte, []byte, []byte, error) {
 	start, end := bytes.Index(data, []byte(beginMarker)), bytes.Index(data, []byte(endMarker))
@@ -16,10 +16,10 @@ func splitBlock(data []byte) ([]byte, []byte, []byte, error) {
 		return data, nil, nil, nil
 	}
 	if start < 0 || end < start || bytes.Count(data, []byte(beginMarker)) != 1 || bytes.Count(data, []byte(endMarker)) != 1 {
-		return nil, nil, nil, fmt.Errorf("invalid or duplicate agentmux markers")
+		return nil, nil, nil, fmt.Errorf("invalid or duplicate agentcfg markers")
 	}
 	if start > 0 && data[start-1] != '\n' {
-		return nil, nil, nil, fmt.Errorf("agentmux marker must be on its own line")
+		return nil, nil, nil, fmt.Errorf("agentcfg marker must be on its own line")
 	}
 	end += len(endMarker)
 	if end < len(data) && data[end] == '\r' {
@@ -52,7 +52,7 @@ func editTOML(before []byte, desired map[string]map[string]any, previous map[str
 		return nil, nil, "", err
 	}
 	if len(block) != 0 && (previousBlock == "" || rawDigest(block) != previousBlock) {
-		return nil, nil, "", fmt.Errorf("managed TOML block was edited manually or is not owned by agentmux")
+		return nil, nil, "", fmt.Errorf("managed TOML block was edited manually or is not owned by agentcfg")
 	}
 	if previousBlock != "" && len(block) == 0 {
 		return nil, nil, "", fmt.Errorf("managed TOML block was removed manually")
@@ -66,7 +66,7 @@ func editTOML(before []byte, desired map[string]map[string]any, previous map[str
 	owned := map[string]string{}
 	for name, wanted := range desired {
 		if _, exists := entries[name]; exists && previous[name] == "" {
-			return nil, nil, "", fmt.Errorf("MCP name %q already exists and is not owned by agentmux", name)
+			return nil, nil, "", fmt.Errorf("MCP name %q already exists and is not owned by agentcfg", name)
 		}
 		owned[name] = digest(wanted)
 	}

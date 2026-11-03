@@ -17,7 +17,7 @@ func defaultSettings() Settings {
 }
 
 func (l *loader) loadSettings() error {
-	path := filepath.Join(l.agents, "agentmux.json")
+	path := filepath.Join(l.agents, "agentcfg.json")
 	data, err := readBounded(path)
 	if os.IsNotExist(err) {
 		return nil

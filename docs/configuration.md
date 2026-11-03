@@ -1,19 +1,26 @@
 # Configuration and portable plugins
 
-`config.Load(root)` reads canonical sources under `<root>/.agentmux/`. The public CLI uses the user's home directory as `root` and synchronizes definitions through native harness configuration adapters. Loading returns resolved servers, discovered skills, settings and warnings without executing processes, looking up executables, contacting networks, creating directories or writing harness configuration.
+`config.Load(root)` reads canonical sources under `<root>/.agentcfg/`. The public CLI uses the user's home directory as `root` and synchronizes definitions through native harness configuration adapters. Loading returns resolved servers, discovered skills, settings and warnings without executing processes, looking up executables, contacting networks, creating directories or writing harness configuration.
 
 ## Sources
 
 | Location relative to root | Purpose |
 | --- | --- |
-| `.agentmux/mcp.json` | Explicit canonical MCP servers and optional agentmux fields |
-| `.agentmux/agentmux.json` | Selected harnesses, runtime durations and named overrides |
-| `.agentmux/skills/<skill>/SKILL.md` | Standalone skills |
-| `.agentmux/plugins/<folder>/plugin.json` | Required portable plugin manifest |
-| `.agentmux/plugins/<folder>/mcp.json` | Optional portable MCP component |
-| `.agentmux/plugins/<folder>/skills/<skill>/SKILL.md` | Optional portable skills |
+| `.agentcfg/mcp.json` | Explicit canonical MCP servers and optional agentcfg fields |
+| `.agentcfg/agentcfg.json` | Selected harnesses, runtime durations and named overrides |
+| `.agentcfg/skills/<skill>/SKILL.md` | Standalone skills |
+| `.agentcfg/plugins/<folder>/plugin.json` | Required portable plugin manifest |
+| `.agentcfg/plugins/<folder>/mcp.json` | Optional portable MCP component |
+| `.agentcfg/plugins/<folder>/skills/<skill>/SKILL.md` | Optional portable skills |
 
 Only immediate plugin directories and immediate skill directories are discovered. The manifest name, rather than the installation folder name, supplies a plugin's namespace. Missing optional sources are valid. The source root itself must exist and be a directory.
+
+`agentcfg` without arguments displays help. `agentcfg config` opens the Huh
+configuration interface (including harness and skill multi-select lists);
+`agentcfg harnesses` opens only the harness list. On systems with old canonical
+sources under `~/.agentmux/`, run `agentcfg migrate` for a read-only preview
+before `agentcfg migrate --apply`. The migration leaves the old installation
+intact and does not import native harness entries or run synchronization.
 
 ## Canonical MCP servers
 
@@ -37,7 +44,7 @@ Only immediate plugin directories and immediate skill directories are discovered
 }
 ~~~
 
-The root object accepts `mcpServers` and an optional `$schema`. If present, the schema identifier must be the supported MCP identifier shown below. Canonical server objects can add `harnesses` and `sharing`; those additions are agentmux configuration, not part of the portable plugin schema.
+The root object accepts `mcpServers` and an optional `$schema`. If present, the schema identifier must be the supported MCP identifier shown below. Canonical server objects can add `harnesses` and `sharing`; those additions are agentcfg configuration, not part of the portable plugin schema.
 
 | Transport | Required fields | Optional fields |
 | --- | --- | --- |
@@ -65,7 +72,7 @@ The default settings are:
 }
 ~~~
 
-`antigravity` is also accepted and targets `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/`, the Google Antigravity personal layout. `vscode` is recognized when loading legacy settings but user-scope VS Code synchronization remains unsupported by the global-only CLI: `agentmux init --harnesses vscode` refuses to create that unsupported selection. Duplicate harness names are removed while retaining their order. Unknown names are errors.
+`antigravity` is also accepted and targets `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/`, the Google Antigravity personal layout. `vscode` is recognized when loading legacy settings but user-scope VS Code synchronization remains unsupported by the global-only CLI: `agentcfg init --harnesses vscode` refuses to create that unsupported selection. Duplicate harness names are removed while retaining their order. Unknown names are errors.
 
 Runtime durations use Go duration syntax, such as `30s` or `5m`, and must be positive. An omitted field retains its default.
 
@@ -89,7 +96,7 @@ Server overrides replace only fields explicitly present. For example, `"harnesse
 
 `shared` is the server default and requests a shared upstream instance. `isolated` requests a separate upstream connection for each client. Choose the latter when an MCP relies on private session state or client callbacks; see the runtime documentation for the supported shared-session operations.
 
-Harness-native discovery may still overlap the generated skill destinations. For example, a harness that reads `~/.agents/skills/` directly can see skills installed there for Codex, even if its own agentmux filter excludes them. The canonical sources under `~/.agentmux/skills/` are deliberately separate from the native discovery directory. A distribution filter is not an isolation or authorization boundary.
+Harness-native discovery may still overlap the generated skill destinations. For example, a harness that reads `~/.agents/skills/` directly can see skills installed there for Codex, even if its own agentcfg filter excludes them. The canonical sources under `~/.agentcfg/skills/` are deliberately separate from the native discovery directory. A distribution filter is not an isolation or authorization boundary.
 
 ## Portable manifests
 
@@ -106,7 +113,7 @@ The required name uses 1–64 ASCII lowercase letters, numbers, dots or hyphens,
 
 Metadata is checked by its specified JSON type. Version, URL, email and license strings are not rejected for lacking a particular external format. An author object permits only string fields `name`, `email` and `url`; keywords must be strings.
 
-The author schema is closed, but the normative client rules specify two recovery cases: **report and ignore unknown top-level manifest fields**, and **report and ignore non-object extensions**. Other manifest violations reject that plugin. Agentmux does not implement extension namespaces, so their values are ignored without assigning semantics. Unknown manifest fields never override the fixed component locations. These recovery rules follow [loading and discovery](https://agent-plugins.org/client-implementers/loading-and-discovery) and [specification §§5.2 and 8.1](https://agent-plugins.org/specification).
+The author schema is closed, but the normative client rules specify two recovery cases: **report and ignore unknown top-level manifest fields**, and **report and ignore non-object extensions**. Other manifest violations reject that plugin. agentcfg does not implement extension namespaces, so their values are ignored without assigning semantics. Unknown manifest fields never override the fixed component locations. These recovery rules follow [loading and discovery](https://agent-plugins.org/client-implementers/loading-and-discovery) and [specification §§5.2 and 8.1](https://agent-plugins.org/specification).
 
 ## Portable MCP components
 
@@ -122,11 +129,11 @@ The author schema is closed, but the normative client rules specify two recovery
 }
 ~~~
 
-Both `$schema` and `mcpServers` are required, and no other top-level fields are permitted. Each server uses the closed portable transport variant. Thus `harnesses`, `sharing`, `disabled` and inline client options invalidate a portable server entry; put agentmux preferences in the external overrides file.
+Both `$schema` and `mcpServers` are required, and no other top-level fields are permitted. Each server uses the closed portable transport variant. Thus `harnesses`, `sharing`, `disabled` and inline client options invalidate a portable server entry; put agentcfg preferences in the external overrides file.
 
 For this example the resolved identifier is `docs-helper.context7`. A plugin's skill `documentation-check` becomes `docs-helper.documentation-check` internally. Its original skill name and source frontmatter remain unchanged.
 
-Agentmux recognizes Agent Plugins 1.0.0 locally. It never fetches a declared schema while loading. Unsupported or mismatched component schema identifiers disable the relevant plugin/component.
+agentcfg recognizes Agent Plugins 1.0.0 locally. It never fetches a declared schema while loading. Unsupported or mismatched component schema identifiers disable the relevant plugin/component.
 
 ## Plugin paths and variables
 
@@ -152,7 +159,7 @@ Portable paths use forward slashes; explicit backslashes and drive/stream colons
 The launcher receives reserved `PLUGIN_ROOT` and `PLUGIN_DATA` environment variables. Plugin-defined replacements, including case variants, are rejected. Data is assigned to:
 
 ~~~text
-<user-home>/.agentmux/data/plugins/<manifest-name>
+<user-home>/.agentcfg/data/plugins/<manifest-name>
 ~~~
 
 That location remains stable across updates using the same manifest name. Existing data paths must be directories, remain within the source root, and must not alias another plugin's data directory. The loader computes missing paths without creating them. The process launcher is responsible for creating the data directory and a selected data-rooted working directory immediately before launch.
@@ -179,7 +186,7 @@ metadata:
 Read the relevant documentation and cite the version used.
 ~~~
 
-The name must match its discovered directory basename, use 1–64 lowercase Unicode letters, digits or hyphens, and have no leading, trailing or doubled hyphen. The description must be a nonempty string of at most 1,024 characters. The optional `license` and `allowed-tools` fields are strings; `compatibility` is a string of 1–500 characters; `metadata` is a string-to-string map. Additional frontmatter fields are parsed safely but receive no agentmux semantics.
+The name must match its discovered directory basename, use 1–64 lowercase Unicode letters, digits or hyphens, and have no leading, trailing or doubled hyphen. The description must be a nonempty string of at most 1,024 characters. The optional `license` and `allowed-tools` fields are strings; `compatibility` is a string of 1–500 characters; `metadata` is a string-to-string map. Additional frontmatter fields are parsed safely but receive no agentcfg semantics.
 
 BOM and CRLF input are supported. Duplicate YAML keys, aliases, anchors, custom tags, malformed types and missing delimiters reject only the affected skill. No skill instructions or scripts are executed by loading.
 
@@ -187,7 +194,7 @@ The full skill tree is checked for escaped links, cycles and special files becau
 
 These are explicit implementation limits: configuration/skill files are limited to 1 MiB, frontmatter to 64 KiB, YAML to 32 levels and 4,096 nodes, and one skill tree to 10,000 visited entries.
 
-Standalone directories containing the reserved `.agentmux-origin.json` marker are generated copies and are skipped. Standalone links into the plugin source tree or a loaded plugin root are also skipped to avoid rediscovering materialized plugin skills. A rejected plugin cannot suppress unrelated standalone skills.
+Standalone directories containing the reserved `.agentcfg-origin.json` marker are generated copies and are skipped. Standalone links into the plugin source tree or a loaded plugin root are also skipped to avoid rediscovering materialized plugin skills. A rejected plugin cannot suppress unrelated standalone skills.
 
 ## Errors and precedence
 
@@ -204,7 +211,7 @@ Standalone directories containing the reserved `.agentmux-origin.json` marker ar
 
 Explicit canonical servers load first and take precedence over colliding plugin IDs. Plugin directory names and server keys are processed lexically. Skills are returned sorted by qualified name. Duplicate keys are rejected at their owning JSON object boundary; semantic errors inside one server do not invalidate its siblings.
 
-The loader does not install packages, execute client extensions, synchronize native configurations in either direction, or infer secrets. Bidirectional configuration import is deferred.
+The loader does not install packages, execute client extensions, synchronize native configurations in either direction, or infer secrets. Bidirectional configuration import is deferred; the separate `agentcfg migrate` command only handles old canonical agentmux sources.
 
 ## Examples and references
 

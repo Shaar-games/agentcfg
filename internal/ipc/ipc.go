@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"strings"
 
-	"agentmux/internal/pathutil"
+	"agentcfg/internal/pathutil"
 )
 
 type Endpoint struct {
@@ -39,13 +39,13 @@ func ForRoot(root string) (Endpoint, error) {
 	if err != nil {
 		return Endpoint{}, err
 	}
-	dir := filepath.Join(cache, "agentmux", hash)
+	dir := filepath.Join(cache, "agentcfg", hash)
 	address := filepath.Join(dir, "broker.sock")
 	if runtime.GOOS == "windows" {
-		address = `\\.\pipe\agentmux-` + hash
+		address = `\\.\pipe\agentcfg-` + hash
 	} else if len(address) > 100 {
 		// sockaddr_un is limited to roughly 104 bytes on macOS.
-		dir = filepath.Join(os.TempDir(), "agentmux-"+hash)
+		dir = filepath.Join(os.TempDir(), "agentcfg-"+hash)
 		address = filepath.Join(dir, "broker.sock")
 	}
 	return Endpoint{Directory: dir, Address: address}, nil

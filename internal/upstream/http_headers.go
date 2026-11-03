@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 )
 
 // Tool header annotations use direct JSON Schema properties paths only.

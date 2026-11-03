@@ -8,7 +8,7 @@ import (
 )
 
 func TestPreregisteredClientSecretRotationUsesCurrentEnvironment(t *testing.T) {
-	const variable = "AGENTMUX_TEST_CLIENT_SECRET"
+	const variable = "AGENTCFG_TEST_CLIENT_SECRET"
 	t.Setenv(variable, "old-client-secret")
 	f := newOAuthFixture(t)
 	f.server.OAuth.ClientSecretEnv = variable
@@ -44,7 +44,7 @@ func TestPreregisteredClientSecretRotationUsesCurrentEnvironment(t *testing.T) {
 }
 
 func TestSecretRotationRequiresStoredIssuerProvenance(t *testing.T) {
-	const variable = "AGENTMUX_TEST_CLIENT_SECRET"
+	const variable = "AGENTCFG_TEST_CLIENT_SECRET"
 	t.Setenv(variable, "client-secret")
 	f := newOAuthFixture(t)
 	f.server.OAuth.ClientSecretEnv = variable
@@ -73,7 +73,7 @@ func TestSecretRotationRequiresStoredIssuerProvenance(t *testing.T) {
 }
 
 func TestPinnedClientCannotFallBackToAnotherIssuersDCR(t *testing.T) {
-	const variable = "AGENTMUX_TEST_CLIENT_SECRET"
+	const variable = "AGENTCFG_TEST_CLIENT_SECRET"
 	t.Setenv(variable, "client-secret")
 	f := newOAuthFixture(t)
 	f.server.OAuth.ClientSecretEnv = variable

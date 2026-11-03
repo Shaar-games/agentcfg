@@ -1,5 +1,7 @@
 /bin/
 /dist/
+/.agentcfg/
+# Legacy project-local configuration must remain ignored.
 /.agentmux/
 /coverage.out
 *.test

@@ -15,7 +15,7 @@ import (
 )
 
 // replaceExecutable stages and validates before touching the existing binary.
-// A lock serializes concurrent 'agentmux update' invocations. Installer
+// A lock serializes concurrent 'agentcfg update' invocations. Installer
 // scripts have their own replacement/rollback logic.
 func replaceExecutable(ctx context.Context, target, stage, version string, expectedDigest [sha256.Size]byte) (string, error) {
 	lock := flock.New(target + ".update.lock")
@@ -97,7 +97,7 @@ func replaceExecutable(ctx context.Context, target, stage, version string, expec
 }
 
 func reserveBackup(dir, extension string) (string, error) {
-	file, err := os.CreateTemp(dir, ".agentmux-backup-*"+extension)
+	file, err := os.CreateTemp(dir, ".agentcfg-backup-*"+extension)
 	if err != nil {
 		return "", fmt.Errorf("reserve backup path: %w", err)
 	}

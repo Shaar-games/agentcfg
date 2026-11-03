@@ -1,10 +1,10 @@
-# agentmux
+# agentcfg
 
 Go CLI for local MCP process sharing and declarative harness/skill configuration.
 
-- Canonical sources are strictly user-level: `~/.agentmux/mcp.json`,
-  `~/.agentmux/agentmux.json`, `~/.agentmux/skills/`, and `~/.agentmux/plugins/`.
-- Never use a project's `.agentmux/` or `.agents/` as canonical sources or
+- Canonical sources are strictly user-level: `~/.agentcfg/mcp.json`,
+  `~/.agentcfg/agentcfg.json`, `~/.agentcfg/skills/`, and `~/.agentcfg/plugins/`.
+- Never use a project's `.agentcfg/` or `.agents/` as canonical sources or
   synchronize into project-local harness configuration.
 - Agent Plugins manifests and MCP files must retain the portable standard format.
 - Never modify live user harness configs in tests; use temporary directories.

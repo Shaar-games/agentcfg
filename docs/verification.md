@@ -1,4 +1,10 @@
-# Vérifications — 2 et 3 novembre 2026
+# Vérifications historiques — 2 et 3 novembre 2026
+
+Les contrôles et les URLs de cette page correspondent aux versions publiées
+**avant le renommage d'agentmux en agentcfg**. Les liens des anciennes
+exécutions restent attachés au dépôt d'origine et ne constituent pas une
+preuve de validation du nouveau nom, des nouvelles archives ou de la commande
+`agentcfg migrate`.
 
 ## Contrôles locaux historiques (2 novembre)
 
@@ -10,9 +16,9 @@ Hôte d’exécution : Windows, Go 1.26.10 via `mise.toml`.
 | `go test -race -count=1 -timeout=180s ./...` | Réussite ; aucune course signalée |
 | `go vet ./...` | Réussite |
 | `mise run check` | Réussite |
-| `mise run build` | Réussite, `bin/agentmux.exe` |
-| `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ...` | Réussite, `dist/agentmux-linux-amd64` |
-| `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ...` | Réussite, `dist/agentmux-darwin-arm64` |
+| `mise run build` | Réussite, `bin/agentmux.exe` (ancien nom) |
+| `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ...` | Réussite, `dist/agentmux-linux-amd64` (ancien nom) |
+| `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ...` | Réussite, `dist/agentmux-darwin-arm64` (ancien nom) |
 | CLI `version`, `validate`, `sync --dry-run`, `status` | Réussite |
 
 ## Preuve de mutualisation
@@ -54,7 +60,7 @@ Les contrôles complémentaires de la version publiée `604bce8` ont réussi :
 | [CI `main` — exécution 41545732674](https://github.com/Shaar-games/agentmux/actions/runs/41545732674) | Succès Windows, Ubuntu et macOS |
 | [CI du tag `v0.2.1` — 41546063962](https://github.com/Shaar-games/agentmux/actions/runs/41546063962) | Succès |
 | [Release et smoke tests — 41546063960](https://github.com/Shaar-games/agentmux/actions/runs/41546063960) | Succès de la vérification, des builds, de la publication et des installations réelles sous Windows, Ubuntu et macOS |
-| [Release publique `v0.2.1`](https://github.com/Shaar-games/agentmux/releases/tag/v0.2.1) | Six archives (Windows, Linux, macOS, chacune AMD64 et ARM64), plus `SHA256SUMS` |
+| [Release publique `v0.2.1`](https://github.com/Shaar-games/agentmux/releases/tag/v0.2.1) | Six archives historiques `agentmux_*` (Windows, Linux, macOS, chacune AMD64 et ARM64), plus `SHA256SUMS` |
 
 Les vérifications locales précédant cette publication ont aussi réussi pour
 `go test ./...`, `go test -race ./...`, `go test -shuffle=on ./...`, `go vet ./...`,

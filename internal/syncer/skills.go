@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
-	"agentmux/internal/config"
-	"agentmux/internal/pathutil"
+	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 )
 
 type skillRecord struct {
@@ -149,7 +149,7 @@ func (p *Plan) planSkill(destination string, skill config.Skill, wanted bool, mo
 		return nil
 	}
 	if exists && previous.Fingerprint == "" {
-		return fmt.Errorf("skill destination exists and is not owned by agentmux: %s", destination)
+		return fmt.Errorf("skill destination exists and is not owned by agentcfg: %s", destination)
 	}
 	source, err := pathutil.Resolve(skill.Path)
 	if err != nil {

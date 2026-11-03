@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"agentmux/internal/config"
-	"agentmux/internal/ipc"
-	"agentmux/internal/wire"
+	"agentcfg/internal/config"
+	"agentcfg/internal/ipc"
+	"agentcfg/internal/wire"
 
 	"github.com/gofrs/flock"
 )
@@ -50,7 +50,7 @@ func exchange(connection net.Conn, request wire.Message) (*wire.Reader, wire.Mes
 	var ok bool
 	_ = json.Unmarshal(response["ok"], &ok)
 	if !ok {
-		return nil, nil, errors.New("invalid agentmux IPC acknowledgement")
+		return nil, nil, errors.New("invalid agentcfg IPC acknowledgement")
 	}
 	return reader, response, nil
 }

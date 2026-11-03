@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"agentmux/internal/config"
-	"agentmux/internal/wire"
+	"agentcfg/internal/config"
+	"agentcfg/internal/wire"
 )
 
 type fakeTransport struct {

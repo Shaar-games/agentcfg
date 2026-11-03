@@ -3,7 +3,7 @@
     "chrome-devtools": {
       "type": "stdio",
       "command": "node",
-      "cwd": "./.agentmux",
+      "cwd": "./.agentcfg",
       "args": [
         "./node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
       ],

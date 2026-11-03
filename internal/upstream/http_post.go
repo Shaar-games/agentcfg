@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"agentmux/internal/auth"
-	"agentmux/internal/wire"
+	"agentcfg/internal/auth"
+	"agentcfg/internal/wire"
 )
 
 var errSessionExpired = errors.New("MCP HTTP session expired; reconnect and initialize a new session")

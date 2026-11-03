@@ -1,7 +1,7 @@
 package broker
 
 import (
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 	"encoding/json"
 	"net"
 	"testing"

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const validOAuthJSON = `{"account":"work","clientId":"agentmux-client","issuer":"https://auth.example.test","redirectUrl":"http://127.0.0.1:48761/callback","scopes":["tools.read"]}`
+const validOAuthJSON = `{"account":"work","clientId":"agentcfg-client","issuer":"https://auth.example.test","redirectUrl":"http://127.0.0.1:48761/callback","scopes":["tools.read"]}`
 
 func writeOAuthFixture(t *testing.T, root, path, content string) {
 	t.Helper()
@@ -24,7 +24,7 @@ func writeOAuthFixture(t *testing.T, root, path, content string) {
 
 func TestLoadOAuthIsolatesInvalidCanonicalEntries(t *testing.T) {
 	root := t.TempDir()
-	writeOAuthFixture(t, root, ".agentmux/mcp.json", `{"mcpServers":{
+	writeOAuthFixture(t, root, ".agentcfg/mcp.json", `{"mcpServers":{
 		"valid":{"url":"https://mcp.example.test/mcp","oauth":`+validOAuthJSON+`},
 		"plain":{"command":"go"},
 		"stdio-oauth":{"command":"go","oauth":`+validOAuthJSON+`},
@@ -39,7 +39,7 @@ func TestLoadOAuthIsolatesInvalidCanonicalEntries(t *testing.T) {
 		t.Fatalf("invalid entries not isolated: %v", cfg.Servers)
 	}
 	server, ok := cfg.Servers["valid"]
-	if !ok || server.OAuth == nil || server.OAuth.Account != "work" || server.OAuth.ClientID != "agentmux-client" {
+	if !ok || server.OAuth == nil || server.OAuth.Account != "work" || server.OAuth.ClientID != "agentcfg-client" {
 		t.Fatalf("missing OAuth config: %+v", server)
 	}
 	if len(cfg.Warnings) != 3 {
@@ -49,12 +49,12 @@ func TestLoadOAuthIsolatesInvalidCanonicalEntries(t *testing.T) {
 
 func TestPortableOAuthRejectedButExternalOverrideAccepted(t *testing.T) {
 	root := t.TempDir()
-	writeOAuthFixture(t, root, ".agentmux/plugins/demo/plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"demo"}`)
-	writeOAuthFixture(t, root, ".agentmux/plugins/demo/mcp.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{
+	writeOAuthFixture(t, root, ".agentcfg/plugins/demo/plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"demo"}`)
+	writeOAuthFixture(t, root, ".agentcfg/plugins/demo/mcp.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{
 		"remote":{"type":"streamable-http","url":"https://mcp.example.test/mcp"},
 		"nonportable":{"type":"streamable-http","url":"https://mcp.example.test/mcp","oauth":`+validOAuthJSON+`}
 	}}`)
-	writeOAuthFixture(t, root, ".agentmux/agentmux.json", `{"harnesses":["antigravity"],"serverOverrides":{"demo.remote":{"harnesses":["antigravity"],"oauth":`+validOAuthJSON+`}}}`)
+	writeOAuthFixture(t, root, ".agentcfg/agentcfg.json", `{"harnesses":["antigravity"],"serverOverrides":{"demo.remote":{"harnesses":["antigravity"],"oauth":`+validOAuthJSON+`}}}`)
 	cfg, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +82,8 @@ func TestOAuthOverrideCannotSilentlyLeaveUnsafeServerEnabled(t *testing.T) {
 	} {
 		t.Run(entry, func(t *testing.T) {
 			root := t.TempDir()
-			writeOAuthFixture(t, root, ".agentmux/mcp.json", `{"mcpServers":{"unsafe":`+entry+`,"plain":{"command":"go"}}}`)
-			writeOAuthFixture(t, root, ".agentmux/agentmux.json", `{"serverOverrides":{"unsafe":{"oauth":`+validOAuthJSON+`}}}`)
+			writeOAuthFixture(t, root, ".agentcfg/mcp.json", `{"mcpServers":{"unsafe":`+entry+`,"plain":{"command":"go"}}}`)
+			writeOAuthFixture(t, root, ".agentcfg/agentcfg.json", `{"serverOverrides":{"unsafe":{"oauth":`+validOAuthJSON+`}}}`)
 			cfg, err := Load(root)
 			if err != nil {
 				t.Fatal(err)
@@ -135,7 +135,7 @@ func TestOAuthValidation(t *testing.T) {
 func TestSkillNoneAndAntigravityCompatibilityWithoutRewriting(t *testing.T) {
 	root := t.TempDir()
 	skill := "---\nname: review\ndescription: Review code.\nmetadata:\n  harness: none\n---\n# Keep this content exactly.\n"
-	writeOAuthFixture(t, root, ".agentmux/skills/review/SKILL.md", skill)
+	writeOAuthFixture(t, root, ".agentcfg/skills/review/SKILL.md", skill)
 	cfg, err := Load(root)
 	if err != nil || len(cfg.Skills) != 1 {
 		t.Fatalf("load: %+v %v", cfg, err)
@@ -143,7 +143,7 @@ func TestSkillNoneAndAntigravityCompatibilityWithoutRewriting(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Skills[0].Harnesses, []string{"none"}) || Allows(cfg.Skills[0].Harnesses, "antigravity") || Allows(cfg.Skills[0].Harnesses, "codex") {
 		t.Fatal(cfg.Skills[0])
 	}
-	after, err := os.ReadFile(filepath.Join(root, ".agentmux", "skills", "review", "SKILL.md"))
+	after, err := os.ReadFile(filepath.Join(root, ".agentcfg", "skills", "review", "SKILL.md"))
 	if err != nil || string(after) != skill {
 		t.Fatalf("skill changed: %v", err)
 	}

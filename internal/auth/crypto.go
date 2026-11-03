@@ -43,6 +43,8 @@ func sealAES(key []byte, identity string, plain []byte) ([]byte, error) {
 	if _, err = rand.Read(nonce); err != nil {
 		return nil, err
 	}
+	// The opaque authenticated-data domain is deliberately stable for legacy
+	// encrypted records copied from ~/.agentmux during explicit migration.
 	return aead.Seal(nonce, nonce, plain, []byte("agentmux.oauth.v1\x00"+identity)), nil
 }
 

@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"agentmux/internal/auth"
-	"agentmux/internal/config"
+	"agentcfg/internal/auth"
+	"agentcfg/internal/config"
 
 	"github.com/charmbracelet/huh"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
@@ -28,7 +28,7 @@ import (
 // automatically by the broker or the TUI.
 func runAuth(ctx context.Context, home string, args []string, input io.Reader, output, diagnostics io.Writer) error {
 	if len(args) < 2 || (args[0] != "login" && args[0] != "status" && args[0] != "logout") {
-		return errors.New("usage: agentmux auth <login|status|logout> <server> [--no-browser]")
+		return errors.New("usage: agentcfg auth <login|status|logout> <server> [--no-browser]")
 	}
 	operation, name := args[0], args[1]
 	flags := flag.NewFlagSet("auth "+operation, flag.ContinueOnError)
@@ -167,7 +167,7 @@ func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output i
 					select {
 					case received <- callback.String():
 						w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-						_, _ = io.WriteString(w, "Authorization response received. You may return to agentmux.")
+						_, _ = io.WriteString(w, "Authorization response received. You may return to agentcfg.")
 					default:
 						http.Error(w, "Authorization already received", http.StatusConflict)
 					}

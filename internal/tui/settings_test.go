@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 func settingsFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	path := filepath.Join(root, ".agentmux")
+	path := filepath.Join(root, ".agentcfg")
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestPowerShellUTF8BOMSettingsEditAndPluginInventory(t *testing.T) {
 	if err != nil || !bytes.Equal(backedUp, original) {
 		t.Fatal("BOM backup not byte-for-byte")
 	}
-	plugin := filepath.Join(root, ".agentmux", "plugins", "demo")
+	plugin := filepath.Join(root, ".agentcfg", "plugins", "demo")
 	if err := os.MkdirAll(plugin, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestMissingSettingsCreatedAndInvalidSettingsPreserved(t *testing.T) {
 
 func TestPluginDiscoveryIncludesEmptyPluginAndInvalidManifest(t *testing.T) {
 	root := settingsFixture(t)
-	base := filepath.Join(root, ".agentmux", "plugins")
+	base := filepath.Join(root, ".agentcfg", "plugins")
 	good := filepath.Join(base, "demo")
 	bad := filepath.Join(base, "broken")
 	for _, dir := range []string{good, bad} {

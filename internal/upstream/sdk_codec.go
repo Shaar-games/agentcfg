@@ -7,7 +7,7 @@ import (
 	"io"
 	"unicode/utf8"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 )

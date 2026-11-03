@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 )
 
 var nextPeer atomic.Uint64

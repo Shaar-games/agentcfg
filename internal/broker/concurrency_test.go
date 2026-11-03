@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 )
 
 // All harnesses deliberately reuse the same JSON-RPC IDs. Concurrent writes

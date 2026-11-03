@@ -2,14 +2,21 @@
 
 ## Autorité
 
-Les fichiers canoniques `~/.agentmux/mcp.json`, `~/.agentmux/agentmux.json`, les plugins
-et les skills sous `~/.agentmux/` sont les seules sources d’autorité. `sync` prépare un plan en
+Les fichiers canoniques `~/.agentcfg/mcp.json`, `~/.agentcfg/agentcfg.json`, les plugins
+et les skills sous `~/.agentcfg/` sont les seules sources d’autorité. `sync` prépare un plan en
 lecture seule. `sync --apply` applique ce plan. Il n’existe ni import implicite,
 ni mode force, ni fusion bidirectionnelle dans cette version.
 
-AgentMux projette ces sources dans les **fichiers de configuration natifs** des
+agentcfg projette ces sources dans les **fichiers de configuration natifs** des
 harnesses sélectionnés. Pour une migration d'anciennes sources ou de manifestes
 d'appartenance, consulter [le guide de migration](../MIGRATION_FOR_AGENTS.md).
+
+Pour passer de l'ancien nom au nouveau, `agentcfg migrate` prévisualise en
+lecture seule une copie de `~/.agentmux/` vers `~/.agentcfg/` ; seul
+`agentcfg migrate --apply` publie la nouvelle configuration canonique. Le
+répertoire d'origine et son exécutable restent intacts. Cette migration ne
+réécrit aucune configuration native : il faut examiner séparément le résultat
+de `agentcfg sync` avant d'utiliser `agentcfg sync --apply`.
 
 Un serveur MCP est généré individuellement dans chaque harness sélectionné.
 Les filtres de l’entrée canonique et les overrides des plugins sont évalués
@@ -19,7 +26,7 @@ gérés et inchangés lors de la prochaine application.
 
 ## Éditions conservatrices
 
-Le manifeste de propriété `~/.agentmux/sync-user.json`
+Le manifeste de propriété `~/.agentcfg/sync-user.json`
 conserve les chemins et empreintes des entrées générées. Il ne contient pas la
 configuration upstream ni ses secrets. Supprimer ce manifeste ne réinitialise
 pas magiquement les fichiers : les entrées restantes redeviennent inconnues et
@@ -38,7 +45,7 @@ revérifiés avant l’écriture. Les suppressions ne concernent que les éléme
 gérés restés inchangés.
 
 L’application utilise un verrou par portée, des écritures par fichier temporaire
-puis renommage, et des sauvegardes sous `~/.agentmux/backups/<date>/`. Une erreur
+puis renommage, et des sauvegardes sous `~/.agentcfg/backups/<date>/`. Une erreur
 d’écriture déclenche une tentative de restauration des changements déjà faits.
 Ce n’est pas une transaction de système de fichiers globale : une coupure
 machine pendant l’application peut nécessiter une restauration depuis ces
@@ -53,11 +60,11 @@ le harness ou le système ne suit pas les liens. Aucune réécriture des noms du
 frontmatter n’est effectuée ; les collisions entre noms natifs doivent être
 résolues dans les sources.
 
-La source `~/.agentmux/skills/` est distincte des destinations natives, notamment
+La source `~/.agentcfg/skills/` est distincte des destinations natives, notamment
 `~/.agents/skills/` pour Codex. Le contenu de chaque fichier du skill source,
 dont `SKILL.md`, est conservé octet pour octet en mode copie. Aucun fichier de
 marquage n'est ajouté aux nouvelles copies. Les anciens marqueurs
-`.agentmux-origin.json` restent reconnus à la lecture pour compatibilité.
+`.agentcfg-origin.json` restent reconnus à la lecture pour compatibilité.
 
 Les liens internes dans un arbre de skill ne sont pas synchronisés dans cette
 version, même lorsqu’ils restent dans le plugin. Cela évite les copies ambiguës
@@ -70,10 +77,10 @@ sont jamais effacées pour contourner le scanner natif d’un logiciel.
 
 ## Portée utilisateur
 
-Les instructions canoniques `~/.agentmux/AGENTS.md` sont synchronisées en portée
+Les instructions canoniques `~/.agentcfg/AGENTS.md` sont synchronisées en portée
 utilisateur vers `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md` et
 `~/.config/opencode/AGENTS.md`, sous réserve du filtre YAML `metadata.harness`.
-La source est préservée ; le frontmatter propre à agentmux est retiré des copies
+La source est préservée ; le frontmatter propre à agentcfg est retiré des copies
 générées. Les fichiers natifs non gérés ne sont jamais écrasés, et une modification
 concurrente empêche l'application. Les autres harnesses reçoivent un avertissement
 tant qu'aucune destination d'instructions utilisateur n'est vérifiée.

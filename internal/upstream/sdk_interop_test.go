@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -48,7 +48,7 @@ func TestOfficialSDKServerInterop(t *testing.T) {
 				} else {
 					if err := transport.Write(rpcRequest("init-sdk", "initialize", map[string]any{
 						"protocolVersion": "2025-11-25", "capabilities": map[string]any{},
-						"clientInfo": map[string]any{"name": "agentmux-test", "version": "1"},
+						"clientInfo": map[string]any{"name": "agentcfg-test", "version": "1"},
 					})); err != nil {
 						t.Fatal(err)
 					}

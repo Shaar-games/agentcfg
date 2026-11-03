@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 

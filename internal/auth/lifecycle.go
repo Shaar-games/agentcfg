@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -110,7 +110,7 @@ func Login(ctx context.Context, server config.Server, opts Options) error {
 	}
 	u, _ := url.Parse(server.URL)
 	client.Transport = &resourceTransport{next: client.Transport, origin: u.Scheme + "://" + u.Host, headers: server.Headers}
-	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "agentmux-auth", Version: "1"}, nil)
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "agentcfg-auth", Version: "1"}, nil)
 	session, err := mcpClient.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL, HTTPClient: client, OAuthHandler: h}, nil)
 	if err != nil {
 		return safeError("OAuth MCP login", err)

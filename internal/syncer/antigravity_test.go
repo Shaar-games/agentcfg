@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 func TestAntigravityGlobalMCPAndSkills(t *testing.T) {
 	root, home := t.TempDir(), t.TempDir()
-	skillRoot := filepath.Join(root, ".agentmux", "skills", "review")
+	skillRoot := filepath.Join(root, ".agentcfg", "skills", "review")
 	writeTestFile(t, filepath.Join(skillRoot, "SKILL.md"), "---\nname: review\ndescription: Review source.\nmetadata:\n  harness: antigravity\n---\n")
 	mcpPath := filepath.Join(home, ".gemini", "config", "mcp_config.json")
 	writeTestFile(t, mcpPath, "{\"mcpServers\":{\"personal\":{\"command\":\"unchanged\"}},\"otherSetting\":17}")
@@ -22,7 +22,7 @@ func TestAntigravityGlobalMCPAndSkills(t *testing.T) {
 		Skills:   []config.Skill{{Name: "review", Path: skillRoot, Harnesses: []string{"antigravity"}}},
 		Settings: config.Settings{Harnesses: []string{"antigravity"}},
 	}
-	opts := Options{Root: root, Home: home, Binary: filepath.Join(root, "agentmux.exe"), Scope: "user", SkillMode: "copy"}
+	opts := Options{Root: root, Home: home, Binary: filepath.Join(root, "agentcfg.exe"), Scope: "user", SkillMode: "copy"}
 	plan, err := BuildPlan(cfg, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestAntigravityPreservesUnmanagedMCPOnCollision(t *testing.T) {
 		Root: root, Servers: map[string]config.Server{"existing": {Name: "existing", Type: "stdio", Command: "other"}},
 		Settings: config.Settings{Harnesses: []string{"antigravity"}},
 	}
-	_, err := BuildPlan(cfg, Options{Root: root, Home: home, Binary: filepath.Join(root, "agentmux"), Scope: "user"})
+	_, err := BuildPlan(cfg, Options{Root: root, Home: home, Binary: filepath.Join(root, "agentcfg"), Scope: "user"})
 	if err == nil || !strings.Contains(err.Error(), "exists") {
 		t.Fatalf("expected unmanaged collision, got %v", err)
 	}

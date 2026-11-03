@@ -1,7 +1,7 @@
 package upstream
 
 import (
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 	"context"
 	"encoding/json"
 	"net/http"

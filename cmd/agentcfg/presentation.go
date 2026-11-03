@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 
+	"agentcfg/internal/tui"
+
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/x/term"
 )
@@ -28,10 +30,11 @@ func terminalPresentation(input io.Reader, output io.Writer, plain bool) bool {
 func terminalForm(ctx context.Context, input io.Reader, output io.Writer, fields ...huh.Field) error {
 	form := huh.NewForm(huh.NewGroup(fields...)).
 		WithInput(input).
-		WithOutput(output)
+		WithOutput(output).
+		WithTheme(tui.Theme())
 	// On Windows, a genuine interactive console can support Huh even if TERM
 	// is incorrectly set to dumb. Preserve numbered prompts for non-terminals.
-	if os.Getenv("AGENTMUX_ACCESSIBLE") == "1" {
+	if os.Getenv("AGENTCFG_ACCESSIBLE") == "1" {
 		form.WithAccessible(true)
 	} else if runtime.GOOS == "windows" && terminalPresentation(input, output, false) {
 		form.WithAccessible(false)
@@ -83,7 +86,7 @@ func terminalHarnessSelection(ctx context.Context, input io.Reader, output io.Wr
 	}
 	err := terminalForm(ctx, input, output, huh.NewMultiSelect[string]().
 		Title("Select user-level AI harnesses").
-		Description("Space toggles a harness. AgentMux will create only missing global source files.").
+		Description("Space toggles a harness. agentcfg will create only missing global source files.").
 		Options(choices...).
 		Value(&selected))
 	if err != nil {

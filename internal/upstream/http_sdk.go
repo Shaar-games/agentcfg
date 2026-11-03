@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"

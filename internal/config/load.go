@@ -10,7 +10,7 @@ import (
 const (
 	pluginSchema   = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 	mcpSchema      = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
-	originMarker   = ".agentmux-origin.json"
+	originMarker   = ".agentcfg-origin.json"
 	maxConfigBytes = 1 << 20
 )
 
@@ -39,7 +39,7 @@ func Load(root string) (*Config, error) {
 	l := &loader{config: &Config{
 		Root: root, Servers: map[string]Server{}, Skills: []Skill{}, Warnings: []string{},
 		Settings: defaultSettings(),
-	}, agents: filepath.Join(root, ".agentmux")}
+	}, agents: filepath.Join(root, ".agentcfg")}
 	if err = l.loadSettings(); err != nil {
 		return nil, err
 	}

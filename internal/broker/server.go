@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"agentmux/internal/config"
-	"agentmux/internal/ipc"
-	"agentmux/internal/upstream"
-	"agentmux/internal/wire"
+	"agentcfg/internal/config"
+	"agentcfg/internal/ipc"
+	"agentcfg/internal/upstream"
+	"agentcfg/internal/wire"
 
 	"github.com/gofrs/flock"
 )
@@ -85,7 +85,7 @@ func Serve(ctx context.Context, root string, stderr io.Writer) error {
 		return err
 	}
 	if !locked {
-		return errors.New("an agentmux broker already owns this source root")
+		return errors.New("an agentcfg broker already owns this source root")
 	}
 	defer lock.Close()
 	listener, err := ipc.Listen(endpoint)
@@ -147,7 +147,7 @@ func (s *server) handleConnection(connection net.Conn) {
 	var version int
 	_ = json.Unmarshal(hello["version"], &version)
 	if version != IPCVersion {
-		_ = writer.Write(wire.Message{"error": wire.Raw("unsupported agentmux IPC version; restart the broker after upgrading")})
+		_ = writer.Write(wire.Message{"error": wire.Raw("unsupported agentcfg IPC version; restart the broker after upgrading")})
 		return
 	}
 	var operation string

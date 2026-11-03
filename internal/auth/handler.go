@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"golang.org/x/oauth2"
@@ -177,7 +177,7 @@ func registration(sdk *sdkauth.AuthorizationCodeHandlerConfig, cfg *config.OAuth
 				TokenEndpointAuthMethod: "none",
 				GrantTypes:              []string{"authorization_code", "refresh_token"},
 				ResponseTypes:           []string{"code"},
-				ClientName:              "agentmux",
+				ClientName:              "agentcfg",
 				Scope:                   strings.Join(cfg.Scopes, " "),
 				ApplicationType:         applicationType,
 			},

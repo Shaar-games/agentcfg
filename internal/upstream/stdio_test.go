@@ -16,14 +16,14 @@ import (
 	"testing"
 	"time"
 
-	"agentmux/internal/config"
-	"agentmux/internal/wire"
+	"agentcfg/internal/config"
+	"agentcfg/internal/wire"
 )
 
 // The actual Go test executable is the fixture server; no installed MCP or
 // external service is started. Exit avoids testing's PASS output on MCP stdout.
 func TestUpstreamHelper(t *testing.T) {
-	if os.Getenv("AGENTMUX_UPSTREAM_HELPER") != "1" {
+	if os.Getenv("AGENTCFG_UPSTREAM_HELPER") != "1" {
 		return
 	}
 	separator := 0
@@ -77,7 +77,7 @@ func TestUpstreamHelper(t *testing.T) {
 		if message.Method() == "probe" {
 			cwd, _ := os.Getwd()
 			_ = writer.Write(wire.Result(message.ID(), map[string]any{
-				"pid": os.Getpid(), "cwd": cwd, "env": os.Getenv("AGENTMUX_TEST_VALUE"),
+				"pid": os.Getpid(), "cwd": cwd, "env": os.Getenv("AGENTCFG_TEST_VALUE"),
 				"args": os.Args[separator+2:], "pluginData": os.Getenv("PLUGIN_DATA"),
 			}))
 		} else {
@@ -94,7 +94,7 @@ func helperServer(t *testing.T, mode string) config.Server {
 	}
 	return config.Server{Type: "stdio", Command: executable,
 		Args: []string{"-test.run=^TestUpstreamHelper$", "--", mode},
-		Env:  map[string]string{"AGENTMUX_UPSTREAM_HELPER": "1"}}
+		Env:  map[string]string{"AGENTCFG_UPSTREAM_HELPER": "1"}}
 }
 
 func startTestTransport(t *testing.T, ctx context.Context, server config.Server) Transport {
@@ -180,7 +180,7 @@ func TestStdioArgumentsEnvironmentCwdAndPID(t *testing.T) {
 	args := []string{"two words", "quote\"inside", "x&y|z", "100%", "bang!", "C:\\tail\\"}
 	server.Args = append(server.Args, args...)
 	server.Env["PATH"] = directory
-	server.Env["AGENTMUX_TEST_VALUE"] = "resolved value"
+	server.Env["AGENTCFG_TEST_VALUE"] = "resolved value"
 	server.Env["PLUGIN_DATA"] = filepath.Join(directory, "plugin data")
 	transport := startTestTransport(t, context.Background(), server)
 	if transport.PID() <= 0 {

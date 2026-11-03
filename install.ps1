@@ -1,16 +1,16 @@
 # Windows PowerShell 5.1+/PowerShell 7 installer: precompiled releases only.
 $ErrorActionPreference = 'Stop'
-$repo = 'https://github.com/Shaar-games/agentmux'
-$version = if ($env:AGENTMUX_VERSION) { $env:AGENTMUX_VERSION } else { 'latest' }
+$repo = 'https://github.com/Shaar-games/agentcfg'
+$version = if ($env:AGENTCFG_VERSION) { $env:AGENTCFG_VERSION } else { 'latest' }
 if ($version -eq 'latest') {
     $base = "$repo/releases/latest/download"
 } elseif ($version -match '^v[0-9]+\.[0-9]+\.[0-9]+([-+._a-zA-Z0-9]*)?$') {
     $base = "$repo/releases/download/$version"
 } else {
-    throw "Invalid AGENTMUX_VERSION: $version"
+    throw "Invalid AGENTCFG_VERSION: $version"
 }
 # Override only for testing against an independently hosted release mirror.
-if ($env:AGENTMUX_RELEASE_BASE_URL) { $base = $env:AGENTMUX_RELEASE_BASE_URL }
+if ($env:AGENTCFG_RELEASE_BASE_URL) { $base = $env:AGENTCFG_RELEASE_BASE_URL }
 $base = $base.TrimEnd('/')
 
 try {
@@ -23,11 +23,11 @@ switch ($architecture) {
     { $_ -in @('arm64', 'aarch64') } { $arch = 'arm64'; break }
     default { throw "Unsupported Windows architecture: $architecture" }
 }
-$asset = "agentmux_windows_$arch.zip"
-$bindir = if ($env:AGENTMUX_BIN_DIR) { $env:AGENTMUX_BIN_DIR } else { Join-Path $HOME '.local\bin' }
-$binary = Join-Path $bindir 'agentmux.exe'
+$asset = "agentcfg_windows_$arch.zip"
+$bindir = if ($env:AGENTCFG_BIN_DIR) { $env:AGENTCFG_BIN_DIR } else { Join-Path $HOME '.local\bin' }
+$binary = Join-Path $bindir 'agentcfg.exe'
 
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ('agentmux-install-' + [guid]::NewGuid().ToString('N'))
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ('agentcfg-install-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 $stage = $null
 $backup = $null
@@ -57,14 +57,14 @@ try {
     if ($actual -cne $expected) { throw "SHA-256 mismatch for $asset. Installation cancelled." }
     $unpacked = Join-Path $tmp 'unpacked'
     New-Item -ItemType Directory -Path $unpacked | Out-Null
-    $executable = Join-Path $unpacked 'agentmux.exe'
+    $executable = Join-Path $unpacked 'agentcfg.exe'
     # Extract only the expected regular file; do not unpack other zip entries.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::OpenRead($archive)
     try {
-        $entries = @($zip.Entries | Where-Object { $_.FullName -ceq 'agentmux.exe' })
+        $entries = @($zip.Entries | Where-Object { $_.FullName -ceq 'agentcfg.exe' })
         if ($entries.Count -ne 1 -or $entries[0].Length -le 0 -or $entries[0].Length -gt 268435456) {
-            throw 'Archive must contain exactly one nonempty agentmux.exe of reasonable size'
+            throw 'Archive must contain exactly one nonempty agentcfg.exe of reasonable size'
         }
         $inputStream = $entries[0].Open()
         try {
@@ -73,7 +73,7 @@ try {
         } finally { $inputStream.Dispose() }
     } finally { $zip.Dispose() }
     New-Item -ItemType Directory -Force -Path $bindir | Out-Null
-    $stage = Join-Path $bindir ('.agentmux-install-' + [guid]::NewGuid().ToString('N') + '.exe')
+    $stage = Join-Path $bindir ('.agentcfg-install-' + [guid]::NewGuid().ToString('N') + '.exe')
     Copy-Item -LiteralPath $executable -Destination $stage
     & $stage version | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Staged binary failed; previous installation kept.' }
@@ -84,7 +84,7 @@ try {
             if ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
                 throw "Existing destination must be a regular executable: $binary"
             }
-            $backup = Join-Path $bindir ('.agentmux-backup-' + [guid]::NewGuid().ToString('N') + '.exe')
+            $backup = Join-Path $bindir ('.agentcfg-backup-' + [guid]::NewGuid().ToString('N') + '.exe')
             # Windows can rename a running executable but cannot overwrite it
             # in place. Keep the previous image for rollback.
             [System.IO.File]::Move($binary, $backup)

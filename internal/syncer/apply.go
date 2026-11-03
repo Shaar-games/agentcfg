@@ -1,7 +1,7 @@
 package syncer
 
 import (
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -17,7 +17,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".agentmux-write-*")
+	file, err := os.CreateTemp(filepath.Dir(path), ".agentcfg-write-*")
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func (p *Plan) checkChange(change Change) error {
 // Apply checks every preimage before writing, locks the target scope, backs up
 // modified content, uses atomic replacements and rolls back on an I/O failure.
 func (p *Plan) Apply() error {
-	lockDir := filepath.Join(p.base, ".agentmux")
+	lockDir := filepath.Join(p.base, ".agentcfg")
 	if err := ensureNoSymlinkParents(p.base, lockDir); err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 	staged, mode := "", change.skill.mode
 	if !change.skill.remove {
 		var err error
-		staged, err = os.MkdirTemp(filepath.Dir(change.Path), ".agentmux-stage-*")
+		staged, err = os.MkdirTemp(filepath.Dir(change.Path), ".agentcfg-stage-*")
 		if err != nil {
 			return nil, err
 		}

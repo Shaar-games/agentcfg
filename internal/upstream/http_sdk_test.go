@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"agentmux/internal/auth"
-	"agentmux/internal/wire"
+	"agentcfg/internal/auth"
+	"agentcfg/internal/wire"
 
 	"golang.org/x/oauth2"
 )

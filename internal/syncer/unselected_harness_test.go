@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 // An unselected, unmanaged harness is outside this sync's write set. Its
@@ -29,7 +29,7 @@ func TestUnselectedHarnessSymlinkDoesNotBlockUserSync(t *testing.T) {
 			"tools": {Name: "tools", Type: "stdio", Command: "unused", Sharing: "shared"},
 		},
 	}
-	opts := Options{Root: root, Home: home, Scope: "user", Binary: filepath.Join(root, "agentmux")}
+	opts := Options{Root: root, Home: home, Scope: "user", Binary: filepath.Join(root, "agentcfg")}
 	plan, err := BuildPlan(cfg, opts)
 	if err != nil {
 		t.Fatalf("unselected/unmanaged harness symlink blocked user sync: %v", err)
@@ -46,7 +46,7 @@ func TestUnselectedHarnessSymlinkDoesNotBlockUserSync(t *testing.T) {
 	}
 }
 
-// An unselected target is not automatically safe to ignore when AgentMux
+// An unselected target is not automatically safe to ignore when agentcfg
 // previously owned files there: it still needs to prune those entries, and
 // must reject a newly linked directory instead of following it on cleanup.
 func TestPreviouslyManagedUnselectedSymlinkIsStillRejected(t *testing.T) {
@@ -58,7 +58,7 @@ func TestPreviouslyManagedUnselectedSymlinkIsStillRejected(t *testing.T) {
 			"tools": {Name: "tools", Type: "stdio", Command: "unused", Sharing: "shared"},
 		},
 	}
-	opts := Options{Root: root, Home: home, Scope: "user", Binary: filepath.Join(root, "agentmux")}
+	opts := Options{Root: root, Home: home, Scope: "user", Binary: filepath.Join(root, "agentcfg")}
 	plan, err := BuildPlan(cfg, opts)
 	if err != nil {
 		t.Fatal(err)

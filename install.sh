@@ -2,18 +2,18 @@
 # Install a verified precompiled GitHub Release. No local compilation.
 set -euo pipefail
 umask 077
-repo="https://github.com/Shaar-games/agentmux"
-version="${AGENTMUX_VERSION:-latest}"
+repo="https://github.com/Shaar-games/agentcfg"
+version="${AGENTCFG_VERSION:-latest}"
 if [[ "$version" == latest ]]; then
   base="$repo/releases/latest/download"
 elif [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+._a-zA-Z0-9]*)?$ ]]; then
   base="$repo/releases/download/$version"
 else
-  printf 'Invalid AGENTMUX_VERSION: %s\n' "$version" >&2
+  printf 'Invalid AGENTCFG_VERSION: %s\n' "$version" >&2
   exit 1
 fi
 # Override only for testing against an independently hosted release mirror.
-base="${AGENTMUX_RELEASE_BASE_URL:-$base}"
+base="${AGENTCFG_RELEASE_BASE_URL:-$base}"
 base="${base%/}"
 
 case "$(uname -s)" in
@@ -38,9 +38,9 @@ else
   exit 1
 fi
 
-bindir="${AGENTMUX_BIN_DIR:-$HOME/.local/bin}"
-binary="$bindir/agentmux"
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/agentmux-install.XXXXXXXX")"
+bindir="${AGENTCFG_BIN_DIR:-$HOME/.local/bin}"
+binary="$bindir/agentcfg"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/agentcfg-install.XXXXXXXX")"
 stage=""
 backup=""
 cleanup() {
@@ -48,7 +48,7 @@ cleanup() {
   rm -rf "$tmp"
 }
 trap cleanup EXIT
-asset="agentmux_${os}_${arch}.tar.gz"
+asset="agentcfg_${os}_${arch}.tar.gz"
 printf 'Downloading precompiled %s (%s)...\n' "$asset" "$version"
 curl -fLsS --retry 2 --connect-timeout 15 --max-time 240 -o "$tmp/$asset" "$base/$asset"
 curl -fLsS --retry 2 --connect-timeout 15 --max-time 60 -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
@@ -64,11 +64,11 @@ actual="$(checksum "$tmp/$asset")"
 [[ "$actual" == "$expected" ]] || { echo 'SHA-256 mismatch: refusing installation.' >&2; exit 1; }
 
 # Extract only the expected filename; reject a missing or symlinked executable.
-tar -xzf "$tmp/$asset" -C "$tmp" agentmux
-[[ -f "$tmp/agentmux" && ! -L "$tmp/agentmux" ]] || { echo 'Archive does not contain a regular agentmux executable.' >&2; exit 1; }
+tar -xzf "$tmp/$asset" -C "$tmp" agentcfg
+[[ -f "$tmp/agentcfg" && ! -L "$tmp/agentcfg" ]] || { echo 'Archive does not contain a regular agentcfg executable.' >&2; exit 1; }
 mkdir -p "$bindir"
-stage="$(mktemp "$bindir/.agentmux-install.XXXXXXXX")"
-cp "$tmp/agentmux" "$stage"
+stage="$(mktemp "$bindir/.agentcfg-install.XXXXXXXX")"
+cp "$tmp/agentcfg" "$stage"
 chmod 755 "$stage"
 # Verify the staged binary before touching any existing installation.
 "$stage" version >/dev/null || { echo 'Staged binary smoke test failed; keeping current installation.' >&2; exit 1; }
@@ -77,7 +77,7 @@ if [[ -e "$binary" || -L "$binary" ]]; then
     printf 'Existing destination is not a regular executable: %s\n' "$binary" >&2
     exit 1
   }
-  backup="$(mktemp "$bindir/.agentmux-backup.XXXXXXXX")"
+  backup="$(mktemp "$bindir/.agentcfg-backup.XXXXXXXX")"
   cp -p "$binary" "$backup"
 fi
 # Stage and destination are on the same filesystem. Unix rename replaces the

@@ -29,12 +29,12 @@ func buildFixtureBinary(t *testing.T, version string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	filename := "agentmux"
+	filename := "agentcfg"
 	if runtime.GOOS == "windows" {
 		filename += ".exe"
 	}
 	path := filepath.Join(t.TempDir(), filename)
-	command := exec.Command("go", "build", "-trimpath", "-ldflags", "-X main.version="+version, "-o", path, "./cmd/agentmux")
+	command := exec.Command("go", "build", "-trimpath", "-ldflags", "-X main.version="+version, "-o", path, "./cmd/agentcfg")
 	command.Dir = root
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build %s fixture: %v\n%s", version, err, output)
@@ -117,7 +117,7 @@ func serveRelease(t *testing.T, asset string, release *releaseFixture) *httptest
 
 func installFixture(t *testing.T, binary []byte) string {
 	t.Helper()
-	name := "agentmux"
+	name := "agentcfg"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -226,6 +226,24 @@ func TestStableVersionOrdering(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateRefusesOverwritingLegacyExecutable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agentmux")
+	if runtime.GOOS == "windows" {
+		path += ".exe"
+	}
+	original := []byte("legacy executable must remain unchanged")
+	if err := os.WriteFile(path, original, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Update(context.Background(), Options{Executable: path, CurrentVersion: oldVersion})
+	if err == nil || !strings.Contains(err.Error(), "legacy agentmux") {
+		t.Fatalf("unsafe update not rejected: %v", err)
+	}
+	if actual := readFixture(t, path); !bytes.Equal(actual, original) {
+		t.Fatal("legacy executable was overwritten")
+	}
+}
+
 func TestSelfUpdateWhileExecutableIsRunning(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -247,8 +265,8 @@ func TestSelfUpdateWhileExecutableIsRunning(t *testing.T) {
 	server := serveRelease(t, asset, fixture)
 	command := exec.Command(binary)
 	command.Env = append(os.Environ(),
-		"AGENTMUX_TEST_LATEST_API="+server.URL+"/latest",
-		"AGENTMUX_TEST_DOWNLOAD_BASE="+server.URL+"/downloads",
+		"AGENTCFG_TEST_LATEST_API="+server.URL+"/latest",
+		"AGENTCFG_TEST_DOWNLOAD_BASE="+server.URL+"/downloads",
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {

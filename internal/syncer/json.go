@@ -75,7 +75,7 @@ func editJSON(before []byte, key string, desired map[string]map[string]any, prev
 			continue
 		}
 		if exists && !managed {
-			return nil, nil, fmt.Errorf("MCP name %q already exists and is not owned by agentmux", name)
+			return nil, nil, fmt.Errorf("MCP name %q already exists and is not owned by agentcfg", name)
 		}
 		owned[name] = digest(wanted)
 		if exists && digest(existing) == digest(wanted) {

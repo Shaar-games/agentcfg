@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 )
 
 func modernHTTPMessage(id any, method string, params map[string]any) wire.Message {

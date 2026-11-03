@@ -12,10 +12,10 @@ import (
 func TestPowerShellUTF8BOMCanonicalAndPortablePlugins(t *testing.T) {
 	root := t.TempDir()
 	sources := map[string]string{
-		".agentmux/agentmux.json":            `{"harnesses":["codex","antigravity"]}`,
-		".agentmux/mcp.json":                 `{"mcpServers":{"local":{"type":"stdio","command":"node"}}}`,
-		".agentmux/plugins/demo/plugin.json": `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"demo"}`,
-		".agentmux/plugins/demo/mcp.json":    `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"remote":{"type":"streamable-http","url":"https://example.com/mcp"}}}`,
+		".agentcfg/agentcfg.json":            `{"harnesses":["codex","antigravity"]}`,
+		".agentcfg/mcp.json":                 `{"mcpServers":{"local":{"type":"stdio","command":"node"}}}`,
+		".agentcfg/plugins/demo/plugin.json": `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"demo"}`,
+		".agentcfg/plugins/demo/mcp.json":    `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"remote":{"type":"streamable-http","url":"https://example.com/mcp"}}}`,
 	}
 	for name, body := range sources {
 		target := filepath.Join(root, filepath.FromSlash(name))

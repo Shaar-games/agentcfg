@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 func testInstructionsFixture(t *testing.T, text string, harnesses []string) (*config.Config, Options, string) {
 	t.Helper()
 	home := t.TempDir()
 	root := home
-	source := filepath.Join(root, ".agentmux", "AGENTS.md")
+	source := filepath.Join(root, ".agentcfg", "AGENTS.md")
 	if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func testInstructionsFixture(t *testing.T, text string, harnesses []string) (*co
 		t.Fatal(err)
 	}
 	return &config.Config{Root: root, Servers: map[string]config.Server{}, Settings: config.Settings{Harnesses: harnesses}}, Options{
-		Root: root, Home: home, Scope: "user", Binary: filepath.Join(root, "agentmux.exe"), SkillMode: "copy",
+		Root: root, Home: home, Scope: "user", Binary: filepath.Join(root, "agentcfg.exe"), SkillMode: "copy",
 	}, source
 }
 
@@ -140,7 +140,7 @@ func TestGlobalInstructionsFailOnMalformedFrontmatter(t *testing.T) {
 }
 
 func TestGlobalInstructionPreservesOtherYAMLAndComments(t *testing.T) {
-	source := "---\r\n# published metadata\r\ntitle: Project guide\r\nmetadata:\r\n  harness: codex,claude-code # agentmux routing\r\n  owner: engineering\r\nsummary: Keep legacy conventions\r\n---\r\n\r\n# Instructions\r\nUse tests.\r\n"
+	source := "---\r\n# published metadata\r\ntitle: Project guide\r\nmetadata:\r\n  harness: codex,claude-code # agentcfg routing\r\n  owner: engineering\r\nsummary: Keep legacy conventions\r\n---\r\n\r\n# Instructions\r\nUse tests.\r\n"
 	expected := "---\r\n# published metadata\r\ntitle: Project guide\r\nmetadata:\r\n  owner: engineering\r\nsummary: Keep legacy conventions\r\n---\r\n\r\n# Instructions\r\nUse tests.\r\n"
 	out, filter, err := instructionsContent([]byte(source))
 	if err != nil {

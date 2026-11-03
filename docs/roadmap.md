@@ -5,7 +5,7 @@
 Non implémentée. La détection de modifications manuelles actuelle doit rester
 la base du mécanisme de conflits. Un futur import devra distinguer les entrées
 personnelles des relais générés et reconstruire la configuration upstream, pas
-importer `agentmux connect` comme serveur réel.
+importer `agentcfg connect` comme serveur réel.
 
 Prévoir une fusion à trois versions : canonique actuelle, dernière projection
 connue et configuration native actuelle. Les suppressions, renommages, filtres,
@@ -30,7 +30,8 @@ Ces possibilités sont **proposées, pas implémentées** dans la version actuel
 Tests de conformité approfondis du MCP 2026-07-28 (MRTR, tâches,
 subscriptions, fournisseurs réels) ; stockage natif OAuth Keychain macOS et
 Secret Service Linux en complément du chiffrement explicite actuel ; profils et
-chemins personnalisés par harness ; mécanisme d’import explicite ; mode watch
+chemins personnalisés par harness ; import explicite des configurations natives
+(distinct de `agentcfg migrate`, limité aux anciennes sources canoniques) ; mode watch
 unidirectionnel ; métriques RAM/processus ;
 politique de rétention des logs ; compatibilité skills avec liens internes
 contrôlés ; provenance signée des binaires de release.

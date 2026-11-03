@@ -21,8 +21,8 @@
 //
 // # Configuration
 //
-// OAuth is an agentmux extension in canonical .agentmux/mcp.json server.oauth or
-// .agentmux/agentmux.json serverOverrides.<name>.oauth. It is never a portable
+// OAuth is an agentcfg extension in canonical .agentcfg/mcp.json server.oauth or
+// .agentcfg/agentcfg.json serverOverrides.<name>.oauth. It is never a portable
 // Agent Plugins mcp.json field. config.OAuthConfig accepts account, clientId,
 // issuer, clientSecretEnv, clientMetadataUrl, redirectUrl, scopes and
 // dynamicRegistration. DCR requires explicit opt-in; an explicitly configured
@@ -41,7 +41,7 @@
 //
 // NewSystemStore uses per-user Windows DPAPI to wrap a fresh AES-256-GCM key for
 // each record. No machine-wide DPAPI scope is used. An explicitly configured
-// AGENTMUX_OAUTH_KEY overrides this selection: it must be the base64 encoding of
+// AGENTCFG_OAUTH_KEY overrides this selection: it must be the base64 encoding of
 // 32 cryptographically random bytes supplied by an external secret manager.
 // NewEncryptedFileStore exposes that alternative directly. The external key
 // is never saved or derived from a user name, machine identifier or password.
@@ -49,7 +49,7 @@
 // explicit key or caller-supplied secure Store, it returns
 // ErrSecureStoreUnavailable. There is no plaintext fallback.
 //
-// Records live under <home>/.agentmux/credentials/oauth with private
+// Records live under <home>/.agentcfg/credentials/oauth with private
 // permissions, atomic ciphertext replacement, and identity-bound encryption.
 // Construction, absent-record reads and Inspect do not create directories.
 // Store implementations supplied to NewHandler must also implement Locker:

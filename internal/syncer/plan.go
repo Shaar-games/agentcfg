@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 type Options struct{ Root, Home, Binary, Scope, SkillMode string }
@@ -118,7 +118,7 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	if opts.Scope == "user" {
 		base = opts.Home
 	}
-	p := &Plan{root: opts.Root, base: base, statePath: filepath.Join(opts.Root, ".agentmux", "sync-"+opts.Scope+".json"),
+	p := &Plan{root: opts.Root, base: base, statePath: filepath.Join(opts.Root, ".agentcfg", "sync-"+opts.Scope+".json"),
 		state: freshManifest(), Changes: []Change{}, Warnings: append([]string{}, c.Warnings...)}
 	// Protect the plan against changes to canonical MCP/harness settings between
 	// dry-run and apply. Test fixtures sometimes construct Config directly; in

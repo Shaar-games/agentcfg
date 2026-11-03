@@ -3,7 +3,7 @@
 ## Frontends natifs, backend partagé
 
 La synchronisation remplace seulement le lancement de chaque MCP par un relais
-stdio `agentmux connect`. Le nom de serveur reste visible dans le harness. Un
+stdio `agentcfg connect`. Le nom de serveur reste visible dans le harness. Un
 relai est nécessaire par connexion stdio, mais le processus lourd du serveur et
 ses descendants sont mutualisés.
 
@@ -14,7 +14,7 @@ Unix : socket dans un répertoire 0700, socket 0600. Aucun port réseau d’éco
 Un verrou de démarrage permet à plusieurs relais concurrents de vérifier puis
 lancer le broker. Un deuxième verrou est conservé toute la vie du broker. Le
 processus lancé est le même exécutable, en sous-commande `daemon`, détaché de la
-console. Les journaux du broker se trouvent dans le répertoire cache agentmux de
+console. Les journaux du broker se trouvent dans le répertoire cache agentcfg de
 l’utilisateur ; les diagnostics ne sont jamais envoyés sur stdout des relais.
 
 ## Identité et cycle de vie
@@ -47,7 +47,7 @@ indépendance vis-à-vis de la durée de vie du parent.
 
 Les clients MCP 2025 utilisent l'ancien handshake stdio, mais le backend partagé
 ne reçoit qu’une seule initialisation. Le résultat est conservé pour les
-clients suivants. Le backend représente agentmux, pas le premier harness :
+clients suivants. Le backend représente agentcfg, pas le premier harness :
 les capacités client ambiguës roots/sampling/elicitation ne sont pas annoncées.
 
 Les clients MCP 2026-07-28 passent directement des requêtes autonomes avec
@@ -76,7 +76,7 @@ annulé. Aucun appel n’est rejoué automatiquement.
 
 ## Ce que les tests démontrent
 
-Le test d’intégration lance deux vrais exécutables `agentmux connect` avec des
+Le test d’intégration lance deux vrais exécutables `agentcfg connect` avec des
 identités de harness distinctes et un serveur MCP de test exécuté comme processus
 enfant. Il vérifie un seul PID upstream, un seul démarrage enregistré, deux
 clients dans le statut, des requêtes utilisant le même identifiant, puis la

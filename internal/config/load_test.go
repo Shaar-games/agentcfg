@@ -35,12 +35,12 @@ func putJSON(t *testing.T, path string, value any) {
 
 func canonicalServers(t *testing.T, root string, servers testObject) {
 	t.Helper()
-	putJSON(t, filepath.Join(root, ".agentmux", "mcp.json"), testObject{"mcpServers": servers})
+	putJSON(t, filepath.Join(root, ".agentcfg", "mcp.json"), testObject{"mcpServers": servers})
 }
 
 func pluginFixture(t *testing.T, root, folder, name string, servers testObject) string {
 	t.Helper()
-	path := filepath.Join(root, ".agentmux", "plugins", folder)
+	path := filepath.Join(root, ".agentcfg", "plugins", folder)
 	putJSON(t, filepath.Join(path, "plugin.json"), testObject{"$schema": pluginSchema, "name": name})
 	if servers != nil {
 		putJSON(t, filepath.Join(path, "mcp.json"), testObject{"$schema": mcpSchema, "mcpServers": servers})
@@ -99,7 +99,7 @@ func TestLoadDefaultsAndNoWrites(t *testing.T) {
 	}
 
 	pluginFixture(t, root, "demo", "demo", testObject{
-		"never": testObject{"type": "stdio", "command": "agentmux-test-never-execute", "cwd": "${PLUGIN_DATA}/work"},
+		"never": testObject{"type": "stdio", "command": "agentcfg-test-never-execute", "cwd": "${PLUGIN_DATA}/work"},
 	})
 	config = loadOK(t, root)
 	server, exists := config.Servers["demo.never"]
@@ -109,7 +109,7 @@ func TestLoadDefaultsAndNoWrites(t *testing.T) {
 	if !strings.HasSuffix(server.Cwd, filepath.Join("demo", "work")) {
 		t.Fatalf("cwd = %s", server.Cwd)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".agentmux", "data")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, ".agentcfg", "data")); !os.IsNotExist(err) {
 		t.Fatalf("Load created PLUGIN_DATA: %v", err)
 	}
 }
@@ -120,9 +120,9 @@ func TestCanonicalServersSettingsAndOverrides(t *testing.T) {
 		"local":  testObject{"command": "node", "args": []string{"script.js"}, "harnesses": []string{"cursor"}, "env": testObject{"EXAMPLE": "value"}},
 		"remote": testObject{"url": "https://example.test/mcp", "headers": testObject{"X-Literal": "${PLUGIN_ROOT}"}},
 	})
-	skillFixture(t, filepath.Join(root, ".agentmux", "skills"), "review")
-	putFile(t, filepath.Join(root, ".agentmux", "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Review code.\nmetadata:\n  harness: claude-code\n---\n")
-	putJSON(t, filepath.Join(root, ".agentmux", "agentmux.json"), testObject{
+	skillFixture(t, filepath.Join(root, ".agentcfg", "skills"), "review")
+	putFile(t, filepath.Join(root, ".agentcfg", "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Review code.\nmetadata:\n  harness: claude-code\n---\n")
+	putJSON(t, filepath.Join(root, ".agentcfg", "agentcfg.json"), testObject{
 		"harnesses": []string{"codex", "claude-code", "codex"},
 		"runtime":   testObject{"idleTimeout": "30s", "requestTimeout": "2m"},
 		"serverOverrides": testObject{
@@ -179,7 +179,7 @@ func TestInvalidEntriesAreIsolated(t *testing.T) {
 	}
 	expectWarnings(t, config, "legacy", "unsupported", "bad-command", "bad-field")
 
-	putFile(t, filepath.Join(root, ".agentmux", "mcp.json"),
+	putFile(t, filepath.Join(root, ".agentcfg", "mcp.json"),
 		"{\"mcpServers\":{\"valid\":{\"command\":\"node\"},\"duplicate\":{\"command\":\"node\",\"command\":\"other\"}}}")
 	config = loadOK(t, root)
 	if !reflect.DeepEqual(serverNames(config), []string{"valid"}) {
@@ -201,7 +201,7 @@ func TestPortablePluginVariablesAndNamespaces(t *testing.T) {
 	putFile(t, filepath.Join(plugin, "bin", "runner"), "This fixture must never be executed.\n")
 	skill := skillFixture(t, filepath.Join(plugin, "skills"), "review")
 	putFile(t, filepath.Join(skill, "SKILL.md"), "---\nname: review\ndescription: Review code.\nmetadata:\n  harness: codex\n---\n")
-	putJSON(t, filepath.Join(root, ".agentmux", "agentmux.json"), testObject{
+	putJSON(t, filepath.Join(root, ".agentcfg", "agentcfg.json"), testObject{
 		"serverOverrides": testObject{"acme.tools.inspect": testObject{"harnesses": []string{"cursor"}, "sharing": "isolated"}},
 	})
 	config := loadOK(t, root)
@@ -214,7 +214,7 @@ func TestPortablePluginVariablesAndNamespaces(t *testing.T) {
 	if server.Command != filepath.Join(resolvedPlugin, "bin", "runner") || server.Cwd != resolvedPlugin {
 		t.Fatalf("bad paths: %#v", server)
 	}
-	data := filepath.Join(config.Root, ".agentmux", "data", "plugins", "acme.tools")
+	data := filepath.Join(config.Root, ".agentcfg", "data", "plugins", "acme.tools")
 	if !reflect.DeepEqual(server.Args, []string{resolvedPlugin, data, "${UNKNOWN}", "../../opaque"}) {
 		t.Fatal(server.Args)
 	}
@@ -373,14 +373,14 @@ func TestSettingsInvalidValues(t *testing.T) {
 	for i, input := range cases {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			root := t.TempDir()
-			putFile(t, filepath.Join(root, ".agentmux", "agentmux.json"), input)
+			putFile(t, filepath.Join(root, ".agentcfg", "agentcfg.json"), input)
 			if _, err := Load(root); err == nil {
 				t.Fatalf("accepted invalid settings: %s", input)
 			}
 		})
 	}
 	root := t.TempDir()
-	putJSON(t, filepath.Join(root, ".agentmux", "agentmux.json"), testObject{"harnesses": []string{}})
+	putJSON(t, filepath.Join(root, ".agentcfg", "agentcfg.json"), testObject{"harnesses": []string{}})
 	if config := loadOK(t, root); config.Settings.Harnesses == nil || len(config.Settings.Harnesses) != 0 {
 		t.Fatal("empty global harness list did not remain explicit")
 	}
@@ -421,7 +421,7 @@ func TestRemoteURLAndHeaderValidation(t *testing.T) {
 
 func TestSkillFrontmatterAndIsolation(t *testing.T) {
 	root := t.TempDir()
-	parent := filepath.Join(root, ".agentmux", "skills")
+	parent := filepath.Join(root, ".agentcfg", "skills")
 	skillFixture(t, parent, "valid")
 	skillFixture(t, filepath.Join(parent, "nested"), "not-discovered")
 	bad := map[string]string{
@@ -458,8 +458,8 @@ func TestGeneratedSkillCopiesAreNotRediscovered(t *testing.T) {
 	root := t.TempDir()
 	plugin := pluginFixture(t, root, "demo", "demo", nil)
 	skillFixture(t, filepath.Join(plugin, "skills"), "review")
-	generated := skillFixture(t, filepath.Join(root, ".agentmux", "skills"), "review")
-	putJSON(t, filepath.Join(generated, originMarker), testObject{"managedBy": "agentmux"})
+	generated := skillFixture(t, filepath.Join(root, ".agentcfg", "skills"), "review")
+	putJSON(t, filepath.Join(generated, originMarker), testObject{"managedBy": "agentcfg"})
 	config := loadOK(t, root)
 	if !reflect.DeepEqual(skillNames(config), []string{"demo.review"}) {
 		t.Fatal(config.Skills)
@@ -509,7 +509,7 @@ func TestPluginDirectoryLinkEscapes(t *testing.T) {
 				skill := skillFixture(t, filepath.Join(plugin, "skills"), "review")
 				directoryLink(t, outside, filepath.Join(skill, "assets"))
 			case "data":
-				directoryLink(t, outside, filepath.Join(root, ".agentmux", "data", "plugins", "demo"))
+				directoryLink(t, outside, filepath.Join(root, ".agentcfg", "data", "plugins", "demo"))
 			}
 			putJSON(t, filepath.Join(plugin, "mcp.json"), testObject{"$schema": mcpSchema, "mcpServers": servers})
 			config := loadOK(t, root)
@@ -530,7 +530,7 @@ func TestContainedSkillLinkAndGeneratedLink(t *testing.T) {
 	plugin := pluginFixture(t, root, "demo", "demo", nil)
 	actual := skillFixture(t, filepath.Join(plugin, "assets"), "review")
 	directoryLink(t, actual, filepath.Join(plugin, "skills", "review"))
-	directoryLink(t, actual, filepath.Join(root, ".agentmux", "skills", "review"))
+	directoryLink(t, actual, filepath.Join(root, ".agentcfg", "skills", "review"))
 	config := loadOK(t, root)
 	if !reflect.DeepEqual(skillNames(config), []string{"demo.review"}) || len(config.Warnings) != 0 {
 		t.Fatal(config.Skills, config.Warnings)

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"agentmux/internal/config"
-	"agentmux/internal/wire"
+	"agentcfg/internal/config"
+	"agentcfg/internal/wire"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

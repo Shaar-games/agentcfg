@@ -48,10 +48,27 @@ func fixtureServer(t *testing.T, asset string, data []byte, badHash bool) *httpt
 	return server
 }
 
+// A renamed installation must never clobber an existing agentmux binary.
+func legacyExecutableCheck(t *testing.T, dir, filename string) func() {
+	t.Helper()
+	const original = "pre-existing agentmux executable"
+	path := filepath.Join(dir, filename)
+	if err := os.WriteFile(path, []byte(original), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		contents, err := os.ReadFile(path)
+		if err != nil || string(contents) != original {
+			t.Fatalf("legacy agentmux installation changed: %q (%v)", contents, err)
+		}
+	}
+}
+
 func windowsArchive(t *testing.T) []byte {
 	t.Helper()
-	binary := filepath.Join(t.TempDir(), "agentmux.exe")
-	command := exec.Command("go", "build", "-o", binary, "./cmd/agentmux")
+	binary := filepath.Join(t.TempDir(), "agentcfg.exe")
+	command := exec.Command("go", "build", "-o", binary, "./cmd/agentcfg")
 	command.Dir = root(t)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build release fixture: %v\n%s", err, output)
@@ -62,7 +79,7 @@ func windowsArchive(t *testing.T) []byte {
 	}
 	var buf bytes.Buffer
 	writer := zip.NewWriter(&buf)
-	entry, err := writer.Create("agentmux.exe")
+	entry, err := writer.Create("agentcfg.exe")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,8 +98,8 @@ func bashArchive(t *testing.T) []byte {
 	if runtime.GOOS == "windows" {
 		data = []byte("#!/usr/bin/env bash\nif [[ \"$1\" == version ]]; then echo fixture; else exit 1; fi\n")
 	} else {
-		binary := filepath.Join(t.TempDir(), "agentmux")
-		command := exec.Command("go", "build", "-o", binary, "./cmd/agentmux")
+		binary := filepath.Join(t.TempDir(), "agentcfg")
+		command := exec.Command("go", "build", "-o", binary, "./cmd/agentcfg")
 		command.Dir = root(t)
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("build release fixture: %v\n%s", err, output)
@@ -96,7 +113,7 @@ func bashArchive(t *testing.T) []byte {
 	var buf bytes.Buffer
 	zipped := gzip.NewWriter(&buf)
 	writer := tar.NewWriter(zipped)
-	if err := writer.WriteHeader(&tar.Header{Name: "agentmux", Mode: 0755, Size: int64(len(data))}); err != nil {
+	if err := writer.WriteHeader(&tar.Header{Name: "agentcfg", Mode: 0755, Size: int64(len(data))}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := writer.Write(data); err != nil {
@@ -126,19 +143,21 @@ func TestPowerShellDownloadsAndVerifiesRelease(t *testing.T) {
 			name = "invalid-sha256"
 		}
 		t.Run(name, func(t *testing.T) {
-			server := fixtureServer(t, "agentmux_windows_"+runtime.GOARCH+".zip", data, bad)
+			server := fixtureServer(t, "agentcfg_windows_"+runtime.GOARCH+".zip", data, bad)
 			dir := filepath.Join(t.TempDir(), "bin")
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			binary := filepath.Join(dir, "agentmux.exe")
+				checkLegacy := legacyExecutableCheck(t, dir, "agentmux.exe")
+				defer checkLegacy()
+			binary := filepath.Join(dir, "agentcfg.exe")
 			if bad {
 				if err := os.WriteFile(binary, []byte("previous executable"), 0o700); err != nil {
 					t.Fatal(err)
 				}
 			}
 			args := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(root(t), "install.ps1")}
-			environment := append(os.Environ(), "AGENTMUX_VERSION=latest", "AGENTMUX_RELEASE_BASE_URL="+server.URL, "AGENTMUX_BIN_DIR="+dir)
+			environment := append(os.Environ(), "AGENTCFG_VERSION=latest", "AGENTCFG_RELEASE_BASE_URL="+server.URL, "AGENTCFG_BIN_DIR="+dir)
 			command := exec.Command(shell, args...)
 			command.Env = environment
 			output, err := command.CombinedOutput()
@@ -157,6 +176,9 @@ func TestPowerShellDownloadsAndVerifiesRelease(t *testing.T) {
 			if _, err = exec.Command(binary, "version").CombinedOutput(); err != nil {
 				t.Fatalf("installed executable cannot run: %v", err)
 			}
+				if help, err := exec.Command(binary).CombinedOutput(); err != nil || !bytes.Contains(help, []byte("Usage: agentcfg")) {
+					t.Fatalf("no-argument help failed: %v\n%s", err, help)
+				}
 			again := exec.Command(shell, args...)
 			again.Env = environment
 			if output, err = again.CombinedOutput(); err != nil {
@@ -186,7 +208,7 @@ func TestBashDownloadsAndVerifiesRelease(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		osName, arch = "linux", "amd64"
 	}
-	asset := "agentmux_" + osName + "_" + arch + ".tar.gz"
+	asset := "agentcfg_" + osName + "_" + arch + ".tar.gz"
 	data := bashArchive(t)
 	for _, bad := range []bool{false, true} {
 		name := "valid"
@@ -199,14 +221,16 @@ func TestBashDownloadsAndVerifiesRelease(t *testing.T) {
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			installed := filepath.Join(dir, "agentmux")
+				checkLegacy := legacyExecutableCheck(t, dir, "agentmux")
+				defer checkLegacy()
+			installed := filepath.Join(dir, "agentcfg")
 			if bad {
 				if err := os.WriteFile(installed, []byte("previous executable"), 0o700); err != nil {
 					t.Fatal(err)
 				}
 			}
 			args := []string{filepath.Join(root(t), "install.sh")}
-			environment := append(os.Environ(), "AGENTMUX_VERSION=latest", "AGENTMUX_RELEASE_BASE_URL="+server.URL, "AGENTMUX_BIN_DIR="+dir)
+			environment := append(os.Environ(), "AGENTCFG_VERSION=latest", "AGENTCFG_RELEASE_BASE_URL="+server.URL, "AGENTCFG_BIN_DIR="+dir)
 			newCommand := func() *exec.Cmd { return exec.Command(bash, args...) }
 			if runtime.GOOS == "windows" {
 				fake := t.TempDir()
@@ -239,6 +263,11 @@ func TestBashDownloadsAndVerifiesRelease(t *testing.T) {
 			if _, err = os.Stat(installed); err != nil {
 				t.Fatal(err)
 			}
+				if runtime.GOOS != "windows" {
+					if help, err := exec.Command(installed).CombinedOutput(); err != nil || !bytes.Contains(help, []byte("Usage: agentcfg")) {
+						t.Fatalf("no-argument help failed: %v\n%s", err, help)
+					}
+				}
 			again := newCommand()
 			again.Env = environment
 			if output, err = again.CombinedOutput(); err != nil {

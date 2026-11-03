@@ -16,9 +16,9 @@ import (
 	"strings"
 	"unicode"
 
-	"agentmux/internal/broker"
-	"agentmux/internal/config"
-	"agentmux/internal/syncer"
+	"agentcfg/internal/broker"
+	"agentcfg/internal/config"
+	"agentcfg/internal/syncer"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/x/term"
@@ -49,11 +49,11 @@ type interfaceSession struct {
 
 func (s interfaceSession) form(fields ...huh.Field) error {
 	form := huh.NewForm(huh.NewGroup(fields...)).
-		WithInput(s.in).WithOutput(s.out)
+		WithInput(s.in).WithOutput(s.out).WithTheme(Theme())
 	// Huh switches to a numbered accessible prompt when TERM=dumb. Windows
 	// consoles can still render the native checkbox UI in that environment;
 	// only override the fallback when both streams are real terminals.
-	if os.Getenv("AGENTMUX_ACCESSIBLE") == "1" {
+	if os.Getenv("AGENTCFG_ACCESSIBLE") == "1" {
 		form.WithAccessible(true)
 	} else if runtime.GOOS == "windows" {
 		in, inOK := s.in.(*os.File)
@@ -107,8 +107,8 @@ func Run(ctx context.Context, root string, input io.Reader, output io.Writer) er
 	return (interfaceSession{ctx: ctx, root: root, in: input, out: output}).configureHarnesses()
 }
 
-// RunMenu exposes the additional management/diagnostic operations without
-// complicating the default checklist. Both use Huh; CLI pipelines stay plain.
+// RunMenu is the complete user-level configuration entrypoint for "agentcfg config".
+// Multi-choice settings still use native Huh checkboxes inside their sections.
 func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer) error {
 	s := interfaceSession{ctx: ctx, root: root, in: input, out: output}
 	for {
@@ -117,7 +117,7 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 		}
 		cfg, err := config.Load(root)
 		if err != nil {
-			if noteErr := s.note("Invalid canonical settings", err.Error()+"\nRepair ~/.agentmux/agentmux.json before continuing."); noteErr != nil && !isCancelled(noteErr) {
+			if noteErr := s.note("Invalid canonical settings", err.Error()+"\nRepair ~/.agentcfg/agentcfg.json before continuing."); noteErr != nil && !isCancelled(noteErr) {
 				return noteErr
 			}
 			return err
@@ -129,7 +129,7 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 		} else if status.Running {
 			state = fmt.Sprintf("broker PID %d", status.PID)
 		}
-		choice, err := s.selectAction("◆ AgentMux  ·  Configure your AI harnesses", "User-level configuration  ·  "+state+"  ·  ↑↓ select, / filter, Enter open, Ctrl+C exit",
+		choice, err := s.selectAction("agentcfg  ·  Configuration", "User-level settings  ·  "+state+"  ·  ↑↓ select, / filter, Enter open, Ctrl+C exit",
 			huh.NewOption("Harnesses  ·  enable / disable", "harnesses"),
 			huh.NewOption(fmt.Sprintf("MCP servers  ·  %d configured", len(cfg.Servers)), "mcp"),
 			huh.NewOption(fmt.Sprintf("Skills  ·  %d available", len(cfg.Skills)), "skills"),
@@ -395,7 +395,7 @@ func (s interfaceSession) showDiagnostics() error {
 	}
 	status, statusErr := broker.GetStatus(s.ctx, cfg.Root)
 	var message strings.Builder
-	fmt.Fprintf(&message, "Canonical root: %s\nMCP servers: %d  ·  Skills: %d  ·  Plugins: %d\n", filepath.Join(cfg.Root, ".agentmux"), len(cfg.Servers), len(cfg.Skills), len(discoverPlugins(s.root, cfg)))
+	fmt.Fprintf(&message, "Canonical root: %s\nMCP servers: %d  ·  Skills: %d  ·  Plugins: %d\n", filepath.Join(cfg.Root, ".agentcfg"), len(cfg.Servers), len(cfg.Skills), len(discoverPlugins(s.root, cfg)))
 	if statusErr != nil {
 		fmt.Fprintf(&message, "Broker status error: %v\n", statusErr)
 	} else if !status.Running {
@@ -476,7 +476,7 @@ func stableExecutable() (string, error) {
 	}
 	info, err := os.Stat(binary)
 	if err != nil || !info.Mode().IsRegular() {
-		return "", fmt.Errorf("agentmux binary must exist as a regular installed file: %w", err)
+		return "", fmt.Errorf("agentcfg binary must exist as a regular installed file: %w", err)
 	}
 	temporary, err := filepath.Abs(os.TempDir())
 	if err != nil {

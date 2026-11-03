@@ -78,10 +78,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/pkg"
-          name="agentmux"
-          if [[ "$GOOS" == windows ]]; then name="agentmux.exe"; fi
-          go build -trimpath -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" -o "$RUNNER_TEMP/pkg/$name" ./cmd/agentmux
-          asset="agentmux_${GOOS}_${GOARCH}"
+          name="agentcfg"
+          if [[ "$GOOS" == windows ]]; then name="agentcfg.exe"; fi
+          go build -trimpath -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" -o "$RUNNER_TEMP/pkg/$name" ./cmd/agentcfg
+          asset="agentcfg_${GOOS}_${GOARCH}"
           if [[ "$GOOS" == windows ]]; then
             (cd "$RUNNER_TEMP/pkg" && zip -q "$RUNNER_TEMP/$asset.zip" "$name")
           else
@@ -89,8 +89,8 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: agentmux-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: ${{ runner.temp }}/agentmux_*
+          name: agentcfg-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ runner.temp }}/agentcfg_*
           if-no-files-found: error
           retention-days: 2
 
@@ -107,7 +107,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          pattern: agentmux-*
+          pattern: agentcfg-*
           path: release
           merge-multiple: true
       - name: Verify all expected assets and checksums
@@ -119,10 +119,10 @@ jobs:
             for arch in amd64 arm64; do
               ext=tar.gz
               if [[ "$os" == windows ]]; then ext=zip; fi
-              test -s "agentmux_${os}_${arch}.${ext}" || { echo "Missing $os/$arch"; exit 1; }
+              test -s "agentcfg_${os}_${arch}.${ext}" || { echo "Missing $os/$arch"; exit 1; }
             done
           done
-          sha256sum agentmux_* > SHA256SUMS
+          sha256sum agentcfg_* > SHA256SUMS
           sha256sum -c SHA256SUMS
       - name: Publish or verify immutable GitHub release
         env:
@@ -172,26 +172,29 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         env:
-          AGENTMUX_VERSION: ${{ inputs.tag || github.ref_name }}
-          AGENTMUX_BIN_DIR: ${{ runner.temp }}/agentmux-bin
+          AGENTCFG_VERSION: ${{ inputs.tag || github.ref_name }}
+          AGENTCFG_BIN_DIR: ${{ runner.temp }}/agentcfg-bin
         run: |
           set -euo pipefail
           bash install.sh
-          "$AGENTMUX_BIN_DIR/agentmux" version
+          "$AGENTCFG_BIN_DIR/agentcfg" version
           # Reinstallation is supported: atomically replace an existing binary.
           bash install.sh
-          [[ "$("$AGENTMUX_BIN_DIR/agentmux" version)" == "$AGENTMUX_VERSION" ]]
+          [[ "$("$AGENTCFG_BIN_DIR/agentcfg" version)" == "$AGENTCFG_VERSION" ]]
+          "$AGENTCFG_BIN_DIR/agentcfg" | grep -Fq 'Usage: agentcfg'
       - name: PowerShell installer smoke
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          AGENTMUX_VERSION: ${{ inputs.tag || github.ref_name }}
-          AGENTMUX_BIN_DIR: ${{ runner.temp }}/agentmux-bin
+          AGENTCFG_VERSION: ${{ inputs.tag || github.ref_name }}
+          AGENTCFG_BIN_DIR: ${{ runner.temp }}/agentcfg-bin
         run: |
           ./install.ps1
-          & (Join-Path $env:AGENTMUX_BIN_DIR 'agentmux.exe') version
+          & (Join-Path $env:AGENTCFG_BIN_DIR 'agentcfg.exe') version
           if ($LASTEXITCODE -ne 0) { throw 'Installed binary smoke test failed' }
           # Windows reinstallation replaces the existing executable too.
           ./install.ps1
-          $installed = & (Join-Path $env:AGENTMUX_BIN_DIR 'agentmux.exe') version
-          if ($LASTEXITCODE -ne 0 -or $installed.Trim() -ne $env:AGENTMUX_VERSION) { throw 'Reinstalled binary smoke test failed' }
+          $installed = & (Join-Path $env:AGENTCFG_BIN_DIR 'agentcfg.exe') version
+          if ($LASTEXITCODE -ne 0 -or $installed.Trim() -ne $env:AGENTCFG_VERSION) { throw 'Reinstalled binary smoke test failed' }
+          $helpText = & (Join-Path $env:AGENTCFG_BIN_DIR 'agentcfg.exe')
+          if ($LASTEXITCODE -ne 0 -or ($helpText -join "`n") -notmatch 'Usage: agentcfg') { throw 'No-argument CLI help smoke test failed' }

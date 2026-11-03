@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -129,7 +129,7 @@ func instructionsContent(original []byte) ([]byte, []string, error) {
 	}
 	if metadataOnlyHarness && len(fields.Content) == 2 {
 		// The only frontmatter information was routing metadata. An AGENTS.md
-		// destination should receive its Markdown body with no agentmux header.
+		// destination should receive its Markdown body with no agentcfg header.
 		return append([]byte(nil), body...), harnesses, nil
 	}
 	lines := bytes.SplitAfter(header, []byte{'\n'})
@@ -154,7 +154,7 @@ func (p *Plan) planInstructions(c *config.Config, opts Options, selected map[str
 	if opts.Scope != "user" {
 		return nil
 	}
-	source := filepath.Join(c.Root, ".agentmux", "AGENTS.md")
+	source := filepath.Join(c.Root, ".agentcfg", "AGENTS.md")
 	if err := ensureNoSymlinkParents(c.Root, source); err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func (p *Plan) planInstructions(c *config.Config, opts Options, selected map[str
 			continue
 		}
 		if present && previous == "" {
-			return fmt.Errorf("global instructions exist and are not owned by agentmux: %s", path)
+			return fmt.Errorf("global instructions exist and are not owned by agentcfg: %s", path)
 		}
 		p.state.Instructions[path] = rawDigest(desired)
 		if !bytes.Equal(original, desired) {

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"agentmux/internal/pathutil"
+	"agentcfg/internal/pathutil"
 )
 
 func resolveExisting(path string) (string, error) {
@@ -85,7 +85,7 @@ func pluginRelative(root, value string, missing bool) (string, error) {
 }
 
 func pluginDataRoot(sourceRoot, name string) (string, error) {
-	base := filepath.Join(sourceRoot, ".agentmux", "data", "plugins")
+	base := filepath.Join(sourceRoot, ".agentcfg", "data", "plugins")
 	candidate := filepath.Join(base, name)
 	resolved, err := containedPath(sourceRoot, candidate, true)
 	if err != nil {

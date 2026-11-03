@@ -99,7 +99,7 @@ func parseServer(raw json.RawMessage, root, pluginRoot, pluginName string) (Serv
 	}
 	if err = allowFields(fields, allowed...); err != nil {
 		if portable {
-			return Server{}, fmt.Errorf("%w; agentmux harnesses/sharing/oauth belong in agentmux.json serverOverrides", err)
+			return Server{}, fmt.Errorf("%w; agentcfg harnesses/sharing/oauth belong in agentcfg.json serverOverrides", err)
 		}
 		return Server{}, err
 	}

@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"os"
 
-	"agentmux/internal/updater"
+	"agentcfg/internal/updater"
 )
 
 func main() {
 	result, err := updater.Update(context.Background(), updater.Options{
 		CurrentVersion: "v0.1.0",
-		LatestAPI:      os.Getenv("AGENTMUX_TEST_LATEST_API"),
-		DownloadBase:   os.Getenv("AGENTMUX_TEST_DOWNLOAD_BASE"),
+		LatestAPI:      os.Getenv("AGENTCFG_TEST_LATEST_API"),
+		DownloadBase:   os.Getenv("AGENTCFG_TEST_DOWNLOAD_BASE"),
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

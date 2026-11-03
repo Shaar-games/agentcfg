@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 func newHTTPClient(server config.Server, supplied *http.Client) (*http.Client, error) {

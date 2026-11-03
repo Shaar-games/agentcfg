@@ -9,20 +9,20 @@ import (
 	"strings"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 func skillSourceFixture(t *testing.T, body string) (string, string, config.Skill) {
 	t.Helper()
 	root := t.TempDir()
-	settings := filepath.Join(root, ".agentmux", "agentmux.json")
+	settings := filepath.Join(root, ".agentcfg", "agentcfg.json")
 	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(settings, []byte(`{"harnesses":["codex","antigravity","cursor"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, ".agentmux", "skills", "review", "SKILL.md")
+	path := filepath.Join(root, ".agentcfg", "skills", "review", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestSkillCommaFilterMinimalLineEditAndBackup(t *testing.T) {
 	if !reflect.DeepEqual(loadSkillFixture(t, root, "review").Harnesses, []string{"codex"}) {
 		t.Fatal("changed filter did not load correctly")
 	}
-	backups, err := filepath.Glob(filepath.Join(root, ".agentmux", "backups", "skills", "review-*.bak"))
+	backups, err := filepath.Glob(filepath.Join(root, ".agentcfg", "backups", "skills", "review-*.bak"))
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("expected one SKILL.md backup: %v %v", backups, err)
 	}
@@ -131,7 +131,7 @@ func TestSkillMultiSelectAtomicEditAndEmptySelection(t *testing.T) {
 	if got != expected {
 		t.Fatalf("multi-select changed unrelated content:\ngot %q\nwant %q", got, expected)
 	}
-	backups, err := filepath.Glob(filepath.Join(root, ".agentmux", "backups", "skills", "review-*.bak"))
+	backups, err := filepath.Glob(filepath.Join(root, ".agentcfg", "backups", "skills", "review-*.bak"))
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("expected one backup for entire multi-select: %v (%v)", backups, err)
 	}
@@ -164,7 +164,7 @@ func TestSkillMultiSelectPreservesNoChangeAndRejectsBadChoices(t *testing.T) {
 			t.Fatalf("invalid multi-select accepted: %v", selected)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, ".agentmux", "backups")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, ".agentcfg", "backups")); !os.IsNotExist(err) {
 		t.Fatalf("no-op or invalid edit wrote backup directory: %v", err)
 	}
 	if got := string(mustReadSkill(t, path)); got != "---\nname: review\ndescription: Review source\n---\n# Keep\n" {
@@ -254,14 +254,14 @@ func TestSkillMalformedOrComplexYAMLRejectedWithoutModification(t *testing.T) {
 
 func TestSkillPluginSourceEditingAndProjectRejection(t *testing.T) {
 	root := t.TempDir()
-	settingsPath := filepath.Join(root, ".agentmux", "agentmux.json")
+	settingsPath := filepath.Join(root, ".agentcfg", "agentcfg.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(settingsPath, []byte(`{"harnesses":["codex","cursor"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	plugin := filepath.Join(root, ".agentmux", "plugins", "demo")
+	plugin := filepath.Join(root, ".agentcfg", "plugins", "demo")
 	manifestPath := filepath.Join(plugin, "plugin.json")
 	path := filepath.Join(plugin, "skills", "review", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

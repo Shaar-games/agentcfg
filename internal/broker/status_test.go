@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"agentmux/internal/ipc"
-	"agentmux/internal/wire"
+	"agentcfg/internal/ipc"
+	"agentcfg/internal/wire"
 )
 
 // A stopped broker can close its listener after the status caller has dialed

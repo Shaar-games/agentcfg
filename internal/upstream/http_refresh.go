@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 )
 
 var errRefreshToolHeaders = errors.New("refresh MCP tool parameter annotations")
@@ -30,7 +30,7 @@ func (t *httpTransport) refreshToolHeaders(ctx context.Context, original wire.Me
 			params["cursor"] = cursor
 		}
 		request := wire.Message{
-			"jsonrpc": wire.Raw("2.0"), "id": wire.Raw("agentmux-headers-" + rand.Text()),
+			"jsonrpc": wire.Raw("2.0"), "id": wire.Raw("agentcfg-headers-" + rand.Text()),
 			"method": wire.Raw("tools/list"), "params": wire.Raw(params),
 		}
 		var next string

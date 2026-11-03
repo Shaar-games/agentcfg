@@ -182,12 +182,12 @@ correlated error; the operation is not replayed. Unsolicited GET reconnection is
 not lossless and does not replay missed events.
 
 OAuth 2.1 authorization is available through the official Go MCP SDK with an
-explicitly configured `oauth` block and `agentmux auth login <server>`.
+explicitly configured `oauth` block and `agentcfg auth login <server>`.
 Discovery, PKCE, encrypted cached tokens and refresh are supported; the broker
 never initiates an interactive login or opens a browser without a user command.
 The configured redirect URL must be registered with the authorization provider.
 Windows uses per-user DPAPI, while Linux/macOS need an explicitly supplied
-`AGENTMUX_OAUTH_KEY` (base64-encoded 32 random bytes) or an injected secure
+`AGENTCFG_OAUTH_KEY` (base64-encoded 32 random bytes) or an injected secure
 store. Static configured headers are supported without OAuth; a configured
 literal Authorization header cannot be combined with OAuth. HTTP 401/403
 failures without valid credentials return sanitized errors. Legacy 2024

@@ -50,10 +50,10 @@ func projectSnapshot(t *testing.T, root string) map[string]string {
 	return result
 }
 
-// Run from a normal project without a checked-in .agentmux directory. CLI
+// Run from a normal project without a checked-in .agentcfg directory. CLI
 // inventory, validation and synchronization must use the temporary user home
 // only, including when a project has its own unrelated harness files.
-func TestGlobalCLIUsesHomeWithoutProjectAgentMux(t *testing.T) {
+func TestGlobalCLIUsesHomeWithoutProjectagentcfg(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
@@ -68,12 +68,12 @@ func TestGlobalCLIUsesHomeWithoutProjectAgentMux(t *testing.T) {
 		output.Reset()
 		diagnostics.Reset()
 		if err := run(context.Background(), args, strings.NewReader(""), &output, &diagnostics); err != nil {
-			t.Fatalf("agentmux %q: %v; stderr=%s", args, err, diagnostics.String())
+			t.Fatalf("agentcfg %q: %v; stderr=%s", args, err, diagnostics.String())
 		}
 		return output.String()
 	}
 	runCLI("init", "--harnesses", "codex,cursor,antigravity")
-	canonical := filepath.Join(home, ".agentmux")
+	canonical := filepath.Join(home, ".agentcfg")
 	writeScopeFixture(t, filepath.Join(canonical, "mcp.json"), `{"mcpServers":{"local":{"type":"stdio","command":"go"}}}`)
 	writeScopeFixture(t, filepath.Join(canonical, "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Inspect code\nmetadata:\n  harness: codex,cursor,antigravity\n---\n# Preserve these bytes\n")
 	plugin := filepath.Join(canonical, "plugins", "docs-plugin")
@@ -109,7 +109,7 @@ func TestGlobalCLIUsesHomeWithoutProjectAgentMux(t *testing.T) {
 			t.Fatalf("skill copy/symlink altered content at %s: %v", target, err)
 		}
 	}
-	writeScopeFixture(t, filepath.Join(canonical, "agentmux.json"), `{"harnesses":[]}`)
+	writeScopeFixture(t, filepath.Join(canonical, "agentcfg.json"), `{"harnesses":[]}`)
 	runCLI("sync", "--apply")
 	content, err := os.ReadFile(filepath.Join(home, ".cursor", "mcp.json"))
 	if err != nil || !strings.Contains(string(content), "home-owned") || strings.Contains(string(content), "docs-plugin.remote") || strings.Contains(string(content), `"local"`) {
@@ -123,8 +123,8 @@ func TestGlobalCLIUsesHomeWithoutProjectAgentMux(t *testing.T) {
 	if projectAfter := projectSnapshot(t, project); !sameProjectSnapshot(before, projectAfter) {
 		t.Fatalf("global CLI modified project: before=%v after=%v", before, projectAfter)
 	}
-	if _, err := os.Stat(filepath.Join(project, ".agentmux")); !os.IsNotExist(err) {
-		t.Fatalf("CLI created project .agentmux: %v", err)
+	if _, err := os.Stat(filepath.Join(project, ".agentcfg")); !os.IsNotExist(err) {
+		t.Fatalf("CLI created project .agentcfg: %v", err)
 	}
 }
 

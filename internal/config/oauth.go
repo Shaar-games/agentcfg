@@ -9,7 +9,7 @@ import (
 )
 
 // OAuthConfig configures client-managed upstream authorization. It is allowed
-// only in canonical server configuration and agentmux serverOverrides, never
+// only in canonical server configuration and agentcfg serverOverrides, never
 // in portable Agent Plugins mcp.json. Secrets and tokens are not stored here.
 type OAuthConfig struct {
 	Account             string   `json:"account,omitempty"`

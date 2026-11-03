@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
-	"agentmux/internal/config"
-	"agentmux/internal/wire"
+	"agentcfg/internal/config"
+	"agentcfg/internal/wire"
 )
 
 // Transport carries raw JSON-RPC objects. Write and Close are safe to call

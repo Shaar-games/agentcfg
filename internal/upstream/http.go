@@ -15,9 +15,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"agentmux/internal/auth"
-	"agentmux/internal/config"
-	"agentmux/internal/wire"
+	"agentcfg/internal/auth"
+	"agentcfg/internal/config"
+	"agentcfg/internal/wire"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 )

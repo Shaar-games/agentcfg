@@ -14,12 +14,13 @@ import (
 	"strings"
 	"syscall"
 
-	"agentmux/internal/broker"
-	"agentmux/internal/config"
-	"agentmux/internal/pathutil"
-	"agentmux/internal/syncer"
-	"agentmux/internal/tui"
-	"agentmux/internal/updater"
+	"agentcfg/internal/broker"
+	"agentcfg/internal/config"
+	"agentcfg/internal/migrate"
+	"agentcfg/internal/pathutil"
+	"agentcfg/internal/syncer"
+	"agentcfg/internal/tui"
+	"agentcfg/internal/updater"
 )
 
 // Set at release build time: -ldflags '-X main.version=vX.Y.Z'.
@@ -29,28 +30,23 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "agentmux:", err)
+		fmt.Fprintln(os.Stderr, "agentcfg:", err)
 		os.Exit(1)
 	}
 }
 
 func run(ctx context.Context, args []string, input io.Reader, output, diagnostics io.Writer) error {
-	if len(args) == 0 {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		return tui.Run(ctx, home, input, output)
-	}
-	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		_, err := fmt.Fprintln(output, `agentmux — shared MCP processes and declarative skills
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		_, err := fmt.Fprintln(output, `agentcfg — shared MCP processes and declarative skills
 
-Usage: agentmux [command] [options]
+Usage: agentcfg [command] [options]
 
-  (no command) / ui     Open the Huh harness checkbox list directly
-  menu                  Open advanced Huh management menus
+  (no command) / help   Display this help (no configuration changes)
+  config                Open complete user-level Huh configuration
+  harnesses             Open the Huh harness checkbox list directly
 
-  init       Create empty canonical .agentmux files (never overwrite)
+  init       Create empty canonical .agentcfg files (never overwrite)
+  migrate    Preview legacy ~/.agentmux migration; --apply copies securely
   list       Show discovered MCP servers and skills
   validate   Validate canonical configuration and plugin discovery
   sync       Preview native harness changes; --apply writes them
@@ -62,9 +58,10 @@ Usage: agentmux [command] [options]
   daemon     Run the local IPC broker in the foreground
   version    Print version
 
-All commands use the current user's ~/.agentmux configuration.
-	Human-facing CLI commands use Huh forms in a TTY; --plain keeps script output.
-Use agentmux <command> --help for command-specific options.
+All commands use the current user's ~/.agentcfg configuration.
+Human-facing CLI commands use Huh forms in a TTY; --plain keeps script output.
+Existing ~/.agentmux data is never migrated or overwritten automatically.
+Use agentcfg <command> --help for command-specific options.
 No persistent web server or TCP listener is used. OAuth login may temporarily
 listen on a loopback callback address when explicitly invoked.
 Bidirectional sync is not implemented.`)
@@ -80,6 +77,11 @@ Bidirectional sync is not implemented.`)
 	if err != nil {
 		return err
 	}
+	if args[0] != "migrate" && args[0] != "update" {
+		if err := requireMigration(home); err != nil {
+			return err
+		}
+	}
 	root := &home
 	switch args[0] {
 	case "update":
@@ -93,27 +95,29 @@ Bidirectional sync is not implemented.`)
 		if result.AlreadyCurrent {
 			_, err = fmt.Fprintf(output, "No update needed (installed: %s, latest stable release: %s).\n", version, result.Version)
 		} else {
-			_, err = fmt.Fprintf(output, "Updated AgentMux to %s: %s\n", result.Version, result.Path)
+			_, err = fmt.Fprintf(output, "Updated agentcfg to %s: %s\n", result.Version, result.Path)
 		}
 		if result.BackupPath != "" {
-			fmt.Fprintf(diagnostics, "Previous executable remains in use; remove %s after exiting AgentMux.\n", result.BackupPath)
+			fmt.Fprintf(diagnostics, "Previous executable remains in use; remove %s after exiting agentcfg.\n", result.BackupPath)
 		}
 		if err == nil && !result.AlreadyCurrent {
-			_, err = fmt.Fprintln(output, "Existing broker processes keep running until stopped; restart them when convenient with 'agentmux stop'.")
+			_, err = fmt.Fprintln(output, "Existing broker processes keep running until stopped; restart them when convenient with 'agentcfg stop'.")
 		}
 		return err
 	case "auth":
 		return runAuth(ctx, home, args[1:], input, output, diagnostics)
-	case "ui", "tui", "harnesses":
+	case "harnesses":
 		if err := parse(flags, args[1:]); err != nil {
 			return helpResult(err)
 		}
 		return tui.Run(ctx, home, input, output)
-	case "menu":
+	case "config", "menu", "ui", "tui":
 		if err := parse(flags, args[1:]); err != nil {
 			return helpResult(err)
 		}
 		return tui.RunMenu(ctx, home, input, output)
+	case "migrate":
+		return migrateLegacy(flags, home, args[1:], output)
 	case "init":
 		return initialize(ctx, flags, root, args[1:], input, output)
 	case "sync":
@@ -142,8 +146,61 @@ Bidirectional sync is not implemented.`)
 		}
 		return inspectOrServe(ctx, args[0], *root, input, output, diagnostics, terminalPresentation(input, output, *plain), asJSON != nil && *asJSON, yes != nil && *yes)
 	default:
-		return fmt.Errorf("unknown command %q; run agentmux help", args[0])
+		return fmt.Errorf("unknown command %q; run agentcfg help", args[0])
 	}
+}
+
+// Do not silently start a second configuration while native adapters may
+// still point at an unmigrated legacy installation.
+func requireMigration(home string) error {
+	_, legacyErr := os.Lstat(filepath.Join(home, ".agentmux"))
+	_, currentErr := os.Lstat(filepath.Join(home, ".agentcfg"))
+	if legacyErr == nil && errors.Is(currentErr, os.ErrNotExist) {
+		return errors.New("legacy ~/.agentmux exists but ~/.agentcfg does not; preview 'agentcfg migrate' then use 'agentcfg migrate --apply' before configuring or syncing (nothing changed)")
+	}
+	if legacyErr != nil && !errors.Is(legacyErr, os.ErrNotExist) {
+		return legacyErr
+	}
+	if currentErr != nil && !errors.Is(currentErr, os.ErrNotExist) {
+		return currentErr
+	}
+	return nil
+}
+
+func migrateLegacy(flags *flag.FlagSet, home string, args []string, output io.Writer) error {
+	apply := flags.Bool("apply", false, "copy legacy sources securely to ~/.agentcfg (without removing ~/.agentmux)")
+	if err := parse(flags, args); err != nil {
+		return helpResult(err)
+	}
+	var (
+		report migrate.Report
+		err    error
+	)
+	if *apply {
+		report, err = migrate.Apply(home)
+	} else {
+		report, err = migrate.Preview(home)
+	}
+	if err != nil {
+		return err
+	}
+	action := "Preview only; nothing written."
+	if *apply {
+		action = "New canonical configuration copied and verified. Original kept intact."
+	}
+	fmt.Fprintf(output, "%s\nFrom: %s\nTo:   %s\n%d files, %d directories, %d bytes\n",
+		action, report.Legacy, report.Destination, report.Files, report.Directories, report.Bytes)
+	for index, path := range report.Paths {
+		if index >= 100 {
+			fmt.Fprintf(output, "  ... and %d additional paths (all validated before applying)\n", len(report.Paths)-index)
+			break
+		}
+		fmt.Fprintf(output, "  copy %s\n", path)
+	}
+	for _, warning := range report.Warnings {
+		fmt.Fprintf(output, "Note: %s\n", warning)
+	}
+	return nil
 }
 
 func parse(flags *flag.FlagSet, args []string) error {
@@ -193,7 +250,7 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 		return encoder.Encode(status)
 	case "stop":
 		if interactive && !yes {
-			confirmed, err := terminalConfirm(ctx, input, output, "Stop the AgentMux broker?", "Managed MCP processes will be closed. This does not alter user configuration.")
+			confirmed, err := terminalConfirm(ctx, input, output, "Stop the agentcfg broker?", "Managed MCP processes will be closed. This does not alter user configuration.")
 			if err != nil {
 				return err
 			}
@@ -205,7 +262,7 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 			return err
 		}
 		if interactive {
-			return terminalNote(ctx, input, output, "Broker stopped", "Shutdown requested for the active user's AgentMux broker.")
+			return terminalNote(ctx, input, output, "Broker stopped", "Shutdown requested for the active user's agentcfg broker.")
 		}
 		_, err := fmt.Fprintln(output, "Broker shutdown requested.")
 		return err
@@ -298,7 +355,7 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 	if err != nil {
 		return fmt.Errorf("init harness selection: %w", err)
 	}
-	agentDir := filepath.Join(abs, ".agentmux")
+	agentDir := filepath.Join(abs, ".agentcfg")
 	if err := ensureRealCanonicalDirectory(agentDir); err != nil {
 		return fmt.Errorf("init source directory: %w", err)
 	}
@@ -316,7 +373,7 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 		value any
 	}{
 		{"mcp.json", map[string]any{"mcpServers": map[string]any{}}},
-		{"agentmux.json", settings},
+		{"agentcfg.json", settings},
 	}
 	for _, source := range files {
 		path := filepath.Join(agentDir, source.name)
@@ -343,7 +400,7 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 	return nil
 }
 
-// A symlink/junction at ~/.agentmux must not redirect initialization into
+// A symlink/junction at ~/.agentcfg must not redirect initialization into
 // some other directory (including an open project). Only real directories are
 // acceptable. The caller validates its harness selection before creating any
 // source files.
@@ -368,7 +425,7 @@ func synchronize(ctx context.Context, flags *flag.FlagSet, root *string, args []
 	yes := flags.Bool("yes", false, "skip Huh confirmation for --apply")
 	scope := "user"
 	mode := flags.String("skill-mode", "auto", "auto (symlink, copy fallback), symlink, or copy")
-	binary := flags.String("binary", "", "absolute installed agentmux binary path (defaults to current executable)")
+	binary := flags.String("binary", "", "absolute installed agentcfg binary path (defaults to current executable)")
 	if err := parse(flags, args); err != nil {
 		return helpResult(err)
 	}

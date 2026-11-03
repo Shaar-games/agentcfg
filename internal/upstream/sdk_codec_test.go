@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"agentmux/internal/wire"
+	"agentcfg/internal/wire"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

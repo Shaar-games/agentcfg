@@ -29,7 +29,7 @@ func TestEncryptedStoreRoundTripAndNoPlaintext(t *testing.T) {
 	if _, err := store.Load(ctx, "account"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(store.home, ".agentmux")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(store.home, ".agentcfg")); !os.IsNotExist(err) {
 		t.Fatalf("read created a directory: %v", err)
 	}
 	secret := []byte("access-secret-and-refresh-secret")
@@ -115,7 +115,7 @@ func TestCiphertextIsBoundToIdentityAndAuthenticated(t *testing.T) {
 func TestCredentialStoreRejectsParentLinksAndJunctions(t *testing.T) {
 	store := testStore(t)
 	outside := t.TempDir()
-	path := filepath.Join(store.home, ".agentmux")
+	path := filepath.Join(store.home, ".agentcfg")
 	err := os.Symlink(outside, path)
 	if err != nil && runtime.GOOS == "windows" {
 		err = exec.Command("cmd", "/c", "mklink", "/J", path, outside).Run()
@@ -165,7 +165,7 @@ func TestStoreLockCoordinatesIndependentInstancesAndCancels(t *testing.T) {
 
 func TestExplicitEnvironmentKeyAndInvalidKey(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("AGENTMUX_OAUTH_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x47}, 32)))
+	t.Setenv("AGENTCFG_OAUTH_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x47}, 32)))
 	store, err := NewSystemStore(home)
 	if err != nil {
 		t.Fatal(err)
@@ -173,10 +173,10 @@ func TestExplicitEnvironmentKeyAndInvalidKey(t *testing.T) {
 	if store.(*fileStore).protector.Scheme() != "external-aes-gcm-v1" {
 		t.Fatal("explicit key ignored")
 	}
-	if _, err := os.Stat(filepath.Join(home, ".agentmux")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".agentcfg")); !os.IsNotExist(err) {
 		t.Fatalf("constructor created files: %v", err)
 	}
-	t.Setenv("AGENTMUX_OAUTH_KEY", "bad-key-do-not-echo")
+	t.Setenv("AGENTCFG_OAUTH_KEY", "bad-key-do-not-echo")
 	if _, err := NewSystemStore(home); err == nil || bytes.Contains([]byte(err.Error()), []byte("bad-key-do-not-echo")) {
 		t.Fatalf("invalid key not safely rejected: %v", err)
 	}

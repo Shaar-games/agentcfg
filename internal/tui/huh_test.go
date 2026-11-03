@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 // Huh's accessible numeric prompt constructs a new buffered reader for each
@@ -32,7 +32,7 @@ func TestHuhAccessibleAdvancedMenuExitIsReadOnly(t *testing.T) {
 	if err := RunMenu(context.Background(), root, strings.NewReader("8\n"), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"AgentMux", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Diagnostics", "synchronization", "Refresh", "Exit"} {
+	for _, text := range []string{"agentcfg", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Diagnostics", "synchronization", "Refresh", "Exit"} {
 		if !strings.Contains(rendered.String(), text) {
 			t.Fatalf("Huh main menu missing %q: %s", text, rendered.String())
 		}
@@ -163,7 +163,7 @@ func TestHuhHarnessMultiSelectAcceptsPreselectedValuesUnchanged(t *testing.T) {
 
 func TestHuhHarnessMultiSelectAccessibleOptIn(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("AGENTMUX_ACCESSIBLE", "1")
+	t.Setenv("AGENTCFG_ACCESSIBLE", "1")
 	root := settingsFixture(t)
 	putSettings(t, root, `{"harnesses":["codex"]}`)
 	var output bytes.Buffer
@@ -194,14 +194,14 @@ func TestHuhSkillMultiSelectAccessible(t *testing.T) {
 	if err != nil || !strings.Contains(string(updated), "harness: antigravity") {
 		t.Fatalf("Huh skill multi-select failed: %q (%v); output: %s", updated, err, output.String())
 	}
-	if _, err := os.Stat(filepath.Join(root, ".agentmux", "backups", "skills")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".agentcfg", "backups", "skills")); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestHuhWindowsPathsAndControlCharactersDisplaySafely(t *testing.T) {
-	value := safeHuhText("C:\\Users\\demo\\.agentmux\\skills\\review\x1b[2J\nNext")
-	if value != "C:/Users/demo/.agentmux/skills/review [2J\nNext" {
+	value := safeHuhText("C:\\Users\\demo\\.agentcfg\\skills\\review\x1b[2J\nNext")
+	if value != "C:/Users/demo/.agentcfg/skills/review [2J\nNext" {
 		t.Fatalf("unexpected terminal-safe text: %q", value)
 	}
 }

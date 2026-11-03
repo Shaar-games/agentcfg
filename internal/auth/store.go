@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"agentmux/internal/pathutil"
+	"agentcfg/internal/pathutil"
 	"github.com/gofrs/flock"
 )
 
@@ -61,16 +61,26 @@ type envelope struct {
 }
 
 // NewSystemStore uses per-user Windows DPAPI, or an explicitly supplied
-// AGENTMUX_OAUTH_KEY (base64 encoding of 32 random bytes). Other platforms without
+// AGENTCFG_OAUTH_KEY (base64 encoding of 32 random bytes). Other platforms without
 // that key return ErrSecureStoreUnavailable instead of writing plaintext. Construction and
 // missing-record reads do not create directories or access DPAPI.
 // An empty home uses os.UserHomeDir; tests should always provide a temp home.
 func NewSystemStore(home string) (Store, error) {
-	if value, exists := os.LookupEnv("AGENTMUX_OAUTH_KEY"); exists {
+	value, exists := os.LookupEnv("AGENTCFG_OAUTH_KEY")
+	legacy, legacyExists := os.LookupEnv("AGENTMUX_OAUTH_KEY")
+	if exists && legacyExists {
+		return nil, fmt.Errorf("both AGENTCFG_OAUTH_KEY and legacy AGENTMUX_OAUTH_KEY are set; select one without changing the encryption key")
+	}
+	if !exists && legacyExists {
+		// Existing installations may have sourced the key from their secret
+		// manager under its former name. Never silently switch encryption keys.
+		value, exists = legacy, true
+	}
+	if exists {
 		key, err := base64.StdEncoding.DecodeString(value)
 		if err != nil || len(key) != 32 {
 			clear(key)
-			return nil, fmt.Errorf("AGENTMUX_OAUTH_KEY must be base64 encoding of exactly 32 random bytes")
+			return nil, fmt.Errorf("OAuth key environment variable must be base64 encoding of exactly 32 random bytes")
 		}
 		defer clear(key)
 		return NewEncryptedFileStore(home, key)
@@ -111,7 +121,7 @@ func newFileStore(home string, p protector) (*fileStore, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("credential home must be an existing directory")
 	}
-	return &fileStore{home: home, dir: filepath.Join(home, ".agentmux", "credentials", "oauth"), protector: p}, nil
+	return &fileStore{home: home, dir: filepath.Join(home, ".agentcfg", "credentials", "oauth"), protector: p}, nil
 }
 
 func (s *fileStore) filename(key, suffix string) string {
@@ -299,7 +309,7 @@ func (s *fileStore) Lock(ctx context.Context, key string) (func() error, error) 
 
 func (s *fileStore) ensureDir(create bool) error {
 	path := s.home
-	for _, name := range []string{".agentmux", "credentials", "oauth"} {
+	for _, name := range []string{".agentcfg", "credentials", "oauth"} {
 		path = filepath.Join(path, name)
 		info, err := s.checkPath(path, true)
 		if err != nil {

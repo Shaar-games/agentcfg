@@ -14,8 +14,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"agentmux/internal/config"
-	"agentmux/internal/pathutil"
+	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 
 	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
@@ -78,7 +78,7 @@ func applySkillHarnessSelection(root string, selected config.Skill, desired map[
 	if err != nil {
 		return fmt.Errorf("load current skill configuration: %w", err)
 	}
-	agents := filepath.Join(current.Root, ".agentmux")
+	agents := filepath.Join(current.Root, ".agentcfg")
 	if err := requireRealDirectory(agents); err != nil {
 		return fmt.Errorf("source directory: %w", err)
 	}
@@ -152,7 +152,7 @@ func applySkillHarnessSelection(root string, selected config.Skill, desired map[
 		return err
 	}
 
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".agentmux-skill-*.tmp")
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".agentcfg-skill-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temporary SKILL.md: %w", err)
 	}
@@ -197,8 +197,8 @@ func checkedSkillSource(root string, skill config.Skill) (string, error) {
 		return "", err
 	}
 	components := strings.Split(filepath.ToSlash(relative), "/")
-	standalone := len(components) == 3 && components[0] == ".agentmux" && components[1] == "skills"
-	plugin := len(components) == 5 && components[0] == ".agentmux" && components[1] == "plugins" && components[3] == "skills"
+	standalone := len(components) == 3 && components[0] == ".agentcfg" && components[1] == "skills"
+	plugin := len(components) == 5 && components[0] == ".agentcfg" && components[1] == "plugins" && components[3] == "skills"
 	if !standalone && !plugin {
 		return "", fmt.Errorf("skill %q is outside canonical user skill/plugin sources; project edits are forbidden", skill.Name)
 	}

@@ -14,8 +14,8 @@ description = "Run Go static checks"
 run = "go vet ./..."
 
 [tasks.build]
-description = "Build the agentmux CLI into bin/"
-run = "go build -o ./bin/ ./cmd/agentmux"
+description = "Build the agentcfg CLI into bin/"
+run = "go build -o ./bin/ ./cmd/agentcfg"
 
 [tasks.check]
 description = "Run static checks and the test suite"

@@ -1,5 +1,5 @@
 // Package updater downloads a verified GitHub Release and replaces the
-// currently running AgentMux executable. It never reads or edits MCP settings.
+// currently running agentcfg executable. It never reads or edits MCP settings.
 package updater
 
 import (
@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	latestAPIURL    = "https://api.github.com/repos/Shaar-games/agentmux/releases/latest"
-	releaseBaseURL  = "https://github.com/Shaar-games/agentmux/releases/download"
+	latestAPIURL    = "https://api.github.com/repos/Shaar-games/agentcfg/releases/latest"
+	releaseBaseURL  = "https://github.com/Shaar-games/agentcfg/releases/download"
 	maxArchiveBytes = 256 << 20
 	maxBinaryBytes  = 128 << 20
 	maxManifestSize = 64 << 10
@@ -79,6 +79,11 @@ func Update(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("locate installed executable: %w", err)
 	}
+	// Rebranding cannot safely update an old executable in place: native MCP
+	// proxies may still depend on the old command name during migration.
+	if name := strings.ToLower(filepath.Base(executable)); name == "agentmux" || name == "agentmux.exe" {
+		return Result{}, errors.New("cannot replace a legacy agentmux executable with agentcfg; install agentcfg under its new name, then explicitly migrate")
+	}
 	info, err := os.Lstat(executable)
 	if err != nil || !info.Mode().IsRegular() {
 		return Result{}, fmt.Errorf("installed executable is not a regular file: %s: %v", executable, err)
@@ -109,7 +114,7 @@ func Update(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	downloadRoot, err := os.MkdirTemp("", "agentmux-update-")
+	downloadRoot, err := os.MkdirTemp("", "agentcfg-update-")
 	if err != nil {
 		return Result{}, err
 	}
@@ -127,7 +132,7 @@ func Update(ctx context.Context, options Options) (Result, error) {
 	if err := downloadArchive(ctx, client, downloadURL+asset, archivePath, expected); err != nil {
 		return Result{}, err
 	}
-	stage, err := os.CreateTemp(filepath.Dir(executable), ".agentmux-update-*"+filepath.Ext(executable))
+	stage, err := os.CreateTemp(filepath.Dir(executable), ".agentcfg-update-*"+filepath.Ext(executable))
 	if err != nil {
 		return Result{}, fmt.Errorf("stage executable beside installation: %w", err)
 	}
@@ -185,7 +190,7 @@ func stableVersionNotOlder(installed, latest string) bool {
 func findLatest(ctx context.Context, client *http.Client, apiURL string) (string, error) {
 	data, err := getSmall(ctx, client, apiURL, 1<<20)
 	if err != nil {
-		return "", fmt.Errorf("get latest AgentMux release: %w", err)
+		return "", fmt.Errorf("get latest agentcfg release: %w", err)
 	}
 	var release latestRelease
 	if err := json.Unmarshal(data, &release); err != nil {
@@ -204,13 +209,13 @@ func platformAsset() (archive, binary string, err error) {
 	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
 		return "", "", fmt.Errorf("unsupported CPU architecture: %s", runtime.GOARCH)
 	}
-	binary = "agentmux"
+	binary = "agentcfg"
 	switch runtime.GOOS {
 	case "windows":
-		binary = "agentmux.exe"
-		archive = "agentmux_windows_" + runtime.GOARCH + ".zip"
+		binary = "agentcfg.exe"
+		archive = "agentcfg_windows_" + runtime.GOARCH + ".zip"
 	case "darwin", "linux":
-		archive = "agentmux_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+		archive = "agentcfg_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
 	default:
 		return "", "", fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
@@ -222,7 +227,7 @@ func getSmall(ctx context.Context, client *http.Client, url string, limit int64)
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("User-Agent", "agentmux-updater")
+	request.Header.Set("User-Agent", "agentcfg-updater")
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
@@ -270,7 +275,7 @@ func downloadArchive(ctx context.Context, client *http.Client, url, path string,
 	if err != nil {
 		return err
 	}
-	request.Header.Set("User-Agent", "agentmux-updater")
+	request.Header.Set("User-Agent", "agentcfg-updater")
 	response, err := client.Do(request)
 	if err != nil {
 		return err
@@ -317,7 +322,7 @@ func unpackVerified(archivePath, filename string, output io.Writer) error {
 		}
 		defer z.Close()
 		if len(z.File) != 1 || z.File[0].Name != filename || !z.File[0].Mode().IsRegular() || z.File[0].UncompressedSize64 > maxBinaryBytes {
-			return errors.New("release ZIP must contain only a regular agentmux executable")
+			return errors.New("release ZIP must contain only a regular agentcfg executable")
 		}
 		reader, err := z.File[0].Open()
 		if err != nil {
@@ -342,7 +347,7 @@ func unpackVerified(archivePath, filename string, output io.Writer) error {
 		return err
 	}
 	if header.Name != filename || header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA || header.Size <= 0 || header.Size > maxBinaryBytes {
-		return errors.New("release tarball must start with a regular agentmux executable")
+		return errors.New("release tarball must start with a regular agentcfg executable")
 	}
 	if err := copyBounded(output, tarReader); err != nil {
 		return err

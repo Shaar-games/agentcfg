@@ -13,19 +13,19 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"agentmux/internal/config"
-	"agentmux/internal/pathutil"
+	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 
 	"github.com/gofrs/flock"
 )
 
 const maxSettingsBytes = 1 << 20
 
-func settingsFile(root string) string { return filepath.Join(root, ".agentmux", "agentmux.json") }
+func settingsFile(root string) string { return filepath.Join(root, ".agentcfg", "agentcfg.json") }
 
 // setHarnessEnabled changes the canonical user-scope harness selection. An
 // expected state check refuses stale edits, while a lock protects concurrent
-// AgentMux TUI writers. Other settings keys are retained verbatim as values.
+// agentcfg TUI writers. Other settings keys are retained verbatim as values.
 func setHarnessEnabled(root, harness string, enabled, expected bool) error {
 	valid := false
 	for _, info := range harnesses {
@@ -150,15 +150,15 @@ func setServerSharing(root, name, next, expected string) error {
 var errNoChange = errors.New("requested setting already has that value")
 
 // updateSettings performs a checked, backup-first atomic edit to the source
-// agentmux.json. It never creates or updates project/harness configuration.
+// agentcfg.json. It never creates or updates project/harness configuration.
 func updateSettings(root string, mutate func(*config.Config, map[string]json.RawMessage) error) error {
 	absolute, err := filepath.Abs(root)
 	if err != nil {
 		return err
 	}
-	agentDir := filepath.Join(absolute, ".agentmux")
+	agentDir := filepath.Join(absolute, ".agentcfg")
 	if err := os.MkdirAll(agentDir, 0o700); err != nil {
-		return fmt.Errorf("prepare agentmux settings directory: %w", err)
+		return fmt.Errorf("prepare agentcfg settings directory: %w", err)
 	}
 	info, err := os.Lstat(agentDir)
 	if err != nil {
@@ -220,7 +220,7 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 		return nil
 	}
 
-	// Do not overwrite user changes made during preparation; AgentMux writers
+	// Do not overwrite user changes made during preparation; agentcfg writers
 	// coordinate using this lock and uncoordinated edits are checked again.
 	latest, stillExists, err := readSettings(path)
 	if err != nil {
@@ -230,7 +230,7 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 		return errors.New("settings changed during edit; refresh before retrying")
 	}
 
-	temporary, err := os.CreateTemp(agentDir, ".agentmux-settings-*.tmp")
+	temporary, err := os.CreateTemp(agentDir, ".agentcfg-settings-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temporary settings: %w", err)
 	}

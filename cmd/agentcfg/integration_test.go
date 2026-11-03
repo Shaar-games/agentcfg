@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"agentmux/internal/broker"
-	"agentmux/internal/ipc"
-	"agentmux/internal/wire"
+	"agentcfg/internal/broker"
+	"agentcfg/internal/ipc"
+	"agentcfg/internal/wire"
 )
 
 var buildOnce sync.Once
@@ -36,12 +36,12 @@ func TestMain(m *testing.M) {
 func cliBinary(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "agentmux-cli-test-")
+		dir, err := os.MkdirTemp("", "agentcfg-cli-test-")
 		if err != nil {
 			buildError = err
 			return
 		}
-		testBinary = filepath.Join(dir, "agentmux")
+		testBinary = filepath.Join(dir, "agentcfg")
 		if runtime.GOOS == "windows" {
 			testBinary += ".exe"
 		}
@@ -59,10 +59,10 @@ func cliBinary(t *testing.T) string {
 // TestMCPFixture becomes a real stdio MCP subprocess only when explicitly
 // selected by the integration fixture. It never runs external services.
 func TestMCPFixture(t *testing.T) {
-	if os.Getenv("AGENTMUX_MCP_FIXTURE") != "1" {
+	if os.Getenv("AGENTCFG_MCP_FIXTURE") != "1" {
 		return
 	}
-	file, err := os.OpenFile(os.Getenv("AGENTMUX_START_LOG"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	file, err := os.OpenFile(os.Getenv("AGENTCFG_START_LOG"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		os.Exit(10)
 	}
@@ -76,7 +76,7 @@ func TestMCPFixture(t *testing.T) {
 		}
 		switch message.Method() {
 		case "initialize":
-			_ = writer.Write(wire.Result(message.ID(), map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "agentmux-test-fixture", "version": "1"}}))
+			_ = writer.Write(wire.Result(message.ID(), map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "agentcfg-test-fixture", "version": "1"}}))
 		case "tools/list":
 			_ = writer.Write(wire.Result(message.ID(), map[string]any{"tools": []any{}}))
 		case "tools/call":
@@ -99,21 +99,21 @@ func integrationRoot(t *testing.T, sharing, idle string) string {
 	root := t.TempDir()
 	t.Setenv("USERPROFILE", root)
 	t.Setenv("HOME", root)
-	if err := os.MkdirAll(filepath.Join(root, ".agentmux"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".agentcfg"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	document := map[string]any{"mcpServers": map[string]any{"fixture": map[string]any{"type": "stdio", "command": executable, "args": []string{"-test.run=^TestMCPFixture$"}, "env": map[string]string{"AGENTMUX_MCP_FIXTURE": "1", "AGENTMUX_START_LOG": filepath.Join(root, "starts.txt")}, "sharing": sharing}}}
+	document := map[string]any{"mcpServers": map[string]any{"fixture": map[string]any{"type": "stdio", "command": executable, "args": []string{"-test.run=^TestMCPFixture$"}, "env": map[string]string{"AGENTCFG_MCP_FIXTURE": "1", "AGENTCFG_START_LOG": filepath.Join(root, "starts.txt")}, "sharing": sharing}}}
 	data, _ := json.Marshal(document)
-	if err := os.WriteFile(filepath.Join(root, ".agentmux", "mcp.json"), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".agentcfg", "mcp.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	settings := map[string]any{"harnesses": []string{"cursor", "codex"}, "runtime": map[string]string{"idleTimeout": idle, "requestTimeout": "3s"}}
 	data, _ = json.Marshal(settings)
-	if err := os.WriteFile(filepath.Join(root, ".agentmux", "agentmux.json"), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".agentcfg", "agentcfg.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -330,7 +330,7 @@ func TestCLISharingModeTransitionKeepsExistingClients(t *testing.T) {
 	// Change only the global canonical settings; no project configuration exists
 	// or is touched. Existing clients keep their generation, new clients get
 	// the opted-in isolated backend.
-	settingsPath := filepath.Join(root, ".agentmux", "agentmux.json")
+	settingsPath := filepath.Join(root, ".agentcfg", "agentcfg.json")
 	original, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatal(err)
@@ -409,7 +409,7 @@ func TestInitDoesNotOverwriteCanonicalFiles(t *testing.T) {
 	if err := run(context.Background(), []string{"init"}, nil, &output, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, ".agentmux", "mcp.json")
+	path := filepath.Join(root, ".agentcfg", "mcp.json")
 	original := []byte(`{"mcpServers":{},"my-manual-content":true}`)
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)

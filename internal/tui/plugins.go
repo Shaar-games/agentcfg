@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 const pluginSchema = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
@@ -21,7 +21,7 @@ type pluginInfo struct {
 // discoverPlugins only inventories portable manifests from the user's source
 // root. Config.Load remains the authority for whether a component is usable.
 func discoverPlugins(root string, cfg *config.Config) []pluginInfo {
-	base := filepath.Join(root, ".agentmux", "plugins")
+	base := filepath.Join(root, ".agentcfg", "plugins")
 	entries, err := os.ReadDir(base)
 	if err != nil {
 		return nil

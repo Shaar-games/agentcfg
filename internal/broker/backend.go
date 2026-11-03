@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"agentmux/internal/config"
-	"agentmux/internal/upstream"
-	"agentmux/internal/wire"
+	"agentcfg/internal/config"
+	"agentcfg/internal/upstream"
+	"agentcfg/internal/wire"
 )
 
 const maxPendingRequests = 1024
@@ -309,7 +309,7 @@ func (b *backend) initializeUpstream(message wire.Message) (wire.Message, error)
 	}
 	// A shared upstream has no single client to own roots, sampling or elicitation.
 	params["capabilities"] = wire.Raw(map[string]any{})
-	params["clientInfo"] = wire.Raw(map[string]string{"name": "agentmux", "version": "0.1.0"})
+	params["clientInfo"] = wire.Raw(map[string]string{"name": "agentcfg", "version": "0.1.0"})
 	request["params"] = wire.Raw(params)
 	reply := make(chan wire.Message, 1)
 	if _, err := b.forward(nil, request, reply); err != nil {
@@ -350,7 +350,7 @@ func hasTaskRequest(message wire.Message) bool {
 
 func (b *backend) forward(owner *peer, message wire.Message, reply chan wire.Message) (*pending, error) {
 	request := &pending{owner: owner, originalID: append(json.RawMessage(nil), message.ID()...),
-		upstreamID: wire.Raw(fmt.Sprintf("agentmux-%d", nextRequest.Add(1))),
+		upstreamID: wire.Raw(fmt.Sprintf("agentcfg-%d", nextRequest.Add(1))),
 		deadline:   time.Now().Add(b.timeout), reply: reply}
 	forwarded := message.Clone()
 	forwarded["id"] = request.upstreamID
@@ -390,7 +390,7 @@ func remapProgress(message wire.Message, request *pending) {
 		return
 	}
 	request.originalToken = meta["progressToken"]
-	request.upstreamToken = wire.Raw(fmt.Sprintf("agentmux-progress-%d", nextRequest.Add(1)))
+	request.upstreamToken = wire.Raw(fmt.Sprintf("agentcfg-progress-%d", nextRequest.Add(1)))
 	meta["progressToken"] = request.upstreamToken
 	params["_meta"] = wire.Raw(meta)
 	message["params"] = wire.Raw(params)
@@ -437,7 +437,7 @@ func (b *backend) routeFrom(message wire.Message, parentID json.RawMessage) {
 	}
 	if method := message.Method(); method != "" {
 		if message.HasID() {
-			response := wire.Error(message.ID(), -32601, "agentmux shared mode has no owning client; use sharing=isolated for client callbacks")
+			response := wire.Error(message.ID(), -32601, "agentcfg shared mode has no owning client; use sharing=isolated for client callbacks")
 			if method == "ping" {
 				response = wire.Result(message.ID(), map[string]any{})
 			}
@@ -567,6 +567,6 @@ func (b *backend) expire(now time.Time) {
 	b.mu.Unlock()
 	for _, request := range expired {
 		b.deliver(request, wire.Error(request.originalID, -32001, "MCP request timed out; the operation may already have run and is not retried"))
-		b.cancelRequest(request, "agentmux request timeout")
+		b.cancelRequest(request, "agentcfg request timeout")
 	}
 }

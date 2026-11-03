@@ -66,6 +66,8 @@ func (dpapiProtector) Open(identity string, encrypted []byte) ([]byte, error) {
 // UI_FORBIDDEN prevents an unexpected credential prompt. LOCAL_MACHINE is
 // deliberately absent: another account must not decrypt these credentials.
 func dpapiKey(input []byte, identity string, decrypt bool) ([]byte, error) {
+	// Domain stability is required to decrypt existing DPAPI-protected records
+	// moved unchanged from ~/.agentmux to ~/.agentcfg.
 	entropy := sha256.Sum256([]byte("agentmux.oauth.dpapi.v1\x00" + identity))
 	in := windows.DataBlob{Size: uint32(len(input)), Data: &input[0]}
 	extra := windows.DataBlob{Size: uint32(len(entropy)), Data: &entropy[0]}
@@ -75,7 +77,7 @@ func dpapiKey(input []byte, identity string, decrypt bool) ([]byte, error) {
 	if decrypt {
 		err = windows.CryptUnprotectData(&in, nil, &extra, 0, nil, uiForbidden, &out)
 	} else {
-		name, _ := windows.UTF16PtrFromString("agentmux OAuth credential key")
+		name, _ := windows.UTF16PtrFromString("agentcfg OAuth credential key")
 		err = windows.CryptProtectData(&in, name, &extra, 0, nil, uiForbidden, &out)
 	}
 	runtime.KeepAlive(input)

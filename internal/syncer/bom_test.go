@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"agentmux/internal/config"
+	"agentcfg/internal/config"
 )
 
 func TestPowerShellBOMNativeJSONPreservesUnmanagedContent(t *testing.T) {
@@ -23,7 +23,7 @@ func TestPowerShellBOMNativeJSONPreservesUnmanagedContent(t *testing.T) {
 	cfg := &config.Config{Root: root, Settings: config.Settings{Harnesses: []string{"cursor"}}, Servers: map[string]config.Server{
 		"demo": {Name: "demo", Type: "stdio", Command: "node", Sharing: "shared"},
 	}}
-	plan, err := BuildPlan(cfg, Options{Root: root, Home: root, Scope: "user", Binary: filepath.Join(root, "agentmux.exe")})
+	plan, err := BuildPlan(cfg, Options{Root: root, Home: root, Scope: "user", Binary: filepath.Join(root, "agentcfg.exe")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,12 +38,12 @@ func TestPowerShellBOMNativeJSONPreservesUnmanagedContent(t *testing.T) {
 	if err != nil || !bytes.HasPrefix(edited, []byte{0xef, 0xbb, 0xbf}) || !bytes.Contains(edited, []byte("mine")) || !bytes.Contains(edited, []byte("keep")) || !bytes.Contains(edited, []byte("demo")) {
 		t.Fatalf("BOM or user settings not preserved: %q (%v)", edited, err)
 	}
-	again, err := BuildPlan(cfg, Options{Root: root, Home: root, Scope: "user", Binary: filepath.Join(root, "agentmux.exe")})
+	again, err := BuildPlan(cfg, Options{Root: root, Home: root, Scope: "user", Binary: filepath.Join(root, "agentcfg.exe")})
 	if err != nil || len(again.Changes) != 0 {
 		t.Fatalf("sync not idempotent with BOM: %+v (%v)", again, err)
 	}
 	cfg.Settings.Harnesses = []string{}
-	prune, err := BuildPlan(cfg, Options{Root: root, Home: root, Scope: "user", Binary: filepath.Join(root, "agentmux.exe")})
+	prune, err := BuildPlan(cfg, Options{Root: root, Home: root, Scope: "user", Binary: filepath.Join(root, "agentcfg.exe")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestPowerShellBOMCodexTOMLPreservesUserSettings(t *testing.T) {
 	cfg := &config.Config{Root: root, Settings: config.Settings{Harnesses: []string{"codex"}}, Servers: map[string]config.Server{
 		"demo": {Name: "demo", Type: "stdio", Command: "node", Sharing: "shared"},
 	}}
-	opts := Options{Root: root, Home: root, Scope: "user", Binary: filepath.Join(root, "agentmux.exe")}
+	opts := Options{Root: root, Home: root, Scope: "user", Binary: filepath.Join(root, "agentcfg.exe")}
 	plan, err := BuildPlan(cfg, opts)
 	if err != nil {
 		t.Fatal(err)
