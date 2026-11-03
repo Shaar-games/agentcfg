@@ -72,29 +72,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import struct
-          import subprocess
-          # Baseline at v0.4.2: config 7.36s, inventory 4.04s.
-          # The README GIFs must run at least twice as long as before.
-          minimum_duration = {"agentcfg-config.gif": 14.72, "agentcfg-list.gif": 8.08}
-          for name in ("agentcfg-config.gif", "agentcfg-list.gif"):
-              path = Path("docs/demo") / name
-              data = path.read_bytes()
-              if not data.startswith((b"GIF89a", b"GIF87a")):
-                  raise SystemExit(f"{name}: invalid GIF header")
-              width, height = struct.unpack_from("<HH", data, 6)
-              if width < 600 or height < 300 or not (20_000 < len(data) < 15_000_000):
-                  raise SystemExit(f"{name}: invalid dimensions or file size")
-              duration = float(subprocess.check_output(
-                  ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                   "-of", "default=nokey=1:noprint_wrappers=1", str(path)],
-                  text=True).strip())
-              if duration < minimum_duration[name]:
-                  raise SystemExit(f"{name}: {duration:.2f}s is not >=2x the original demo")
-              print(f"{name}: {width}x{height}, {duration:.2f}s, {len(data):,} bytes")
-          PY
+          python3 docs/demo/check_gifs.py
 
       - uses: actions/upload-artifact@v4
         with:
