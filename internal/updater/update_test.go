@@ -180,7 +180,12 @@ func TestSelfUpdateVerifiedReplacementAndFailurePreservation(t *testing.T) {
 				t.Fatal("release assets were downloaded unexpectedly")
 			}
 			if tc.name == "update" {
-				if result.Version != newVersion || result.Path != installed || result.AlreadyCurrent {
+				actualInfo, actualErr := os.Stat(result.Path)
+				installedInfo, installedErr := os.Stat(installed)
+				if actualErr != nil || installedErr != nil {
+					t.Fatalf("updated file missing: %v, %v", actualErr, installedErr)
+				}
+				if result.Version != newVersion || result.AlreadyCurrent || !os.SameFile(actualInfo, installedInfo) {
 					t.Fatalf("update result = %+v", result)
 				}
 				if err := verifyVersion(context.Background(), installed, newVersion); err != nil {
