@@ -56,21 +56,32 @@ func exchange(connection net.Conn, request wire.Message) (*wire.Reader, wire.Mes
 }
 
 // GetStatus never starts a broker. A missing endpoint is reported as stopped.
+// An idle broker can close its IPC listener between Dial and the status reply,
+// especially on Windows named pipes. Only a transport-disconnect error is
+// retried: malformed responses and explicit broker errors must remain visible.
 func GetStatus(ctx context.Context, root string) (Status, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	connection, err := open(ctx, root)
-	if err != nil {
-		return Status{Backends: []BackendStatus{}}, nil
+	for attempt := 0; attempt < 3; attempt++ {
+		connection, err := open(ctx, root)
+		if err != nil {
+			return Status{Backends: []BackendStatus{}}, nil
+		}
+		_, response, err := exchange(connection, hello("status"))
+		_ = connection.Close()
+		if err != nil {
+			if attempt < 2 && ctx.Err() == nil && statusConnectionClosed(err) {
+				// The broker may have just stopped: retrying Dial will report a
+				// missing endpoint as stopped, or reach a replacement broker.
+				continue
+			}
+			return Status{}, err
+		}
+		var status Status
+		err = json.Unmarshal(response["status"], &status)
+		return status, err
 	}
-	defer connection.Close()
-	_, response, err := exchange(connection, hello("status"))
-	if err != nil {
-		return Status{}, err
-	}
-	var status Status
-	err = json.Unmarshal(response["status"], &status)
-	return status, err
+	return Status{}, errors.New("status probe retry limit reached")
 }
 
 // Stop requests shutdown of this source root only; unrelated brokers survive.

@@ -105,6 +105,26 @@ serveur MCP. Ces résultats locaux ne valent ni validation des applications
 réelles ni preuve de succès d'une CI sur le nouveau commit : ces contrôles
 externes doivent être examinés séparément après publication du code.
 
+## Incident de CI au lancement du tag `v0.2.2`
+
+Le [workflow CI `v0.2.2` (41550051516)](https://github.com/Shaar-games/agentmux/actions/runs/41550051516)
+a exposé une fermeture concurrente du pipe Windows pendant
+`TestCLIIdleBrokerStopsAutomatically` (`The pipe is being closed`). La même
+révision avait réussi la [CI `main` (41549656788)](https://github.com/Shaar-games/agentmux/actions/runs/41549656788)
+et le [workflow de release (41550051505)](https://github.com/Shaar-games/agentmux/actions/runs/41550051505),
+y compris la prévalidation sur trois OS et les tests d'installation. La CI du
+tag elle-même est **en échec**, et ne doit pas être représentée comme verte.
+
+Lors d'un arrêt pour inactivité, `GetStatus` peut réussir la connexion au
+broker juste avant la fermeture de son listener puis échouer en lisant la
+réponse. Le traitement réessaie maintenant uniquement les erreurs de
+déconnexion IPC reconnues, avec une borne stricte de tentatives : si le broker
+n'est plus joignable, le statut est « arrêté ». Les erreurs de protocole et
+les refus explicites restent visibles. Les nouveaux tests simulent la fermeture
+pendant la requête de statut, le refus protocolaire et l'erreur de pipe Windows
+observée. Les artefacts `v0.2.2` restent immuables ; cette correction ne les
+modifie pas.
+
 ## Portée et limites
 
 Les scénarios utilisent des clients de test et des fichiers temporaires. Les

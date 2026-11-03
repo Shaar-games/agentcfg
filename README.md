@@ -70,7 +70,7 @@ irm https://raw.githubusercontent.com/Shaar-games/agentmux/main/install.ps1 | ie
 
 The installer places a single executable in `~/.local/bin/agentmux` (`agentmux.exe` on Windows). No source checkout, compiler or persistent build directory is created. Add `~/.local/bin` to your `PATH` if necessary. Available release targets are Linux, macOS and Windows on AMD64 and ARM64 (where the OS supports the architecture). The scripts require `curl` and `tar` plus `sha256sum` or `shasum` on Unix; Windows PowerShell provides its own downloader, checksum and ZIP extraction.
 
-The scripts **do not modify your harness configurations**. They refuse to overwrite an existing executable, validate SHA-256 checksums, and run a post-install binary smoke test. Review the remote scripts before executing them; these one-liners follow the repository's `main` branch. Set `AGENTMUX_VERSION=v0.2.1` to install a specific published release, or `AGENTMUX_BIN_DIR` for another executable directory. A checksum fetched from the same release prevents accidental corruption but is not a substitute for a cryptographically signed provenance attestation.
+The scripts **do not modify your harness configurations**. They refuse to overwrite an existing executable, validate SHA-256 checksums, and run a post-install binary smoke test. Review the remote scripts before executing them; these one-liners follow the repository's `main` branch. Set `AGENTMUX_VERSION` to an existing published tag (for example, `v0.2.2`) to pin a release, or `AGENTMUX_BIN_DIR` for another executable directory. A checksum fetched from the same release prevents accidental corruption but is not a substitute for a cryptographically signed provenance attestation.
 
 ## Quick start
 
