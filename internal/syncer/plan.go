@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 )
 
 type Options struct {
@@ -94,6 +95,23 @@ func normalizeOptions(c *config.Config, opts Options) (Options, error) {
 	}
 	if opts.Home, err = filepath.Abs(opts.Home); err != nil {
 		return opts, err
+	}
+	if opts.AdoptExisting {
+		// Do not follow a symlink or junction at the selected home itself.
+		// System-provided aliases in a *parent* path are allowed, but only
+		// after both roots have been proven to be real final directories.
+		for _, path := range []string{opts.Home, opts.Root} {
+			info, err := os.Lstat(path)
+			if err != nil || !info.IsDir() || redirected(info) {
+				return opts, errors.New("native adoption requires real user-home directories (linked roots are refused)")
+			}
+		}
+		if opts.Home, err = pathutil.Resolve(opts.Home); err != nil {
+			return opts, err
+		}
+		if opts.Root, err = pathutil.Resolve(opts.Root); err != nil {
+			return opts, err
+		}
 	}
 	if opts.Binary == "" {
 		opts.Binary, err = os.Executable()

@@ -3,9 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"agentcfg/internal/bootstrap"
+	"agentcfg/internal/pathutil"
 	"agentcfg/internal/syncer"
 )
 
@@ -20,6 +23,22 @@ func initAdoptionProofs(inventory *bootstrap.Plan, selectedServers map[string]ma
 	}
 	if err := inventory.Revalidate(); err != nil {
 		return nil, nil, fmt.Errorf("native discovery changed before adoption preview: %w", err)
+	}
+	physicalHome, err := pathutil.Resolve(inventory.Home)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The scanner displays the caller's native spelling (/var on macOS), but
+	// BuildPlan uses config.Load's physically resolved canonical root. Preserve
+	// the *relative* native entry path, not a followed final symlink, when
+	// translating an exact scanner proof to that rooted namespace.
+	physicalOrigin := func(source string) (string, error) {
+		relative, err := filepath.Rel(inventory.Home, source)
+		if err != nil || relative == ".." || filepath.IsAbs(relative) ||
+			strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("native proof source escapes discovery home: %s", source)
+		}
+		return filepath.Join(physicalHome, relative), nil
 	}
 	var mcp []syncer.MCPAdoption
 	var skills []syncer.SkillAdoption
@@ -45,8 +64,12 @@ func initAdoptionProofs(inventory *bootstrap.Plan, selectedServers map[string]ma
 				return nil, nil, errors.New("duplicate native MCP adoption origin")
 			}
 			seenMCP[key] = true
+			physical, err := physicalOrigin(origin.Source)
+			if err != nil {
+				return nil, nil, err
+			}
 			mcp = append(mcp, syncer.MCPAdoption{
-				Harness: origin.Harness, Path: origin.Source,
+				Harness: origin.Harness, Path: physical,
 				Name: candidate.Name, CanonicalName: candidate.Name,
 				FileSHA256: hash, CanonicalSHA256: candidate.CanonicalSHA256,
 			})
@@ -78,8 +101,12 @@ func initAdoptionProofs(inventory *bootstrap.Plan, selectedServers map[string]ma
 				return nil, nil, errors.New("duplicate native skill adoption origin")
 			}
 			seenSkills[key] = true
+			physical, err := physicalOrigin(origin.Source)
+			if err != nil {
+				return nil, nil, err
+			}
 			skills = append(skills, syncer.SkillAdoption{
-				Harness: origin.Harness, Path: origin.Source,
+				Harness: origin.Harness, Path: physical,
 				CanonicalName: candidate.Name, TreeSHA256: candidate.TreeSHA256,
 			})
 		}
