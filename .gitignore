@@ -1,5 +1,6 @@
 /bin/
 /dist/
+/.demo/
 /.agentcfg/
 /coverage.out
 *.test

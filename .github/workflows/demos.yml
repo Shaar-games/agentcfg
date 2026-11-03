@@ -1,0 +1,113 @@
+name: Record CLI GIFs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/demos.yml'
+      - 'README.md'
+      - 'cmd/agentcfg/**'
+      - 'internal/tui/**'
+      - 'internal/config/**'
+      - 'docs/demo/**'
+      - '!docs/demo/*.gif'
+  pull_request:
+    paths:
+      - '.github/workflows/demos.yml'
+      - 'cmd/agentcfg/**'
+      - 'internal/tui/**'
+      - 'internal/config/**'
+      - 'docs/demo/**'
+      - '!docs/demo/*.gif'
+  workflow_dispatch:
+
+permissions:
+  contents: write # Only the checked GIF files are committed on main.
+
+concurrency:
+  group: cli-gifs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  record:
+    name: Build and record real CLI sessions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build app and prepare synthetic community fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .demo/bin
+          CGO_ENABLED=0 go build -trimpath -o .demo/bin/agentcfg ./cmd/agentcfg
+          bash docs/demo/prepare.sh
+          HOME="$PWD/.demo/home" .demo/bin/agentcfg validate --plain
+          HOME="$PWD/.demo/home" .demo/bin/agentcfg mcps --plain | grep -F 'context7'
+          HOME="$PWD/.demo/home" .demo/bin/agentcfg skills --plain | grep -F 'react-best-practices'
+
+      - name: Render terminal demos with VHS
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull ghcr.io/charmbracelet/vhs:latest
+          for tape in docs/demo/agentcfg-config.tape docs/demo/agentcfg-list.tape; do
+            # The container has no external network. The application only
+            # reads copied fixture definitions: no MCP or skill is executed.
+            docker run --rm --network none -e VHS_HOST=127.0.0.1 \
+              -v "$PWD:/vhs" ghcr.io/charmbracelet/vhs:latest "$tape"
+          done
+
+      - name: Validate generated images
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          for name in ("agentcfg-config.gif", "agentcfg-list.gif"):
+              path = Path("docs/demo") / name
+              data = path.read_bytes()
+              if not data.startswith((b"GIF89a", b"GIF87a")):
+                  raise SystemExit(f"{name}: invalid GIF header")
+              width, height = struct.unpack_from("<HH", data, 6)
+              if width < 600 or height < 300 or not (20_000 < len(data) < 15_000_000):
+                  raise SystemExit(f"{name}: invalid dimensions or file size")
+              print(f"{name}: {width}x{height}, {len(data):,} bytes")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentcfg-readme-gifs
+          path: docs/demo/*.gif
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish updated GIFs to main
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Refuse to publish if a human committed new code while VHS ran.
+          git fetch origin main
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+            echo "main changed while rendering; rerun the recording workflow" >&2
+            exit 1
+          fi
+          git add -- docs/demo/agentcfg-config.gif docs/demo/agentcfg-list.gif
+          if git diff --cached --quiet; then
+            echo "GIFs already match the recorded UI."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs(demo): refresh generated CLI GIFs [skip ci]"
+          git push origin HEAD:main

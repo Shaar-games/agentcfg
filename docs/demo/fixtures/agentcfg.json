@@ -1,0 +1,7 @@
+{
+  "harnesses": ["claude-code", "codex", "cursor"],
+  "runtime": {
+    "idleTimeout": "5m",
+    "requestTimeout": "5m"
+  }
+}

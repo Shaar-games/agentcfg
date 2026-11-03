@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "context7": {
+      "type": "streamable-http",
+      "url": "https://mcp.context7.com/mcp",
+      "sharing": "shared",
+      "harnesses": ["claude-code", "codex", "cursor"]
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"],
+      "sharing": "isolated",
+      "harnesses": ["codex", "cursor"]
+    }
+  }
+}
