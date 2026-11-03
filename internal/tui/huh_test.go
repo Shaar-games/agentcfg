@@ -67,6 +67,70 @@ func TestHuhHarnessMultiSelectAccessible(t *testing.T) {
 	}
 }
 
+func TestHuhHarnessMultiSelectAllowsEmptySelection(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex"]}`)
+	var output bytes.Buffer
+	session := interfaceSession{
+		ctx: context.Background(), root: root,
+		in: terminalByteReader{strings.NewReader("2\n0\n")}, out: &output,
+	}
+	if err := session.configureHarnesses(); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Settings.Harnesses == nil || len(cfg.Settings.Harnesses) != 0 {
+		t.Fatalf("empty Huh selection must disable every harness: %v; output: %s", cfg.Settings.Harnesses, output.String())
+	}
+}
+
+func TestHuhHarnessMultiSelectAcceptsPreselectedValuesUnchanged(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex","cursor"]}`)
+	before, err := os.ReadFile(settingsFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	session := interfaceSession{
+		ctx: context.Background(), root: root,
+		in: terminalByteReader{strings.NewReader("0\n")}, out: &output,
+	}
+	if err := session.configureHarnesses(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(settingsFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("accepting default selections rewrote config: before=%s after=%s", before, after)
+	}
+}
+
+func TestHuhHarnessMultiSelectAccessibleOptIn(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("AGENTMUX_ACCESSIBLE", "1")
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex"]}`)
+	var output bytes.Buffer
+	session := interfaceSession{
+		ctx: context.Background(), root: root,
+		in: terminalByteReader{strings.NewReader("0\n")}, out: &output,
+	}
+	if err := session.configureHarnesses(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Select up to 6 options") {
+		t.Fatalf("explicit accessible opt-in did not render the numbered selector: %s", output.String())
+	}
+}
+
 func TestHuhSkillMultiSelectAccessible(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	root, path, _ := skillSourceFixture(t, "---\nname: review\ndescription: Skill test\nmetadata:\n  harness: codex, antigravity\n---\n# Keep\n")

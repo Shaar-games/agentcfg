@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"agentmux/internal/syncer"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/x/term"
 )
 
 type harnessInfo struct {
@@ -46,8 +48,21 @@ type interfaceSession struct {
 }
 
 func (s interfaceSession) form(fields ...huh.Field) error {
-	return huh.NewForm(huh.NewGroup(fields...)).
-		WithInput(s.in).WithOutput(s.out).RunWithContext(s.ctx)
+	form := huh.NewForm(huh.NewGroup(fields...)).
+		WithInput(s.in).WithOutput(s.out)
+	// Huh switches to a numbered accessible prompt when TERM=dumb. Windows
+	// consoles can still render the native checkbox UI in that environment;
+	// only override the fallback when both streams are real terminals.
+	if os.Getenv("AGENTMUX_ACCESSIBLE") == "1" {
+		form.WithAccessible(true)
+	} else if runtime.GOOS == "windows" {
+		in, inOK := s.in.(*os.File)
+		out, outOK := s.out.(*os.File)
+		if inOK && outOK && term.IsTerminal(in.Fd()) && term.IsTerminal(out.Fd()) {
+			form.WithAccessible(false)
+		}
+	}
+	return form.RunWithContext(s.ctx)
 }
 
 func (s interfaceSession) selectAction(title, description string, choices ...huh.Option[string]) (string, error) {
@@ -162,10 +177,10 @@ func (s interfaceSession) configureHarnesses() error {
 		choices = append(choices, huh.NewOption(h.Label, h.ID).
 			Selected(slices.Contains(cfg.Settings.Harnesses, h.ID)))
 	}
-	selected := append([]string(nil), cfg.Settings.Harnesses...)
+	var selected []string
 	err = s.form(huh.NewMultiSelect[string]().
 		Title("Harness availability").
-		Description("Space selects/deselects; Enter saves all choices. Esc returns without changes. Native harness settings are applied on sync.").
+		Description("Space toggles, Enter saves, Ctrl+C cancels. Run sync to apply changes to native harness settings.").
 		Options(choices...).
 		Value(&selected))
 	if isCancelled(err) {
@@ -180,7 +195,7 @@ func (s interfaceSession) configureHarnesses() error {
 		}
 		return err
 	}
-	return s.note("Harnesses saved", "Harness availability updated. Run synchronization to update native harness configuration.")
+	return nil
 }
 
 func (s interfaceSession) configureMCP() error {
@@ -303,7 +318,7 @@ func (s interfaceSession) configureSkill(name string) error {
 		return fmt.Errorf("skill %q no longer exists; refresh", name)
 	}
 	choices := make([]huh.Option[string], 0, len(harnesses))
-	enabled := make([]string, 0, len(harnesses))
+	var enabled []string
 	for _, h := range harnesses {
 		label := h.Label
 		if !h.UserScopeEnabled {
@@ -311,13 +326,10 @@ func (s interfaceSession) configureSkill(name string) error {
 		}
 		active := config.Allows(selected.Harnesses, h.ID)
 		choices = append(choices, huh.NewOption(label, h.ID).Selected(active))
-		if active {
-			enabled = append(enabled, h.ID)
-		}
 	}
 	err = s.form(huh.NewMultiSelect[string]().
 		Title("Skill availability: " + safeHuhText(name)).
-		Description("Space selects/deselects, Enter saves all, Esc cancels. Empty selection writes metadata.harness: none. Global harness selection still controls sync.").
+		Description("Space toggles, Enter saves, Ctrl+C cancels. No selection means metadata.harness: none.").
 		Options(choices...).
 		Value(&enabled))
 	if isCancelled(err) {
@@ -332,7 +344,7 @@ func (s interfaceSession) configureSkill(name string) error {
 		}
 		return err
 	}
-	return s.note("Skill availability saved", "Updated only the source skill's metadata.harness. Native skill files are refreshed on synchronization.")
+	return nil
 }
 
 func (s interfaceSession) showPlugins() error {

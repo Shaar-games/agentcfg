@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -25,10 +26,17 @@ func terminalPresentation(input io.Reader, output io.Writer, plain bool) bool {
 }
 
 func terminalForm(ctx context.Context, input io.Reader, output io.Writer, fields ...huh.Field) error {
-	return huh.NewForm(huh.NewGroup(fields...)).
+	form := huh.NewForm(huh.NewGroup(fields...)).
 		WithInput(input).
-		WithOutput(output).
-		RunWithContext(ctx)
+		WithOutput(output)
+	// On Windows, a genuine interactive console can support Huh even if TERM
+	// is incorrectly set to dumb. Preserve numbered prompts for non-terminals.
+	if os.Getenv("AGENTMUX_ACCESSIBLE") == "1" {
+		form.WithAccessible(true)
+	} else if runtime.GOOS == "windows" && terminalPresentation(input, output, false) {
+		form.WithAccessible(false)
+	}
+	return form.RunWithContext(ctx)
 }
 
 func terminalNote(ctx context.Context, input io.Reader, output io.Writer, title, body string) error {
@@ -61,7 +69,7 @@ func terminalHarnessSelection(ctx context.Context, input io.Reader, output io.Wr
 		{"Gemini CLI", "gemini"},
 		{"Google Antigravity", "antigravity"},
 	}
-	selected := append([]string(nil), initial...)
+	var selected []string
 	choices := make([]huh.Option[string], 0, len(options))
 	for _, h := range options {
 		active := false
