@@ -48,5 +48,6 @@ Sleep 1800 ms
 # Show the same simulated MCP configuration in the CLI's read-only mode.
 Type "agentcfg mcps --plain"
 Enter
-Wait+Screen /playwright/
-Sleep 2500 ms
+# The last line may be below the visible terminal viewport after Huh exits;
+# do not wait for off-screen text just to finish the recording.
+Sleep 4000 ms
