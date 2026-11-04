@@ -27,7 +27,7 @@ func RunList(ctx context.Context, root string, input io.Reader, output io.Writer
 			return err
 		}
 		choices := overviewNavigationOptions(cfg, len(discoverPlugins(root, cfg)))
-		category, err := s.selectAction("agentcfg  ·  Inventory", "↑↓ navigate, Enter opens, Ctrl+C exits", choices...)
+		category, err := s.selectAction("agentcfg  ·  Inventory", "", choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -69,9 +69,9 @@ func (s interfaceSession) listHarnesses(cfg *config.Config) error {
 		rows = append(rows, navigationStatus{title: h.Label, detail: state, id: h.ID})
 	}
 	choices := statusNavigationOptions(rows)
-	choices = append(choices, huh.NewOption("Back to inventory", "back"))
+	choices = append(choices, huh.NewOption("Back", "back"))
 	for {
-		choice, err := s.selectAction("Harnesses", "↑↓ navigate, Enter views native paths", choices...)
+		choice, err := s.selectAction("Harnesses", "User-level MCP and skill locations.", choices...)
 		if isCancelled(err) || choice == "back" || choice == "" {
 			return nil
 		}
@@ -109,12 +109,12 @@ func (s interfaceSession) listMCP(cfg *config.Config) error {
 	rows := make([]navigationStatus, 0, len(names))
 	for _, name := range names {
 		server := cfg.Servers[name]
-		rows = append(rows, navigationStatus{title: safeHuhText(name), detail: server.Type + "  ·  " + sharing(server), id: navigationItemValue(name)})
+		rows = append(rows, navigationStatus{title: safeHuhText(name), columns: []string{server.Type, sharing(server)}, id: navigationItemValue(name)})
 	}
 	choices := statusNavigationOptions(rows)
-	choices = append(choices, huh.NewOption("Back to inventory", "back"))
+	choices = append(choices, huh.NewOption("Back", "back"))
 	for {
-		choice, err := s.selectAction("MCP servers", "↑↓ navigate, Enter views details", choices...)
+		choice, err := s.selectAction("MCP servers", "Transport and sharing mode for each MCP server.", choices...)
 		if isCancelled(err) || choice == "back" || choice == "" {
 			return nil
 		}
@@ -156,7 +156,7 @@ func (s interfaceSession) listSkills(cfg *config.Config) error {
 		rows = append(rows, navigationStatus{title: safeHuhText(skill.Name), detail: strconv.Itoa(active), id: navigationItemValue(skill.Name)})
 	}
 	choices := statusNavigationOptions(rows)
-	choices = append(choices, huh.NewOption("Back to inventory", "back"))
+	choices = append(choices, huh.NewOption("Back", "back"))
 	for {
 		choice, err := s.selectAction("Agent Skills", "Counts: enabled harnesses. Enter views paths and availability.", choices...)
 		if isCancelled(err) || choice == "back" || choice == "" {

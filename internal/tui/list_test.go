@@ -52,7 +52,7 @@ func TestRunListMCPAndSkillsDetailsWithoutWriting(t *testing.T) {
 	if err := RunList(context.Background(), root, terminalByteReader{strings.NewReader(seq)}, &output); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"MCP: alpha", "Transport", "Skill: review", "Source:", "Back to inventory", "Available to: Codex"} {
+	for _, expected := range []string{"MCP: alpha", "Transport", "Skill: review", "Source:", "Back", "Available to: Codex"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("missing %q in read-only drilldown: %s", expected, output.String())
 		}
@@ -80,7 +80,7 @@ func TestRunListHarnessesReadOnlyWithoutExtraSpacingAfterReturn(t *testing.T) {
 	if err := RunList(context.Background(), root, strings.NewReader("1\n1\n8\n6\n"), &output); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Harness: Claude Code", "MCP config", "Skills", "Back to inventory"} {
+	for _, expected := range []string{"Harness: Claude Code", "MCP config", "Skills", "Back"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("harness list missing %q: %s", expected, output.String())
 		}

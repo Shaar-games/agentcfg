@@ -2,6 +2,14 @@
 
 The two `.tape` files record the **real agentcfg executable** with [VHS](https://github.com/charmbracelet/vhs). GitHub Actions rebuilds their GIFs when the CLI or demo scripts change and commits only the generated images.
 
+The tapes pause for at least 2.8 seconds on menus and longer on detail screens.
+Repeated arrow presses are separated by 350 ms so the highlighted route is
+visible. `PlaybackSpeed 0.85` also slows playback. Keep `Wait+Screen` checks
+before each reading pause so slower machines do not skip a screen.
+
+The UI follows the native Select, MultiSelect and theme patterns in the
+[official Huh examples](https://github.com/charmbracelet/huh/tree/v1.0.0/examples).
+
 The fixtures are **synthetic, inert samples**, referencing the names and public shapes of community projects:
 
 - [Context7 MCP](https://github.com/upstash/context7) — HTTP endpoint name and URL

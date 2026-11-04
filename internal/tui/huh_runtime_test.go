@@ -27,53 +27,92 @@ func longNavigationOptions(count int) []huh.Option[string] {
 	return options
 }
 
-// Exercise Huh's real Form.Update and Select.View path rather than inspecting
-// AST text for a missing `.Height()` call. The form height must stay natural
-// even when a WindowSizeMsg advertises fewer rows than the menu needs.
-func TestNaturalHuhFormKeepsAllLongSelectRowsWhenTerminalSmallAndResized(t *testing.T) {
-	options := longNavigationOptions(25)
-	var selection string
-	field := huh.NewSelect[string]().Title("Many actions").Description("Enter immediately activates highlighted row").Options(options...).Value(&selection)
-	form, group := newNaturalForm(strings.NewReader(""), io.Discard, field)
-	_ = form.Init()
-	for _, size := range []tea.WindowSizeMsg{{Width: 100, Height: 7}, {Width: 32, Height: 5}, {Width: 86, Height: 16}, {Width: 40, Height: 4}} {
-		resizeNaturalForm(form, group, []huh.Field{field}, size.Width)
-		_, _ = form.Update(size)
-		view := form.View()
-		for i := range options {
-			if !strings.Contains(view, fmt.Sprintf("CHOICE_%02d", i)) {
-				t.Fatalf("Huh clipped action %02d after resize %+v: visible lines %d:\n%s", i, size, lipgloss.Height(view), view)
+// Exercise actual Huh updates and rendering: exactly ten options initially,
+// then native scrolling must make the last option reachable.
+func TestMenuShowsTenOptionsBeforeScrolling(t *testing.T) {
+	for _, colored := range []bool{false, true} {
+		var selection string
+		field := huh.NewSelect[string]().Title("Many actions").Description("Select an action").Options(longNavigationOptions(25)...).Value(&selection)
+		var rendered huh.Field = field
+		if colored {
+			rendered = &navigationField{Select: field, options: longNavigationOptions(25), renderer: lipgloss.NewRenderer(io.Discard)}
+		}
+		form, group := newNaturalForm(strings.NewReader(""), io.Discard, rendered)
+		_ = form.Init()
+		for _, width := range []int{100, 60, 85} {
+			resizeNaturalForm(form, group, []huh.Field{rendered}, width)
+			_, _ = form.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+			view := form.View()
+			for i := 0; i < 10; i++ {
+				if !strings.Contains(view, fmt.Sprintf("CHOICE_%02d", i)) {
+					t.Fatalf("missing initial option %d: %s", i, view)
+				}
+			}
+			if strings.Contains(view, "CHOICE_10") {
+				t.Fatalf("more than ten options: %s", view)
 			}
 		}
-		if lipgloss.Height(view) <= size.Height {
-			t.Fatalf("test setup should exceed tiny terminal height; %+v yielded %d lines", size, lipgloss.Height(view))
+		for range 24 {
+			_, _ = form.Update(tea.KeyMsg{Type: tea.KeyDown})
 		}
-	}
-	// Navigation to the final item must work without any inner viewport offset.
-	for i := 0; i < len(options)-1; i++ {
-		_, _ = form.Update(tea.KeyMsg{Type: tea.KeyDown})
-	}
-	if selection != "id-24" || !strings.Contains(form.View(), "CHOICE_24") {
-		t.Fatalf("down navigation did not reach final action: selected=%q", selection)
+		if selection != "id-24" || !strings.Contains(form.View(), "CHOICE_24") {
+			t.Fatalf("last option unreachable: %s", form.View())
+		}
 	}
 }
 
-func TestHuhDefaultFormClipsLongSelectWhileNaturalFormDoesNot(t *testing.T) {
-	options := longNavigationOptions(22)
-	var defaultSelected string
-	defaultField := huh.NewSelect[string]().Title("Default").Options(options...).Value(&defaultSelected)
-	defaultForm := huh.NewForm(huh.NewGroup(defaultField)).WithTheme(Theme())
-	_, _ = defaultForm.Update(tea.WindowSizeMsg{Width: 75, Height: 7})
-	if strings.Contains(defaultForm.View(), "CHOICE_21") {
-		t.Fatal("Huh default did not reproduce the source of scroll/clipping; inspect the regression test")
+func TestShortMultiSelectStartsAtTopWithLastOptionChecked(t *testing.T) {
+	for _, count := range []int{6, 10, 20} {
+		options := longNavigationOptions(count)
+		options[count-1] = options[count-1].Selected(true)
+		var chosen []string
+		field := huh.NewMultiSelect[string]().Title("Harnesses").Options(options...).Value(&chosen)
+		form, group := newNaturalForm(strings.NewReader(""), io.Discard, field)
+		_ = form.Init()
+		for _, width := range []int{80, 45, 90} {
+			resizeNaturalForm(form, group, []huh.Field{field}, width)
+			_, _ = form.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+			for i := 0; i < min(count, 10); i++ {
+				if !strings.Contains(form.View(), fmt.Sprintf("CHOICE_%02d", i)) {
+					t.Fatalf("initial option %d hidden for %d choices: %s", i, count, form.View())
+				}
+			}
+		}
+		if count <= 10 {
+			for range count - 1 {
+				_, _ = form.Update(tea.KeyMsg{Type: tea.KeyDown})
+				for i := range count {
+					if !strings.Contains(form.View(), fmt.Sprintf("CHOICE_%02d", i)) {
+						t.Fatalf("short checkbox list scrolls: %s", form.View())
+					}
+				}
+			}
+		}
+		if !slices.Contains(chosen, fmt.Sprintf("id-%02d", count-1)) {
+			t.Fatal("prechecked state lost")
+		}
 	}
-	var selected string
-	field := huh.NewSelect[string]().Title("No viewport clipping").Options(options...).Value(&selected)
-	form, group := newNaturalForm(strings.NewReader(""), io.Discard, field)
-	resizeNaturalForm(form, group, []huh.Field{field}, 75)
-	_, _ = form.Update(tea.WindowSizeMsg{Width: 75, Height: 7})
-	if !strings.Contains(form.View(), "CHOICE_21") {
-		t.Fatal("natural form still clips long select")
+}
+
+func TestShortSelectNeverScrollsAndPreservesInitialValue(t *testing.T) {
+	for _, count := range []int{2, 6, 10} {
+		options := longNavigationOptions(count)
+		selected := fmt.Sprintf("id-%02d", count-1)
+		field := huh.NewSelect[string]().Title("Sharing").Options(options...).Value(&selected)
+		form, group := newNaturalForm(strings.NewReader(""), io.Discard, field)
+		_ = form.Init()
+		resizeNaturalForm(form, group, []huh.Field{field}, 100)
+		if selected != fmt.Sprintf("id-%02d", count-1) {
+			t.Fatal("initial value changed")
+		}
+		for range count * 2 {
+			for i := range count {
+				if !strings.Contains(form.View(), fmt.Sprintf("CHOICE_%02d", i)) {
+					t.Fatalf("short list scrolls at %s: %s", selected, form.View())
+				}
+			}
+			_, _ = form.Update(tea.KeyMsg{Type: tea.KeyDown})
+		}
 	}
 }
 
@@ -179,7 +218,7 @@ func TestHuhAccessibleRunListConsumesOrdinaryReaderAcrossScreens(t *testing.T) {
 	if err := RunList(context.Background(), root, strings.NewReader("1\n1\n8\n6\n"), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	for _, label := range []string{"agentcfg", "Inventory", "Harness: Claude Code", "Back to inventory"} {
+	for _, label := range []string{"agentcfg", "Inventory", "Harness: Claude Code", "Back"} {
 		if !strings.Contains(rendered.String(), label) {
 			t.Fatalf("multi-screen Huh accessible navigation lost %q:\n%s", label, rendered.String())
 		}

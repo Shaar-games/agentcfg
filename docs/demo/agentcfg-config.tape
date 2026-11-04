@@ -9,7 +9,8 @@ Set Width 1080
 Set Height 610
 Set Theme "Catppuccin Mocha"
 Set Framerate 12
-Set TypingSpeed 110 ms
+Set TypingSpeed 140 ms
+Set PlaybackSpeed 0.85
 Set CursorBlink false
 Set WindowBar Colorful
 
@@ -20,34 +21,46 @@ Env TERM "xterm-256color"
 Type "agentcfg config"
 Enter
 Wait+Screen /Configuration/
-Sleep 1800 ms
+Sleep 2880 ms
 # Open MCP servers from the main Select menu.
 Down
 Enter
-Wait+Screen /Back to main menu/
-Sleep 2000 ms
+Wait+Screen /Back/
+Sleep 3200 ms
 # Open the first MCP, then its read-only transport/routing details.
 Enter
 Wait+Screen /Change sharing mode/
-Sleep 1600 ms
-Down 2
+Sleep 2800 ms
+Down
+Sleep 350 ms
+Down
 Enter
 Wait+Screen /Enabled harnesses/
-Sleep 2500 ms
+Sleep 4000 ms
 # Return through the actual Back and Exit actions (no blind Ctrl+C chain).
 Enter
-Wait+Screen /Back to main menu/
-Sleep 1800 ms
-Down 2
+Wait+Screen /Back/
+Sleep 2880 ms
+Down
+Sleep 350 ms
+Down
 Enter
 Wait+Screen /Configuration/
-Sleep 1800 ms
-Down 5
+Sleep 2880 ms
+Down
+Sleep 350 ms
+Down
+Sleep 350 ms
+Down
+Sleep 350 ms
+Down
+Sleep 350 ms
+Down
 Enter
-Sleep 1800 ms
+Sleep 2880 ms
 # Show the same simulated MCP configuration in the CLI's read-only mode.
 Type "agentcfg mcps --plain"
 Enter
 # The last line may be below the visible terminal viewport after Huh exits;
 # do not wait for off-screen text just to finish the recording.
-Sleep 4000 ms
+Sleep 6400 ms

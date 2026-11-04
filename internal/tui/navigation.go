@@ -15,19 +15,11 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
-var (
-	navActionColor = lipgloss.AdaptiveColor{Light: "#17664E", Dark: "#83D9AF"}
-	navInfoColor   = lipgloss.AdaptiveColor{Light: "#315A79", Dark: "#A9CDE6"}
-	navExitColor   = lipgloss.AdaptiveColor{Light: "#AF272E", Dark: "#FF828A"}
-	navBackColor   = lipgloss.AdaptiveColor{Light: "#895D14", Dark: "#FFD182"}
-	navFreshColor  = lipgloss.AdaptiveColor{Light: "#096883", Dark: "#7CDFFF"}
-	navWarnColor   = lipgloss.AdaptiveColor{Light: "#925B17", Dark: "#F3C274"}
-)
-
 // Status columns are padded by terminal cell width, not bytes or
 // runes. This also works if a label later contains wide or combining glyphs.
 type navigationStatus struct {
 	title, detail, id string
+	columns           []string
 }
 
 // Item values are namespaced away from action sentinels (back/exit/refresh).
@@ -42,14 +34,39 @@ func navigationItemName(value string) (string, bool) {
 }
 
 func statusNavigationOptions(rows []navigationStatus) []huh.Option[string] {
-	width := 0
-	for _, row := range rows {
-		width = max(width, lipgloss.Width(row.title))
+	// Measure every column in terminal cells. Keep keys ANSI-free for Huh's
+	// filtering; wide glyphs and combining accents must not shift columns.
+	cells := make([][]string, len(rows))
+	var widths []int
+	for i, row := range rows {
+		cells[i] = append([]string{row.title}, row.columns...)
+		if len(row.columns) == 0 {
+			cells[i] = append(cells[i], row.detail)
+		}
+		for j, cell := range cells[i] {
+			cell = singleLineLabel(cell)
+			cells[i][j] = cell
+			if j == len(widths) {
+				widths = append(widths, 0)
+			}
+			widths[j] = max(widths[j], lipgloss.Width(cell))
+		}
 	}
 	options := make([]huh.Option[string], 0, len(rows))
-	for _, row := range rows {
-		padding := strings.Repeat(" ", width-lipgloss.Width(row.title))
-		options = append(options, huh.NewOption(row.title+padding+"  ·  "+row.detail, row.id))
+	for i, row := range rows {
+		last := len(cells[i]) - 1
+		for last > 0 && cells[i][last] == "" {
+			last--
+		}
+		var label strings.Builder
+		for j, cell := range cells[i][:last+1] {
+			label.WriteString(cell)
+			if j < last {
+				label.WriteString(strings.Repeat(" ", widths[j]-lipgloss.Width(cell)))
+				label.WriteString("  ·  ")
+			}
+		}
+		options = append(options, huh.NewOption(label.String(), row.id))
 	}
 	return options
 }
@@ -71,7 +88,7 @@ func overviewNavigationOptions(cfg *config.Config, plugins int) []huh.Option[str
 // A coloured Select must retain plain Option.Key values. Huh's built-in
 // filtering compares strings directly, so ANSI in options would make e.g. a
 // search for "0" match unrelated choices via the SGR escape codes.
-func navigationColor(id, label string) lipgloss.AdaptiveColor {
+func navigationColor(id, _ string) lipgloss.AdaptiveColor {
 	switch id {
 	case "exit":
 		return navExitColor
@@ -82,12 +99,6 @@ func navigationColor(id, label string) lipgloss.AdaptiveColor {
 	case "details":
 		return navInfoColor
 	case "isolated":
-		return navWarnColor
-	}
-	switch {
-	case strings.Contains(strings.ToLower(label), "unavailable"),
-		strings.Contains(strings.ToLower(label), "warning"),
-		strings.Contains(strings.ToLower(label), "disabled"):
 		return navWarnColor
 	default:
 		return navActionColor
@@ -116,28 +127,34 @@ func navigationPlainMode() bool {
 }
 
 func (s interfaceSession) navigationSelect(field *huh.Select[string], options []huh.Option[string]) huh.Field {
-	if !s.navigationSupportsColor() {
-		return field
+	view := &navigationField{Select: field, options: options}
+	if s.navigationSupportsColor() {
+		view.renderer = lipgloss.NewRenderer(s.out)
 	}
-	return &coloredNavigationSelect{Select: field, options: options, renderer: lipgloss.NewRenderer(s.out)}
+	return view
 }
 
-// The wrapper only adds ANSI to the final rendered view, after Huh has
-// filtered and laid out its untouched labels. It retains the official Select
-// focus/navigation/size behaviour and delegates accessible prompts to Huh.
-type coloredNavigationSelect struct {
+// Navigation decorates Huh's native view with optional colors and a bottom
+// Back row. Options stay untouched: spacing never becomes a selectable item
+// or part of a search label, and accessible prompts retain native numbering.
+type navigationField struct {
 	*huh.Select[string]
-	options  []huh.Option[string]
-	renderer *lipgloss.Renderer
+	options    []huh.Option[string]
+	renderer   *lipgloss.Renderer
+	optionRows int
 }
 
-func (s *coloredNavigationSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (s *navigationField) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, cmd := s.Select.Update(msg)
 	return s, cmd
 }
 
-func (s *coloredNavigationSelect) View() string {
-	lines := strings.Split(s.Select.View(), "\n")
+func (s *navigationField) View() string {
+	view := padNavigationBack(s.Select, s.options, s.optionRows)
+	if s.renderer == nil {
+		return view
+	}
+	lines := strings.Split(view, "\n")
 	for i, line := range lines {
 		plain := strings.TrimRight(ansi.Strip(line), " ")
 		// Check the longest suffix first, so a `Back` option never colors the
@@ -157,8 +174,33 @@ func (s *coloredNavigationSelect) View() string {
 		if start < 0 {
 			continue
 		}
-		styled := s.renderer.NewStyle().Foreground(navigationColor(option.Value, option.Key)).Render(option.Key)
+		styled := s.renderOptionLabel(option)
 		lines[i] = line[:start] + styled + line[start+len(option.Key):]
 	}
 	return strings.Join(lines, "\n")
+}
+
+func singleLineLabel(value string) string {
+	return strings.Join(strings.Fields(ansi.Strip(value)), " ")
+}
+
+// Apply semantic colors after Huh filtering/layout. Each status cell has its
+// own role; a transport or sharing status must not color the whole row green.
+func (s *navigationField) renderOptionLabel(option huh.Option[string]) string {
+	cells := strings.Split(option.Key, "  \u00b7  ")
+	for i, cell := range cells {
+		color := navigationColor(option.Value, cell)
+		if i > 0 {
+			switch strings.TrimSpace(strings.ToLower(cell)) {
+			case "shared", "enabled":
+				color = navActionColor
+			case "isolated", "warning", "disabled", "adapter unavailable":
+				color = navWarnColor
+			default:
+				color = navInfoColor
+			}
+		}
+		cells[i] = s.renderer.NewStyle().Foreground(color).Render(cell)
+	}
+	return strings.Join(cells, "  \u00b7  ")
 }

@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 )
 
@@ -97,7 +98,7 @@ func TestNavigationColorsHaveReadableLightDarkAndDistinctRoles(t *testing.T) {
 		{"sharing", "Sharing", navActionColor},
 		{"shared", "Shared", navActionColor},
 		{"isolated", "Isolated", navWarnColor},
-		{"skill", "Disabled skill", navWarnColor},
+		{"skill", "Disabled skill", navActionColor},
 		{"mcp", "MCP servers", navActionColor},
 	} {
 		got := navigationColor(tc.id, tc.label)
@@ -120,7 +121,7 @@ func TestNavigationColoredSelectKeepsPlainSearchableKeysAndWidths(t *testing.T) 
 	field := huh.NewSelect[string]().Title("Navigation").Options(options...).Value(&selected)
 	renderer := lipgloss.NewRenderer(io.Discard)
 	renderer.SetColorProfile(termenv.TrueColor)
-	colored := &coloredNavigationSelect{Select: field, options: options, renderer: renderer}
+	colored := &navigationField{Select: field, options: options, renderer: renderer}
 	form := huh.NewForm(huh.NewGroup(colored)).WithTheme(Theme())
 	_, _ = form.Update(tea.WindowSizeMsg{Width: 90, Height: 28})
 	plain := field.View()
@@ -129,7 +130,7 @@ func TestNavigationColoredSelectKeepsPlainSearchableKeysAndWidths(t *testing.T) 
 		t.Fatalf("native navigation view lacks colors: %q", view)
 	}
 	for _, option := range options {
-		if !strings.Contains(view, option.Key) {
+		if !strings.Contains(ansi.Strip(view), option.Key) {
 			t.Errorf("colored view dropped option %q", option.Key)
 		}
 	}
@@ -146,7 +147,7 @@ func TestNavigationColoredSelectKeepsPlainSearchableKeysAndWidths(t *testing.T) 
 	_, _ = colored.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
 	_, _ = colored.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("0")})
 	filtered := colored.View()
-	if !strings.Contains(filtered, "MCP servers  ·  0") || strings.Contains(filtered, "Refresh") || strings.Contains(filtered, "Exit") {
+	if !strings.Contains(ansi.Strip(filtered), "MCP servers  ·  0") || strings.Contains(filtered, "Refresh") || strings.Contains(filtered, "Exit") {
 		t.Fatalf("filtering by 0 included unrelated ANSI-colored choices: %q", filtered)
 	}
 }
@@ -181,7 +182,7 @@ func TestColoredNavigationMatchesWholeOptionNotOverlappingLabel(t *testing.T) {
 	field := huh.NewSelect[string]().Title("Navigation").Options(options...).Value(&selected)
 	renderer := lipgloss.NewRenderer(io.Discard)
 	renderer.SetColorProfile(termenv.TrueColor)
-	colored := &coloredNavigationSelect{Select: field, options: options, renderer: renderer}
+	colored := &navigationField{Select: field, options: options, renderer: renderer}
 	form, group := newNaturalForm(strings.NewReader(""), io.Discard, colored)
 	resizeNaturalForm(form, group, []huh.Field{colored}, 80)
 	_, _ = form.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
@@ -220,5 +221,52 @@ func TestNavigationPlainModeRespectsNoColorAndExplicitAccessibility(t *testing.T
 	s := interfaceSession{ctx: context.Background(), in: strings.NewReader("1\n"), out: &bytes.Buffer{}}
 	if s.navigationSupportsColor() {
 		t.Fatal("non-TTY screen unexpectedly enabled option coloring")
+	}
+}
+
+func TestAllStatusColumnsAlignWithUnicodeAndOptionalCells(t *testing.T) {
+	rows := []navigationStatus{
+		{title: "界", columns: []string{"stdio", "shared", ""}, id: "first"},
+		{title: "e\u0301", columns: []string{"streamable-http", "isolated", "warning"}, id: "second"},
+		{title: "a long name", columns: []string{"sse", "shared", "warning"}, id: "third"},
+	}
+	options := statusNavigationOptions(rows)
+	offsets := map[int]int{}
+	for _, option := range options {
+		cells := strings.Split(option.Key, "  \u00b7  ")
+		prefix := ""
+		for j, cell := range cells {
+			if j > 0 {
+				actual := lipgloss.Width(prefix)
+				if want, ok := offsets[j]; ok && want != actual {
+					t.Fatalf("column %d moved: %d != %d in %q", j, actual, want, option.Key)
+				}
+				offsets[j] = actual
+			}
+			prefix += cell + "  \u00b7  "
+		}
+		if strings.ContainsAny(option.Key, "\r\n\t\x1b") {
+			t.Fatalf("unsafe column label: %q", option.Key)
+		}
+	}
+}
+
+func TestStatusColorsPreserveCellsAndDistinguishSharing(t *testing.T) {
+	renderer := lipgloss.NewRenderer(io.Discard)
+	renderer.SetColorProfile(termenv.TrueColor)
+	wrapper := &navigationField{renderer: renderer}
+	for _, status := range []string{"shared", "isolated", "warning", "disabled"} {
+		key := "warning-guide  \u00b7  stdio  \u00b7  " + status
+		rendered := wrapper.renderOptionLabel(huh.NewOption(key, "item:warning-guide"))
+		color := navWarnColor
+		if status == "shared" {
+			color = navActionColor
+		}
+		if !strings.Contains(rendered, renderer.NewStyle().Foreground(color).Render(status)) {
+			t.Fatalf("wrong status color: %q", rendered)
+		}
+		if ansi.Strip(rendered) != key || lipgloss.Width(rendered) != lipgloss.Width(key) {
+			t.Fatal("color changed column layout")
+		}
 	}
 }

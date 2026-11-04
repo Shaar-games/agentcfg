@@ -8,7 +8,8 @@ Set Width 1080
 Set Height 610
 Set Theme "Catppuccin Mocha"
 Set Framerate 12
-Set TypingSpeed 110 ms
+Set TypingSpeed 140 ms
+Set PlaybackSpeed 0.85
 Set CursorBlink false
 Set WindowBar Colorful
 
@@ -20,19 +21,21 @@ Type "agentcfg list"
 Enter
 Wait+Screen /Inventory/
 # Navigate directly to the Skills section, then inspect both fixture skills.
-Sleep 1900 ms
-Down 2
+Sleep 3040 ms
+Down
+Sleep 350 ms
+Down
 Enter
-Wait+Screen /Back to inventory/
-Sleep 1400 ms
+Wait+Screen /Back/
+Sleep 2800 ms
 Enter
 Wait+Screen /Available to/
-Sleep 4200 ms
+Sleep 6720 ms
 # A Huh Note closes with Enter, returning to the same skill Select menu.
 Enter
-Wait+Screen /Back to inventory/
-Sleep 1400 ms
+Wait+Screen /Back/
+Sleep 2800 ms
 Down
 Enter
 Wait+Screen /Available to/
-Sleep 3000 ms
+Sleep 4800 ms

@@ -16,7 +16,6 @@ import (
 	"strings"
 	"unicode"
 
-	"agentcfg/internal/broker"
 	"agentcfg/internal/config"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -52,13 +51,9 @@ func (s interfaceSession) form(fields ...huh.Field) error {
 	return RunForm(s.ctx, s.in, s.out, fields...)
 }
 
-// RunForm is the shared Huh runner for the TUI and CLI wizard. Huh normally
-// caps a Group's height to the terminal and then passes that reduced height to
-// Select, which converts a natural list into an internal scrollable viewport.
-// Keep its original controls, styling and key bindings, but give the form its
-// actual content height at startup and after terminal resizes. When the list is
-// taller than the physical terminal, the terminal handles its own scrollback;
-// Huh never hides options in an internal navigation viewport.
+// RunForm shares native Huh controls and a ten-row option viewport between
+// configuration, inventory and the initialization wizard. Terminals too small
+// for the bounded form use Huh's complete accessible numbered list.
 func RunForm(ctx context.Context, input io.Reader, output io.Writer, fields ...huh.Field) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -95,7 +90,7 @@ func RunForm(ctx context.Context, input io.Reader, output io.Writer, fields ...h
 	if native && !accessible {
 		out := output.(*os.File)
 		width, terminalHeight, sizeErr := term.GetSize(out.Fd())
-		if sizeErr == nil && terminalHeight > 0 && resizeNaturalForm(form, group, fields, width) > terminalHeight {
+		if sizeErr == nil && terminalHeight > 0 && resizeNaturalForm(form, group, fields, width, terminalHeight) > terminalHeight {
 			// Huh native Select cannot show more lines than the physical TTY and
 			// Bubble Tea's renderer would otherwise truncate the first options.
 			// Its official accessible mode prints every numbered option without
@@ -305,8 +300,15 @@ func newNaturalForm(input io.Reader, output io.Writer, fields ...huh.Field) (*hu
 func newNaturalFormWithOverflow(input io.Reader, output io.Writer, overflow *bool, fields ...huh.Field) (*huh.Form, *huh.Group) {
 	group := huh.NewGroup(fields...)
 	form := huh.NewForm(group).WithTheme(Theme())
+	// Checked values are state, not a request to open halfway down a list.
+	for _, field := range fields {
+		if multi, ok := field.(*huh.MultiSelect[string]); ok {
+			_, _ = multi.Update(tea.KeyMsg{Type: tea.KeyHome})
+		}
+	}
+
 	// This Bubble Tea hook modifies Huh's own dimensions, not its UI. A
-	// terminal resize never clamps the visible choice set to terminal rows.
+	// terminal resize recalculates the option budget after text wrapping.
 	options := []tea.ProgramOption{tea.WithReportFocus(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
 		switch msg := msg.(type) {
 		case tea.WindowSizeMsg:
@@ -332,7 +334,7 @@ func updateNaturalWindowSize(form *huh.Form, group *huh.Group, fields []huh.Fiel
 	if form.State != huh.StateNormal {
 		return size
 	}
-	natural := resizeNaturalForm(form, group, fields, size.Width)
+	natural := resizeNaturalForm(form, group, fields, size.Width, size.Height)
 	if overflow != nil && size.Height > 0 && natural > size.Height {
 		*overflow = true
 		// Finish the inline surface through Huh's own cancellation path before
@@ -344,21 +346,21 @@ func updateNaturalWindowSize(form *huh.Form, group *huh.Group, fields []huh.Fiel
 	return size
 }
 
-func resizeNaturalForm(form *huh.Form, group *huh.Group, fields []huh.Field, width int) int {
+func resizeNaturalForm(form *huh.Form, group *huh.Group, fields []huh.Field, width int, terminalHeight ...int) int {
 	if width > 0 {
 		form.WithWidth(width)
 	}
 	for _, field := range fields {
-		// A previous narrow render may have caused a Select to retain Huh's
-		// reduced viewport. Restore natural sizing before measuring its content.
-		switch selectField := field.(type) {
-		case *huh.Select[string]:
-			selectField.Height(0)
-		case *coloredNavigationSelect:
-			selectField.Select.Height(0)
+		sizeMenuField(field)
+		if nav, ok := field.(*navigationField); ok {
+			available := 0
+			if len(terminalHeight) > 0 {
+				available = terminalHeight[0]
+			}
+			sizeNavigationRows(nav, group, available)
 		}
-		_, _ = field.Update(nil)
 	}
+
 	height := lipgloss.Height(group.Content())
 	if header := group.Header(); header != "" {
 		height += lipgloss.Height(header)
@@ -480,14 +482,7 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 			}
 			return err
 		}
-		status, statusErr := broker.GetStatus(ctx, cfg.Root)
-		state := "broker idle"
-		if statusErr != nil {
-			state = "broker status unavailable"
-		} else if status.Running {
-			state = fmt.Sprintf("broker PID %d", status.PID)
-		}
-		choice, err := s.selectAction("agentcfg  ·  Configuration", "↑↓ navigate, Enter opens, Ctrl+C exits  ·  "+state,
+		choice, err := s.selectAction("agentcfg  ·  Configuration", "",
 			overviewNavigationOptions(cfg, len(discoverPlugins(root, cfg)))...)
 		if isCancelled(err) {
 			return nil
@@ -539,7 +534,7 @@ func (s interfaceSession) configureHarnesses() error {
 	var selected []string
 	err = s.form(huh.NewMultiSelect[string]().
 		Title("Harness availability").
-		Description("Space toggles, Enter reviews changes, Ctrl+C cancels.").
+		Description("Choose the harnesses to enable. Changes are reviewed before saving.").
 		Options(choices...).
 		Value(&selected))
 	if isCancelled(err) {
@@ -583,11 +578,11 @@ func (s interfaceSession) configureMCP() error {
 		sort.Strings(names)
 		rows := make([]navigationStatus, 0, len(names))
 		for _, name := range names {
-			rows = append(rows, navigationStatus{title: safeHuhText(name), detail: cfg.Servers[name].Type + "  ·  " + sharing(cfg.Servers[name]), id: navigationItemValue(name)})
+			rows = append(rows, navigationStatus{title: safeHuhText(name), columns: []string{cfg.Servers[name].Type, sharing(cfg.Servers[name])}, id: navigationItemValue(name)})
 		}
 		choices := statusNavigationOptions(rows)
-		choices = append(choices, huh.NewOption("Back to main menu", "back"))
-		name, err := s.selectAction("MCP servers", "↑↓ navigate, Enter opens a server. Shared reduces processes.", choices...)
+		choices = append(choices, huh.NewOption("Back", "back"))
+		name, err := s.selectAction("MCP servers", "Shared reuses the upstream process; isolated keeps session state separate.", choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -660,7 +655,7 @@ func (s interfaceSession) configureMCPHarnesses(server config.Server, configured
 	var selected []string
 	err := s.form(huh.NewMultiSelect[string]().
 		Title("MCP availability: " + safeHuhText(server.Name)).
-		Description("Space toggles, Enter reviews changes. Unchecked MCPs are unavailable for that harness.").
+		Description("Unchecked MCPs are unavailable for that harness. Changes are reviewed before saving.").
 		Options(choices...).
 		Value(&selected))
 	if isCancelled(err) {
@@ -698,7 +693,7 @@ func (s interfaceSession) configureMCPSharing(name string, server config.Server)
 	}
 	field := huh.NewSelect[string]().
 		Title("MCP sharing: " + safeHuhText(name)).
-		Description("↑↓ selects, Enter saves. Shared reuses the upstream process; isolated keeps session state separate.").
+		Description("Shared reuses the upstream process; isolated keeps session state separate.").
 		Options(choices...).
 		Value(&selected)
 	err := s.form(s.navigationSelect(field, choices))
@@ -750,7 +745,7 @@ func (s interfaceSession) configureSkills() error {
 			rows = append(rows, navigationStatus{title: safeHuhText(skill.Name), detail: strconv.Itoa(count), id: navigationItemValue(skill.Name)})
 		}
 		choices := statusNavigationOptions(rows)
-		choices = append(choices, huh.NewOption("Back to main menu", "back"))
+		choices = append(choices, huh.NewOption("Back", "back"))
 		name, err := s.selectAction("Agent Skills", "Counts: enabled harnesses. Enter opens availability; source edits only.", choices...)
 		if isCancelled(err) {
 			return nil
@@ -839,11 +834,11 @@ func (s interfaceSession) showPlugins() error {
 	items := discoverPlugins(s.root, cfg)
 	rows := make([]navigationStatus, 0, len(items))
 	for _, p := range items {
-		detail := fmt.Sprintf("%d / %d", p.MCP, p.Skills)
+		detail := ""
 		if !p.Valid {
-			detail += "  ·  warning"
+			detail = "warning"
 		}
-		rows = append(rows, navigationStatus{title: safeHuhText(p.Name), detail: detail, id: p.Path})
+		rows = append(rows, navigationStatus{title: safeHuhText(p.Name), columns: []string{fmt.Sprintf("%d / %d", p.MCP, p.Skills), detail}, id: p.Path})
 	}
 	choices := statusNavigationOptions(rows)
 	choices = append(choices, huh.NewOption("Back", "back"))

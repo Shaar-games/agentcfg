@@ -35,6 +35,20 @@ Ctrl+C cancels. Current availability selections are prechecked. The interface
 edits canonical settings; native harness files change only after an explicit
 sync confirmation.
 
+Menus show up to **ten option rows** before native Huh scrolling. Short lists
+stay fully visible, and checkbox menus open at the first option while retaining
+all prechecked values. Titles and wrapped descriptions have their own space.
+In short navigation menus, **Back** occupies the tenth option row, separated
+from the preceding items by visual space. Arrow keys skip that space directly;
+it adds no selectable entries or numbered accessible choices.
+The empty space shrinks on smaller terminals so it does not cause scrolling.
+If the terminal is too small for this layout, Huh shows its complete numbered
+accessible list. Set `AGENTCFG_ACCESSIBLE=1` to request that mode explicitly.
+
+Status columns align by terminal cell width, including wide Unicode labels.
+Colors distinguish actions, information and warnings; `NO_COLOR` or
+`CLICOLOR=0` disables navigation colors. Huh's footer supplies keyboard help.
+
 `--plain` on a category command prints its effective settings without opening
 Huh, editing sources or starting MCP processes. It is useful in scripts:
 
