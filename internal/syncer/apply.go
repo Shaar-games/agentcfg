@@ -180,7 +180,7 @@ func (p *Plan) checkChange(change Change) error {
 	}
 	fingerprint := treeFingerprint
 	if change.adopted {
-		fingerprint = adoptionTreeFingerprint
+		fingerprint = adoptionEntryFingerprint
 	}
 	actual, err := fingerprint(change.Path)
 	if os.IsNotExist(err) && !change.exists {
@@ -194,12 +194,21 @@ func (p *Plan) checkChange(change Change) error {
 		return fmt.Errorf("skill changed since planning: %s", change.Path)
 	}
 	if change.adopted {
-		content, err := SkillTreeSHA256(change.Path)
+		source, _, err := p.adoptedSkillSource(change.Path, change.skill.adoptionSource)
+		if err != nil {
+			return err
+		}
+		content, err := SkillTreeSHA256(source)
 		if err != nil || content != change.skill.adoptionHash {
 			return fmt.Errorf("native skill changed since adoption preview: %s", change.Path)
 		}
 	}
 	if !change.skill.remove || change.adopted {
+		if change.skill.restoreLink {
+			if err := ensureNoSymlinkParents(p.root, filepath.Dir(change.skill.source)); err != nil {
+				return err
+			}
+		}
 		sourceHash, err := fingerprint(change.skill.source)
 		if err != nil {
 			return err
@@ -265,11 +274,11 @@ func (p *Plan) Apply() error {
 	if err := p.preflight(); err != nil {
 		return err
 	}
-	if err := p.captureInitRestore(); err != nil {
-		return err
-	}
 	backupRoot := filepath.Join(lockDir, "backups", time.Now().UTC().Format("20060102T150405.000000000"))
 	if err := ensureNoSymlinkParents(p.base, backupRoot); err != nil {
+		return err
+	}
+	if err := p.captureInitRestore(backupRoot); err != nil {
 		return err
 	}
 	undos := []func() error{}
@@ -289,7 +298,7 @@ func (p *Plan) Apply() error {
 		if err := p.checkChange(change); err != nil {
 			return rollback(err)
 		}
-		backup := filepath.Join(backupRoot, rawDigest([]byte(change.Path))[:16]+"-"+filepath.Base(change.Path))
+		backup := changeBackupPath(backupRoot, change.Path)
 		undo, err := p.applyChange(change, backup)
 		if undo != nil {
 			undos = append(undos, undo)
@@ -408,7 +417,9 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 	}
 	staged, mode := "", change.skill.mode
 	installedHash := ""
-	if !change.skill.remove {
+	if change.skill.restoreLink {
+		installedHash = change.skill.sourceHash
+	} else if !change.skill.remove {
 		var err error
 		staged, err = os.MkdirTemp(filepath.Dir(change.Path), ".agentcfg-stage-*")
 		if err != nil {
@@ -513,7 +524,17 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 					return fmt.Errorf("cannot roll back externally edited adopted skill: %s", change.Path)
 				}
 			}
-			if err := os.RemoveAll(change.Path); err != nil {
+			if change.skill.restoreLink {
+				if err := ensureNoSymlinkParents(p.root, filepath.Dir(change.skill.source)); err != nil {
+					return err
+				}
+				if _, err := os.Lstat(change.skill.source); !os.IsNotExist(err) {
+					return fmt.Errorf("original skill link backup was replaced during restore: %s", change.skill.source)
+				}
+				if err := os.Rename(change.Path, change.skill.source); err != nil {
+					return err
+				}
+			} else if err := os.RemoveAll(change.Path); err != nil {
 				return err
 			}
 		} else if _, err := os.Lstat(change.Path); !os.IsNotExist(err) {
@@ -527,7 +548,12 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 		}
 		return nil
 	}
-	if staged != "" {
+	if change.skill.restoreLink {
+		if err := os.Rename(change.skill.source, change.Path); err != nil {
+			return undo, err
+		}
+		installed = true
+	} else if staged != "" {
 		if err := os.Rename(staged, change.Path); err != nil {
 			return undo, err
 		}

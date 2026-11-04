@@ -95,6 +95,12 @@ func (p *Plan) Revalidate() error {
 		}
 		sources := append([]string(nil), candidate.Sources...)
 		for _, origin := range candidate.Origins {
+			if origin.Target != "" {
+				relative, err := anchoredPath(root, origin.Source)
+				if err != nil || filepath.Join(root.Name(), relative) != origin.Target {
+					return errors.New("native skill link target changed since discovery")
+				}
+			}
 			sources = union(sources, []string{origin.Source})
 		}
 		for _, source := range sources {

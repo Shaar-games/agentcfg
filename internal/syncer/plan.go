@@ -243,6 +243,10 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 		return nil, err
 	}
 	sort.Slice(p.Changes, func(i, j int) bool { return p.Changes[i].Path < p.Changes[j].Path })
+	p.Changes, err = orderLinkedSkillAdoptions(p.Changes)
+	if err != nil {
+		return nil, err
+	}
 	if err := p.checkScopeIdentity(); err != nil {
 		return nil, err
 	}

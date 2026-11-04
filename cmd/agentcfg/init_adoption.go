@@ -99,9 +99,14 @@ func initAdoptionProofs(inventory *bootstrap.Plan, selectedServers map[string]ma
 				return nil, nil, errors.New("duplicate native skill adoption origin")
 			}
 			seenSkills[key] = true
+			source := origin.Target
+			if source == "" {
+				source = candidate.Source
+			}
 			skills = append(skills, syncer.SkillAdoption{
 				Harness: origin.Harness, Path: physical,
 				CanonicalName: candidate.Name, TreeSHA256: candidate.TreeSHA256,
+				Source: source,
 			})
 		}
 	}

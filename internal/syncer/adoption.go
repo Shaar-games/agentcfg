@@ -38,6 +38,7 @@ type MCPAdoption struct {
 // have exactly the same file bytes and relative names when planning/applying.
 type SkillAdoption struct {
 	Harness, Path, CanonicalName, TreeSHA256 string
+	Source                                   string // scanner-resolved physical source, required for linked entries
 }
 
 // ServerSHA256 fingerprints a resolved upstream definition. Routing policy and

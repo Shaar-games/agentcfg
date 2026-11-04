@@ -26,6 +26,8 @@ type skillChange struct {
 	source, sourceHash, beforeHash, mode string
 	remove                               bool
 	adoptionHash                         string
+	adoptionSource, nativeLinkTarget     string
+	restoreLink                          bool
 }
 
 func canonicalSkill(c *config.Config, name string) *config.Skill {
@@ -42,15 +44,16 @@ func treeFingerprint(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
+	if redirected(info) {
 		target, err := os.Readlink(path)
 		if err != nil {
 			return "", err
 		}
-		return "link:" + filepath.Clean(target), nil
-	}
-	if redirected(info) {
-		return "", fmt.Errorf("refusing a junction or reparse point as a managed skill tree: %s", path)
+		kind := "link:"
+		if info.Mode()&os.ModeSymlink == 0 {
+			kind = "junction:"
+		}
+		return kind + filepath.Clean(target), nil
 	}
 	if !info.IsDir() {
 		return "", fmt.Errorf("skill path is not a directory: %s", path)
@@ -178,7 +181,7 @@ func (p *Plan) planSkill(destination string, skill config.Skill, wanted bool, mo
 	}
 	fingerprint := treeFingerprint
 	if adoption.CanonicalName != "" {
-		fingerprint = adoptionTreeFingerprint
+		fingerprint = adoptionEntryFingerprint
 	}
 	current, err := fingerprint(destination)
 	exists := err == nil
@@ -208,11 +211,17 @@ func (p *Plan) planSkill(destination string, skill config.Skill, wanted bool, mo
 	if err != nil {
 		return err
 	}
+	var nativeSource, linkTarget string
 	if adoption.CanonicalName != "" {
 		if !exists || adoption.CanonicalName != skill.Name {
 			return fmt.Errorf("scanner-approved skill destination no longer matches %q: %s", skill.Name, destination)
 		}
-		nativeHash, nativeErr := SkillTreeSHA256(destination)
+		var nativeErr error
+		nativeSource, linkTarget, nativeErr = p.adoptedSkillSource(destination, adoption.Source)
+		if nativeErr != nil {
+			return nativeErr
+		}
+		nativeHash, nativeErr := SkillTreeSHA256(nativeSource)
 		canonicalHash, sourceErr := SkillTreeSHA256(source)
 		if nativeErr != nil {
 			return nativeErr
@@ -239,7 +248,8 @@ func (p *Plan) planSkill(destination string, skill config.Skill, wanted bool, mo
 		action = "adopt existing skill (" + mode + ")"
 	}
 	p.Changes = append(p.Changes, Change{Path: destination, Action: action, exists: exists, adopted: adoption.CanonicalName != "",
-		skill: &skillChange{source: source, sourceHash: sourceHash, beforeHash: current, mode: mode, adoptionHash: adoption.TreeSHA256}})
+		skill: &skillChange{source: source, sourceHash: sourceHash, beforeHash: current, mode: mode, adoptionHash: adoption.TreeSHA256,
+			adoptionSource: nativeSource, nativeLinkTarget: linkTarget}})
 	return nil
 }
 

@@ -24,6 +24,7 @@ type restoreEntry struct {
 	BeforeExists bool   `json:"beforeExists"`
 	Before       []byte `json:"before,omitempty"`
 	BeforeHash   string `json:"beforeHash,omitempty"`
+	BeforeLink   bool   `json:"beforeLink,omitempty"`
 	Backup       string `json:"backup,omitempty"` // relative to .agentcfg
 	AfterHash    string `json:"afterHash,omitempty"`
 	AfterAbsent  bool   `json:"afterAbsent,omitempty"`
@@ -49,7 +50,7 @@ func CreateInitRestorePoint(home string) error {
 // captureInitRestore runs under the sync lock, before the first native write.
 // Later syncs never replace the pre-init baseline. Existing installations with
 // no marker are left untouched; guessing their original state would lose data.
-func (p *Plan) captureInitRestore() error {
+func (p *Plan) captureInitRestore(backupRoot string) error {
 	if p.stateExists && !p.migratesSharedSkills || p.root != p.base || len(p.Changes) == 0 {
 		return nil
 	}
@@ -87,7 +88,7 @@ func (p *Plan) captureInitRestore() error {
 		if index >= 0 {
 			previous = &point.Native[index]
 		}
-		entry, err := p.captureRestoreEntry(change, previous)
+		entry, err := p.captureRestoreEntry(change, previous, backupRoot)
 		if err != nil {
 			return err
 		}
@@ -111,7 +112,7 @@ func (p *Plan) captureInitRestore() error {
 
 // Existing entries retain their original backup across the shared-root
 // migration; only the expected post-sync state is updated.
-func (p *Plan) captureRestoreEntry(change Change, previous *restoreEntry) (restoreEntry, error) {
+func (p *Plan) captureRestoreEntry(change Change, previous *restoreEntry, backupRoot string) (restoreEntry, error) {
 	relative, err := filepath.Rel(p.base, change.Path)
 	if err != nil || !withinScope(relative) {
 		return restoreEntry{}, errors.New("restore target escapes user home")
@@ -138,6 +139,25 @@ func (p *Plan) captureRestoreEntry(change Change, previous *restoreEntry) (resto
 			}
 		}
 		if previous == nil && change.exists {
+			info, err := os.Lstat(change.Path)
+			if err != nil {
+				return restoreEntry{}, err
+			}
+			if redirected(info) {
+				// Apply moves the original entry, preserving relative targets and
+				// Windows junctions without requiring link-creation privileges.
+				entry.BeforeLink = true
+				entry.BeforeHash, err = treeFingerprint(change.Path)
+				if err != nil {
+					return restoreEntry{}, err
+				}
+				backup, err := filepath.Rel(filepath.Join(p.root, ".agentcfg"), changeBackupPath(backupRoot, change.Path))
+				if err != nil || !withinScope(backup) {
+					return restoreEntry{}, errors.New("original skill link backup escapes canonical directory")
+				}
+				entry.Backup = filepath.ToSlash(backup)
+				return entry, nil
+			}
 			entry.Backup = filepath.ToSlash(filepath.Join("restore", "skills", rawDigest([]byte(relative))[:16]))
 			backup := filepath.Join(p.root, ".agentcfg", filepath.FromSlash(entry.Backup))
 			if err := ensureNoSymlinkParents(p.root, backup); err != nil {
@@ -319,13 +339,16 @@ func restoreChange(p *Plan, path string, entry restoreEntry) (*Change, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
+	if entry.BeforeLink && exists && current == entry.BeforeHash {
+		return nil, nil // Includes an original relative link whose target is temporarily absent.
+	}
 	content := ""
 	if exists {
 		info, err := os.Lstat(path)
 		if err != nil {
 			return nil, err
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
+		if redirected(info) {
 			link, err := os.Readlink(path)
 			if err != nil || filepath.Clean(link) != filepath.Clean(entry.AfterSource) {
 				return nil, fmt.Errorf("native skill link changed since init: %s", path)
@@ -353,6 +376,26 @@ func restoreChange(p *Plan, path string, entry restoreEntry) (*Change, error) {
 	skill := &skillChange{beforeHash: current, mode: "copy", remove: !entry.BeforeExists}
 	if entry.BeforeExists {
 		relative := filepath.FromSlash(entry.Backup)
+		if entry.BeforeLink {
+			if filepath.Clean(relative) != relative || !withinScope(relative) ||
+				!strings.HasPrefix(relative, "backups"+string(filepath.Separator)) {
+				return nil, errors.New("invalid original skill link backup path")
+			}
+			skill.source = filepath.Join(p.root, ".agentcfg", relative)
+			if err := ensureNoSymlinkParents(p.root, filepath.Dir(skill.source)); err != nil {
+				return nil, err
+			}
+			info, err := os.Lstat(skill.source)
+			if err != nil || !redirected(info) {
+				return nil, errors.New("original skill link backup is missing or changed")
+			}
+			skill.sourceHash, err = treeFingerprint(skill.source)
+			if err != nil || skill.sourceHash != entry.BeforeHash {
+				return nil, errors.New("original skill link backup changed")
+			}
+			skill.restoreLink = true
+			return &Change{Path: path, Action: "restore pre-init native skill link", exists: exists, skill: skill}, nil
+		}
 		if filepath.Clean(relative) != relative || filepath.Dir(relative) != filepath.Join("restore", "skills") {
 			return nil, errors.New("invalid original skill backup path")
 		}
@@ -370,6 +413,10 @@ func restoreChange(p *Plan, path string, entry restoreEntry) (*Change, error) {
 		}
 	}
 	return &Change{Path: path, Action: "restore pre-init native skill", exists: exists, skill: skill}, nil
+}
+
+func changeBackupPath(root, path string) string {
+	return filepath.Join(root, rawDigest([]byte(path))[:16]+"-"+filepath.Base(path))
 }
 
 func (r *RestorePlan) Apply() error {

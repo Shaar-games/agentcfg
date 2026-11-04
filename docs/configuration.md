@@ -146,6 +146,15 @@ Server overrides replace only fields explicitly present. For example, `"harnesse
 
 Skills are distributed into each selected harness's own directory; Codex uses `~/.codex/skills/` (its [supported legacy user location](https://github.com/openai/codex/blob/main/codex-rs/ext/skills/src/host_roots.rs)), rather than the shared `~/.agents/skills/`. During initialization, imported skills from every native location are backed up and removed after their canonical copies have been verified; enabled destinations are replaced with physical copies. Existing agentcfg-managed shared skills migrate on the next sync. Unimported skills and manually modified managed entries are protected. `agentcfg restore` restores the original shared imports when an initialization restore point exists.
 
+Initialization also adopts top-level skill symlinks and Windows junctions whose
+resolved targets were discovered inside the user home. Their contents are
+centralized and distributed as physical copies; replacing a native link leaves
+its independent target untouched. Link chains are detached before their target
+imports are retired. Restore moves the original link entries back, preserving
+relative targets and junction types without creating replacement links. Nested
+links, linked destination parents, changed targets and outside-home targets
+remain unsupported.
+
 The canonical sources remain under `~/.agentcfg/skills/`. Harness-native discovery can still read additional locations independently of agentcfg; distribution filters are not an isolation or authorization boundary.
 
 ## Portable manifests

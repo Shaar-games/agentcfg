@@ -35,6 +35,7 @@ type Harness struct {
 type Origin struct {
 	Harness string
 	Source  string
+	Target  string `json:",omitempty"` // resolved skill source captured before prompting
 }
 
 // Server contains only definitions that can be represented canonically.

@@ -175,6 +175,29 @@ func TestDiscoveryRejectsImplicitHomes(t *testing.T) {
 	}
 }
 
+func TestDiscoveryRejectsRetargetedSkillLinkWithIdenticalContent(t *testing.T) {
+	home := t.TempDir()
+	first := filepath.Dir(put(t, home, "packs/first/SKILL.md", skill("review")))
+	second := filepath.Dir(put(t, home, "packs/second/SKILL.md", skill("review")))
+	parent := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "review")
+	dirLink(t, link, first)
+	plan, err := Discover(home)
+	if err != nil || len(plan.Skills) != 1 {
+		t.Fatalf("initial linked discovery: %v", err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	dirLink(t, link, second)
+	if err := plan.Revalidate(); err == nil {
+		t.Fatal("same-content retargeting manufactured a different valid source")
+	}
+}
+
 func TestDiscoveryContainmentAndPortableLinks(t *testing.T) {
 	t.Run("config-escape", func(t *testing.T) {
 		home, outside := t.TempDir(), t.TempDir()

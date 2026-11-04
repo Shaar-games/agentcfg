@@ -73,7 +73,7 @@ func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
 		plan.Skills = append(plan.Skills, SkillCandidate{
 			Name: entry.Name(), Source: resolved, Sources: []string{resolved},
 			Harnesses: []string{harness}, Selected: !disabled, Warnings: warnings, Fingerprint: fingerprint,
-			Origins: []Origin{{Harness: harness, Source: native}}, TreeSHA256: treeSHA256,
+			Origins: []Origin{{Harness: harness, Source: native, Target: resolved}}, TreeSHA256: treeSHA256,
 		})
 	}
 }
