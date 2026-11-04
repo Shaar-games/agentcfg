@@ -70,6 +70,9 @@ replace both. Signed provenance/attestations are potential future enhancements.
    The checksum, `agentcfg version` and no-argument CLI help are verified as part of installation.
 
 The release workflow also accepts a manual trigger with an existing tag.
+To retry a release after a workflow-only fix, dispatch the current `main`
+workflow with that existing tag. Every build and installer still checks out
+the immutable tag; published assets are never overwritten.
 Publishing requires GitHub Actions `contents: write` permission only for
 the publish job. Never publish artifacts built from uncommitted local changes.
 

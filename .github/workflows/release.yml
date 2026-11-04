@@ -24,9 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Use a supported macOS Intel runner while the hosted arm64 pool has
+        # Match CI's supported macOS 15 pool while macOS 26 runners have
         # acquisition failures; no verification steps are skipped.
-        os: [ubuntu-latest, windows-latest, macos-26-intel]
+        os: [ubuntu-latest, windows-latest, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -165,7 +165,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-26-intel, windows-latest]
+        os: [ubuntu-latest, macos-15-intel, windows-latest]
     steps:
       - uses: actions/checkout@v4
         with:

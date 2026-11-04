@@ -16,10 +16,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # GitHub-hosted macOS arm64 runners have been failing acquisition
-        # before any steps run. Test the same macOS suite on the supported
-        # Intel macOS 26 image; release builds still target both architectures.
-        os: [ubuntu-latest, windows-latest, macos-26-intel]
+        # The macOS 26 pools intermittently fail hosted-runner acquisition.
+        # Keep all macOS checks on the supported Intel macOS 15 pool;
+        # release builds still target both architectures.
+        os: [ubuntu-latest, windows-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
