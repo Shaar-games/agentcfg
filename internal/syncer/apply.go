@@ -199,7 +199,7 @@ func (p *Plan) checkChange(change Change) error {
 			return fmt.Errorf("native skill changed since adoption preview: %s", change.Path)
 		}
 	}
-	if !change.skill.remove {
+	if !change.skill.remove || change.adopted {
 		sourceHash, err := fingerprint(change.skill.source)
 		if err != nil {
 			return err

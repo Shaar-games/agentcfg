@@ -3,13 +3,11 @@ package tui
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // Back is an action, never a checkbox value. Keep Huh's real MultiSelect for
@@ -34,6 +32,12 @@ func (s interfaceSession) multiSelectWithBack(field *huh.MultiSelect[string], op
 }
 
 func (s *backMultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if input, ok := msg.(tea.KeyMsg); ok && input.String() == "tab" && s.GetFiltering() {
+		_, _ = s.MultiSelect.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, _ = s.MultiSelect.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		s.back = true
+		return s, nil
+	}
 	if input, ok := msg.(tea.KeyMsg); ok && !s.GetFiltering() {
 		if s.back {
 			switch input.String() {
@@ -75,37 +79,12 @@ func (s *backMultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (s *backMultiSelect) View() string {
 	view := s.MultiSelect.View()
-	if s.GetFiltering() {
-		return view
-	}
-	if s.back {
-		// Hide the checkbox cursor while the separate Back action has focus.
-		if value, ok := s.Hovered(); ok {
-			for _, option := range s.options {
-				if option.Value != value {
-					continue
-				}
-				lines := strings.Split(view, "\n")
-				for i, line := range lines {
-					if strings.HasSuffix(strings.TrimSpace(ansi.Strip(line)), option.Key) {
-						lines[i] = strings.Replace(line, "> ", "  ", 1)
-					}
-				}
-				view = strings.Join(lines, "\n")
-				break
-			}
-		}
-	}
+
 	label := "Back"
 	if s.renderer != nil {
 		label = s.renderer.NewStyle().Foreground(navBackColor).Render(label)
 	}
-	cursor := "  "
-	if s.back {
-		cursor = "> "
-	}
-	line := Theme().Focused.Base.Width(lipgloss.Width(view)).Render(cursor + label)
-	return padBottomAction(view+"\n"+line, s.headerHeight(), s.optionRows)
+	return renderPinnedAction(view, s.headerHeight(), s.optionRows, label, s.back && !s.GetFiltering())
 }
 
 func (s *backMultiSelect) KeyBinds() []key.Binding {

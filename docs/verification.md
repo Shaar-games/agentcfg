@@ -91,11 +91,12 @@ Dans un environnement de test avec un home isolé et des fixtures de harnesses,
 vérifier d'abord le flux `agentcfg init` :
 
 1. `agentcfg init --plain` découvre les MCP et skills natifs et affiche un plan sans créer de fichier.
-2. `agentcfg init` ouvre des listes Huh de sélection et demande une confirmation avant création des sources canoniques.
-3. `agentcfg init` propose à la fin un plan de synchronisation native, puis une confirmation Huh distincte, sans exiger `--apply`.
-4. `agentcfg init --yes` crée uniquement les sources canoniques, sans synchronisation native ; `init --plain` ne modifie aucun fichier.
-5. Pour les scripts, `agentcfg sync --plain` prévisualise les changements, puis seul `agentcfg sync --apply --yes` autorise explicitement leur application.
-6. Une annulation, un conflit d'entrée non gérée ou une modification concurrente ne doit produire aucun écrasement silencieux ; les changements autorisés sont sauvegardés et soumis aux vérifications CAS, l'adoption MCP TOML est refusée.
+2. `agentcfg init` demande les harnesses de destination, puis une seule confirmation avant l'import et la migration.
+3. Après validation, les MCP JSON/JSONC et TOML Codex utilisent les proxies agentcfg ; les sources upstream n'existent que sous `~/.agentcfg/`.
+4. Les skills natifs sont centralisés puis copiés physiquement dans les destinations choisies ; les anciennes sources, y compris celles des harnesses non sélectionnés, sont retirées avec sauvegarde.
+5. `agentcfg init --yes` autorise le parcours complet ; `init --plain` ne modifie aucun fichier.
+6. Un import incomplet ou ambigu bloque init. Une erreur pendant la migration tente de restaurer l'état natif et archive les sources importées. `restore` doit rétablir les configurations et skills d'origine.
+7. Pour les modifications ultérieures, `agentcfg sync --plain` prévisualise les changements et `agentcfg sync --apply --yes` autorise leur application.
 
 Lancer ensuite `agentcfg config`, puis vérifier que :
 

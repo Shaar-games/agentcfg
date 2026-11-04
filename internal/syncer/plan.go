@@ -46,6 +46,7 @@ type manifest struct {
 }
 
 type Plan struct {
+	migratesSharedSkills  bool
 	extraPreflight        func() error
 	Changes               []Change `json:"changes"`
 	Warnings              []string `json:"warnings"`
@@ -216,13 +217,19 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 			return nil, err
 		}
 	}
+	if opts.Scope == "user" {
+		if err := p.planSharedSkills(c, old); err != nil {
+			return nil, err
+		}
+	}
+
 	for path := range old.Configs {
 		if !knownPaths[path] {
 			return nil, fmt.Errorf("ownership manifest contains an unexpected config path %s; no changes made", path)
 		}
 	}
 	for path := range old.Skills {
-		valid := false
+		valid := opts.Scope == "user" && IsSharedSkillPath(base, path)
 		for _, t := range all {
 			if filepath.Dir(path) == t.skills {
 				valid = true
@@ -258,8 +265,15 @@ func (p *Plan) planConfig(t target, desired map[string]map[string]any, old manif
 	var after []byte
 	var owned map[string]string
 	if t.toml {
+		input := before
+		if adopted {
+			input, err = removeAdoptedTOML(before, p.adoption.mcp[t.path])
+			if err != nil {
+				return fmt.Errorf("%s: %w", t.path, err)
+			}
+		}
 		var blockHash string
-		after, owned, blockHash, err = editTOML(before, desired, old.Configs[t.path], old.Blocks[t.path])
+		after, owned, blockHash, err = editTOML(input, desired, old.Configs[t.path], old.Blocks[t.path])
 		if blockHash != "" {
 			p.state.Blocks[t.path] = blockHash
 		}

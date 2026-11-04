@@ -163,9 +163,13 @@ func (b *safeBuffer) String() string {
 }
 
 func startCLIPeer(t *testing.T, binary, root, harness string) *cliPeer {
+	return startCLIPeerCommand(t, binary, root, []string{"connect", "--server", "fixture", "--harness", harness})
+}
+
+func startCLIPeerCommand(t *testing.T, binary, root string, args []string) *cliPeer {
 	t.Helper()
 	p := &cliPeer{root: root, done: make(chan error, 1)}
-	p.command = exec.Command(binary, "connect", "--server", "fixture", "--harness", harness)
+	p.command = exec.Command(binary, args...)
 	p.command.Env = append(os.Environ(), "USERPROFILE="+root, "HOME="+root)
 	input, err := p.command.StdinPipe()
 	if err != nil {

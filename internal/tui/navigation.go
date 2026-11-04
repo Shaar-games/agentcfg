@@ -8,6 +8,7 @@ import (
 
 	"agentcfg/internal/config"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -142,15 +143,115 @@ type navigationField struct {
 	options    []huh.Option[string]
 	renderer   *lipgloss.Renderer
 	optionRows int
+	bodyOffset int
+}
+
+func (s *navigationField) hasBottomAction() bool {
+	return len(s.options) > 0 && isTerminalAction(s.options[len(s.options)-1].Value)
+}
+
+func (s *navigationField) normalizeViewport() {
+	// Let Huh render every option, then window that native view ourselves. Huh
+	// v1 resets a positive-height Select's offset to its cursor on each update.
+	// Natural height plus native movement clamps its viewport back to zero.
+	s.Select.Height(0)
+	if _, ok := s.Hovered(); ok {
+		_, _ = s.Select.Update(tea.KeyMsg{Type: tea.KeyUp})
+		_, _ = s.Select.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+}
+
+func (s *navigationField) WithHeight(height int) huh.Field {
+	if s.hasBottomAction() {
+		s.normalizeViewport()
+	} else {
+		s.Select.WithHeight(height)
+	}
+	return s
 }
 
 func (s *navigationField) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if s.hasBottomAction() {
+		if input, ok := msg.(tea.KeyMsg); ok && (input.String() == "tab" || input.String() == "esc" && !s.GetFiltering()) {
+			// Leave and clear a filter before selecting the real terminal action.
+			// It remains an ordinary Huh option, including in accessible prompts.
+			_, _ = s.Select.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			_, _ = s.Select.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			_, cmd := s.Select.Update(tea.KeyMsg{Type: tea.KeyEnd})
+			s.normalizeViewport()
+			return s, cmd
+		}
+	}
 	_, cmd := s.Select.Update(msg)
+	if s.hasBottomAction() {
+		s.normalizeViewport()
+	}
 	return s, cmd
 }
 
+func (s *navigationField) KeyBinds() []key.Binding {
+	bindings := s.Select.KeyBinds()
+	if s.hasBottomAction() {
+		action := s.options[len(s.options)-1].Value
+		bindings = append(bindings, key.NewBinding(key.WithKeys("esc", "tab"), key.WithHelp("esc/tab", action)))
+	}
+	return bindings
+}
+
+func (s *navigationField) pinnedView() string {
+	view := s.Select.View()
+	if !s.hasBottomAction() {
+		return view
+	}
+	header := s.headerHeight()
+	lines := strings.Split(view, "\n")
+	header = min(header, len(lines))
+	body := lines[header:]
+	// Huh pads filtered results to the unfiltered option count. Remove only
+	// empty native rows, then detach the real Back/Exit row if it is visible.
+	for len(body) > 0 && emptyMenuLine(body[len(body)-1]) {
+		body = body[:len(body)-1]
+	}
+	action := s.options[len(s.options)-1]
+	if len(body) > 0 && menuOptionLabel(body[len(body)-1]) == action.Key {
+		body = body[:len(body)-1]
+	}
+	value, ok := s.Hovered()
+	active := ok && value == action.Value && !s.GetFiltering()
+	rows := s.optionRows
+	if rows <= 0 {
+		rows = visibleMenuOptions
+	}
+	limit := max(1, rows-1)
+	if !active {
+		for i, line := range body {
+			if hasMenuCursor(line) {
+				end := i + 1
+				for _, option := range s.options {
+					if ok && option.Value == value {
+						end = menuOptionEnd(body, i, option.Key)
+						break
+					}
+				}
+				if end > s.bodyOffset+limit {
+					s.bodyOffset = end - limit
+				}
+				if i < s.bodyOffset {
+					s.bodyOffset = i
+				}
+				break
+			}
+		}
+	}
+	s.bodyOffset = max(0, min(s.bodyOffset, len(body)-limit))
+	end := min(len(body), s.bodyOffset+limit)
+	window := append([]string(nil), lines[:header]...)
+	window = append(window, body[s.bodyOffset:end]...)
+	return renderPinnedAction(strings.Join(window, "\n"), header, rows, action.Key, active)
+}
+
 func (s *navigationField) View() string {
-	view := padNavigationBack(s.Select, s.options, s.optionRows)
+	view := s.pinnedView()
 	if s.renderer == nil {
 		return view
 	}

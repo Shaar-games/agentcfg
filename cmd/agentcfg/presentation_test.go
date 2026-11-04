@@ -33,7 +33,10 @@ func TestTerminalConfirmUsesConsistentLabelsAndDefaultsToNo(t *testing.T) {
 	field := terminalConfirmation("Synchronize native harnesses?", "Existing files are rechecked.", &confirmed)
 	huh.NewForm(huh.NewGroup(field)).WithTheme(tui.Theme())
 	view := field.View()
-	for _, expected := range []string{"Are you sure?", "Yes!", "No.", "Synchronize native harnesses?"} {
+	if strings.Contains(view, "Are you sure?") || strings.Count(view, "Synchronize native harnesses?") != 1 {
+		t.Fatalf("confirmation repeats the question: %q", view)
+	}
+	for _, expected := range []string{"Synchronize native harnesses?", "Yes!", "No.", "Existing files are rechecked."} {
 		if !strings.Contains(view, expected) {
 			t.Errorf("confirmation is missing %q: %q", expected, view)
 		}
@@ -52,8 +55,37 @@ func TestTerminalConfirmUsesConsistentLabelsAndDefaultsToNo(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Errorf("input %q: got %t, %v; want %t", tc.input, got, err, tc.want)
 		}
-		if !strings.Contains(output.String(), "Are you sure?") || strings.Contains(output.String(), "\x1b[") {
+		if strings.Count(output.String(), "Reviewed changes only.") != 1 || strings.Count(output.String(), "Save?") != 1 || strings.Contains(output.String(), "\x1b[") {
 			t.Errorf("accessible confirmation is inconsistent: %q", output.String())
+		}
+	}
+}
+
+func TestStopConfirmationUsesOnlyTheRequestedMessage(t *testing.T) {
+	var output bytes.Buffer
+	home := t.TempDir()
+	if err := inspectOrServe(context.Background(), "stop", home, strings.NewReader("n\n"), &output, &bytes.Buffer{}, true, false, false); err != nil {
+		t.Fatal(err)
+	}
+	message := "Managed MCP processes will be closed. This does not alter user configuration."
+	if strings.Count(output.String(), message) != 1 || strings.Contains(output.String(), "Are you sure?") || strings.Contains(output.String(), "Stop the agentcfg broker?") {
+		t.Fatalf("verbose stop confirmation: %s", output.String())
+	}
+}
+
+func TestInitReviewShowsOnlySelectionAndCounts(t *testing.T) {
+	summary := initReview([]string{"codex", "cursor", "opencode"}, 10, 31, 15)
+	for _, value := range []string{"Codex, Cursor, OpenCode", "MCPs      10", "Skills    31", "Skipped   15", "init --plain"} {
+		if !strings.Contains(summary, value) {
+			t.Errorf("summary is missing %q: %s", value, summary)
+		}
+	}
+	if len(strings.Split(summary, "\n")) > 5 {
+		t.Fatalf("init review is too long: %s", summary)
+	}
+	for _, redundant := range []string{"Detected", "Enabled", "Importable", "Canonical", "unsupported options", "After creation"} {
+		if strings.Contains(summary, redundant) {
+			t.Fatalf("redundant init explanation: %s", summary)
 		}
 	}
 }

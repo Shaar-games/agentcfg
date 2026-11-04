@@ -42,16 +42,18 @@ sync confirmation.
 Menus show up to **ten option rows** before native Huh scrolling. Short lists
 stay fully visible, and checkbox menus open at the first option while retaining
 all prechecked values. Titles and wrapped descriptions have their own space.
-In short navigation menus, **Back** (or **Exit** in the main menu) occupies the
-tenth option row, separated from the preceding items by visual space. Arrow keys skip that space directly;
+**Back** (or **Exit** in the main menu) stays pinned below the scrollable options,
+including while filtering. It occupies the tenth option row, leaving nine rows
+for content. Short lists fill the gap with visual space. Arrow keys skip that space directly;
 it adds no selectable entries or numbered accessible choices.
 The empty space shrinks on smaller terminals so it does not cause scrolling.
+Press Tab to focus the pinned action directly, including from a filter, then
+Enter to activate it. Outside a filter, Esc also focuses that action.
 The Harnesses checkbox screen also has a separate **Back** action: move below
 the last checkbox or press Esc/Tab to focus it, then Enter to discard pending
 changes and return. Enter on a checkbox still reviews the selection. Accessible
 numbered mode accepts `b` followed by Enter to return without saving.
-Import lists and long review notes in `init` also use a viewport of at most
-ten rows. Smaller terminals reduce that viewport while preserving native
+Long review notes also use a viewport of at most ten rows. Smaller terminals reduce that viewport while preserving native
 scrolling and every selection. Only a terminal too small for even one content
 row plus its help falls back to Huh's complete accessible list. Set `AGENTCFG_ACCESSIBLE=1` to request that mode explicitly.
 
@@ -77,74 +79,47 @@ approve a write: `sync --apply` and any confirmation bypass such as `--yes`
 are separate, explicit operations. `agentcfg config` is the interactive menu,
 so use an individual category with `--plain` in a noninteractive workflow.
 
-## `agentcfg init`: discover, preview, confirm
+## `agentcfg init`: import and migrate
 
-Initial setup inspects **existing user-level native MCP definitions and skill
-directories** of supported, installed harnesses. Discovery is limited to the
-user's home; it does not inspect open projects, start MCP servers, run skills
-or silently edit native configuration files.
+`agentcfg init` reads the supported user-level MCP definitions and skills,
+asks which AI harnesses to enable, then requests one confirmation. Approval
+imports the complete portable inventory into `~/.agentcfg/`, replaces the
+selected harnesses' MCP entries with `agentcfg connect` broker proxies, and
+copies the canonical skills into those harnesses' own directories.
 
-On an interactive terminal, `agentcfg init`:
-
-1. Identifies installed harnesses and reads their supported native MCP and
-   skill sources. It presents discovered candidates and any duplicate names
-   or configurations that cannot be safely resolved.
-2. Shows Huh Select menus for navigation/actions and MultiSelect checkboxes
-   only for multi-entry availability choices. The user chooses which
-   harnesses, MCPs and skills to include in the canonical configuration.
-3. Previews the proposed `~/.agentcfg/mcp.json`,
-   `~/.agentcfg/agentcfg.json`, and skills.
-4. Requests **explicit Huh confirmation before creating canonical sources**.
-   Cancelling leaves them untouched.
-5. At the end of initialization, previews the native harness synchronization
-   plan and asks **whether to apply it**, using an explicit confirmation. The
-   user may decline and keep only the canonical configuration.
-
-The preview is available without writing anything:
+Native MCP provenance does not restrict availability: every imported MCP is
+available to all selected harnesses. Explicit skill `metadata.harness` filters
+remain effective. Imported skills are removed from their old native locations,
+including shared/legacy roots and unselected harnesses; selected destinations
+are recreated as physical copies. Neither MCP processes nor skills are executed
+during initialization. Unrelated native settings are preserved.
 
 ```sh
-agentcfg init --plain                  # Read-only discovery and preview
-agentcfg init --harnesses codex,cursor # Limit the selected harnesses
+agentcfg init --plain                     # Read-only discovery and full details
+agentcfg init                            # Choose harnesses and confirm once
+agentcfg init --harnesses codex,cursor     # Set the destination selection
+agentcfg init --harnesses codex,cursor --yes # Approve the complete migration
 ```
 
-`agentcfg init` handles both canonical creation and the **optional native
-sync prompt** within that one interactive flow. It does not need an `--apply`
-flag. Only exact native entries selected during discovery may be adopted after
-their original file/tree fingerprints have been revalidated (compare-and-swap,
-CAS). Supported JSON/JSONC MCP entries and byte-identical skill trees can be
-adopted with explicit consent and backups; unrelated settings remain untouched.
-**Native Codex TOML MCP adoption is refused**, including when the discovered
-entry appears equivalent. Unexpected collisions, changed files or unproved
-entries block the operation; no general force-overwrite mode exists.
+`--yes` authorizes both canonical creation and native migration. There is no
+optional synchronization step after successful initialization. JSON/JSONC and
+Codex TOML MCP entries are adopted only with revalidated scanner proofs.
+Original files and skill directories are backed up for `agentcfg restore`.
 
-For deliberate unattended canonical setup, `--yes` skips the interactive
-creation confirmation **only**; it does not approve native synchronization:
+Unsupported active MCP definitions, unreadable/nonportable skills and ambiguous
+names block initialization before canonical publication; `init --plain` shows
+the source details. Init must not report success with a partial inventory.
+A later migration failure attempts to restore the native baseline and archives
+the imported canonical sources, so a failed attempt can be reviewed and retried.
 
-```sh
-agentcfg init --yes                   # Create canonical sources only; no native sync
-```
+After success, only `~/.agentcfg/` supplies upstream definitions and skill
+content. Use `agentcfg config` to edit availability, then `agentcfg sync --plain`
+and `agentcfg sync --apply` for subsequent changes. Skills are copied by default;
+`sync --skill-mode auto` or `symlink` remains an explicit alternative. Native
+manual edits remain conflicts, rather than being silently overwritten.
 
-Review the output or run `agentcfg init --plain` first. The optional final
-native synchronization prompt exists **only in interactive initialization**.
-`agentcfg init --yes` must never silently write native harness settings. To
-apply native changes from a script, use a separate explicit command:
-
-```sh
-agentcfg init --yes
-agentcfg sync --plain         # Review native changes without writing
-agentcfg sync --apply --yes   # Explicit noninteractive native synchronization
-```
-
-The application still checks ownership, conflicts and fingerprints (CAS) and
-creates backups as appropriate. Without the required confirmation, no writes
-occur. **Existing canonical files and any unproved or modified native entries
-must never be silently overwritten**. Resolve conflicts by inspecting the
-paths and entries reported by the preview.
-
-After configuration, `agentcfg validate` checks canonical sources, and
-`agentcfg sync` produces an independent read-only preview. For ongoing
-changes outside initialization, use `agentcfg sync --apply` only after
-reviewing that plan.
+For an earlier canonical-only initialization, run `agentcfg restore` before
+initializing again. Restoration preserves the old canonical data in an archive.
 
 ## Shell completion
 

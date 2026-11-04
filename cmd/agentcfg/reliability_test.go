@@ -110,12 +110,12 @@ func TestPlainCommandsReportOutputFailures(t *testing.T) {
 	}
 }
 
-func TestInitNativeSyncCannotBypassInteractiveApproval(t *testing.T) {
+func TestInitWithoutApprovalOnlyPreviews(t *testing.T) {
 	home := t.TempDir()
 	before := projectSnapshot(t, home)
-	err := previewAndApplyInitSync(context.Background(), home, nil, io.Discard, false, nil, nil, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "interactive confirmation") {
-		t.Fatalf("native init synchronization accepted missing approval: %v", err)
+	err := runInitWizard(context.Background(), home, initProposal{}, initOptions{}, nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if after := projectSnapshot(t, home); !sameProjectSnapshot(before, after) {
 		t.Fatal("unapproved native init synchronization modified the home")

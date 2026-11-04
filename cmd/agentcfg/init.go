@@ -13,16 +13,16 @@ import (
 
 	"agentcfg/internal/bootstrap"
 	"agentcfg/internal/config"
+	"agentcfg/internal/tui"
 )
 
 // initialize discovers native user-scope harness MCPs and skills before any
 // writes. Only the explicit --yes or successful Huh confirmation publishes a
-// fresh canonical user configuration. Once created, init reviews the native
-// synchronization plan and asks for a final Huh confirmation to apply.
+// fresh canonical user configuration and migrates the selected native harnesses.
 func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []string, input io.Reader, output io.Writer) error {
 	harnesses := flags.String("harnesses", "", "comma-separated harness identifiers; default: autodetect native user configuration")
 	plain := flags.Bool("plain", false, "preview discovery without creating configuration")
-	yes := flags.Bool("yes", false, "approve only canonical initialization without interactive prompts; native files remain untouched")
+	yes := flags.Bool("yes", false, "approve initialization, broker routing and native skill migration without prompts")
 	if err := parse(flags, args); err != nil {
 		return helpResult(err)
 	}
@@ -64,7 +64,7 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 
 // proposalFromNative converts only the scanner's vetted, selected candidates
 // into portable canonical entries. Duplicate names are excluded (not renamed
-// or overwritten), and server definitions retain discovered harness filters.
+// or overwritten), and native provenance does not restrict canonical availability.
 func proposalFromNative(plan *bootstrap.Plan) (initProposal, error) {
 	if plan == nil {
 		return initProposal{}, errors.New("missing native discovery inventory")
@@ -84,7 +84,7 @@ func proposalFromNative(plan *bootstrap.Plan) (initProposal, error) {
 		return initProposal{}, fmt.Errorf("invalid discovered harnesses: %w", err)
 	}
 	for _, warning := range plan.Warnings {
-		proposal.Warnings = append(proposal.Warnings, fmt.Sprintf("%s: %s", warning.Harness, warning.Message))
+		proposal.Warnings = append(proposal.Warnings, fmt.Sprintf("%s: %s (%s)", warning.Harness, warning.Message, warning.Source))
 	}
 	for _, candidate := range plan.Servers {
 		if !candidate.Selected {
@@ -107,14 +107,18 @@ func proposalFromNative(plan *bootstrap.Plan) (initProposal, error) {
 		if err := json.Unmarshal(serialized, &server); err != nil {
 			return initProposal{}, err
 		}
-		if len(candidate.Harnesses) > 0 {
-			server["harnesses"] = append([]string(nil), candidate.Harnesses...)
-		}
+		// Native provenance is not an availability policy. The canonical entry
+		// is available to every globally selected harness after initialization.
+		delete(server, "harnesses")
 		proposal.Servers[candidate.Name] = server
-		proposal.ServerSources[candidate.Name] = strings.Join(candidate.Harnesses, ", ")
+		proposal.ServerSources[candidate.Name] = strings.Join(tui.HarnessNames(candidate.Harnesses), ", ")
+	}
+	skillNames := map[string]int{}
+	for _, candidate := range plan.Skills {
+		skillNames[candidate.Name]++
 	}
 	for _, candidate := range plan.Skills {
-		if !candidate.Selected {
+		if skillNames[candidate.Name] > 1 {
 			for _, warning := range candidate.Warnings {
 				proposal.Warnings = append(proposal.Warnings, fmt.Sprintf("skill %s: %s", candidate.Name, warning))
 			}

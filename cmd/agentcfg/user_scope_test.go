@@ -97,7 +97,7 @@ func TestGlobalCLIUsesHomeWithoutProjectagentcfg(t *testing.T) {
 	runCLI("sync", "--apply")
 	for _, target := range []string{
 		filepath.Join(home, ".cursor", "skills", "review", "SKILL.md"),
-		filepath.Join(home, ".agents", "skills", "review", "SKILL.md"),
+		filepath.Join(home, ".codex", "skills", "review", "SKILL.md"),
 		filepath.Join(home, ".gemini", "config", "skills", "review", "SKILL.md"),
 	} {
 		source, err := os.ReadFile(filepath.Join(canonical, "skills", "review", "SKILL.md"))

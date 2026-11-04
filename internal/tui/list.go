@@ -71,7 +71,7 @@ func (s interfaceSession) listHarnesses(cfg *config.Config) error {
 	choices := statusNavigationOptions(rows)
 	choices = append(choices, huh.NewOption("Back", "back"))
 	for {
-		choice, err := s.selectAction("Harnesses", "User-level MCP and skill locations.", choices...)
+		choice, err := s.selectAction("Harnesses", "", choices...)
 		if isCancelled(err) || choice == "back" || choice == "" {
 			return nil
 		}

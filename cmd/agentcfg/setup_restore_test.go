@@ -23,6 +23,61 @@ func mustRead(t *testing.T, path string) []byte {
 	return data
 }
 
+func TestInitImportsSharedSkillsEvenWithCodexUnchecked(t *testing.T) {
+	home := t.TempDir()
+	shared := filepath.Join(home, ".agents", "skills", "review")
+	if err := os.MkdirAll(shared, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte("---\nname: review\ndescription: Review changes.\n---\nOriginal shared instructions.\n")
+	if err := os.WriteFile(filepath.Join(shared, "SKILL.md"), original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := bootstrap.Discover(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := proposalFromNative(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := []string{"cursor"}
+	if err := writeInitialSources(home, config.Settings{Harnesses: selected}, proposal.Servers, proposal.Skills); err != nil {
+		t.Fatal(err)
+	}
+	mcp, skills, err := initAdoptionProofs(inventory, proposal.Servers, proposal.Skills, selected)
+	if err != nil || len(skills) != 1 {
+		t.Fatalf("shared import proof was lost: %v, %+v", err, skills)
+	}
+	cfg, err := config.Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := syncer.BuildPlan(cfg, syncer.Options{Root: home, Home: home, Scope: "user", SkillMode: "copy", AdoptExisting: true, AdoptMCP: mcp, AdoptSkills: skills})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(shared); !os.IsNotExist(err) {
+		t.Fatal("shared import was not removed")
+	}
+	if !bytes.Equal(mustRead(t, filepath.Join(home, ".cursor", "skills", "review", "SKILL.md")), original) {
+		t.Fatal("Cursor received different skill bytes")
+	}
+	restore, err := syncer.BuildRestorePlan(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restore.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(mustRead(t, filepath.Join(shared, "SKILL.md")), original) {
+		t.Fatal("original shared skill was not restored")
+	}
+}
+
 func initNativeFixture(t *testing.T) (string, []byte) {
 	t.Helper()
 	home := t.TempDir()
@@ -50,7 +105,7 @@ func initNativeFixture(t *testing.T) (string, []byte) {
 	if err := os.Chtimes(home, changed, changed); err != nil {
 		t.Fatal(err)
 	}
-	if err := runInitWizard(context.Background(), home, proposal, initOptions{Yes: true, Harnesses: []string{"claude-code", "cursor"}}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
+	if err := writeInitialSources(home, config.Settings{Harnesses: []string{"claude-code", "cursor"}}, proposal.Servers, proposal.Skills); err != nil {
 		t.Fatal(err)
 	}
 	adoptMCP, adoptSkills, err := initAdoptionProofs(inventory, proposal.Servers, proposal.Skills, []string{"claude-code", "cursor"})

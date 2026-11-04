@@ -18,6 +18,7 @@ import (
 
 	"agentcfg/internal/config"
 	"agentcfg/internal/pathutil"
+	toml "github.com/pelletier/go-toml/v2"
 
 	"github.com/tailscale/hujson"
 )
@@ -301,9 +302,6 @@ func prepareAdoption(c *config.Config, opts Options, all []target, selected map[
 		if pathErr != nil || !sameAdoptionPath(nativePath, t.path) {
 			return nil, fmt.Errorf("MCP adoption path is not the active native configuration for %s: %s", proof.Harness, proof.Path)
 		}
-		if t.toml {
-			return nil, fmt.Errorf("native TOML MCP adoption is not supported for %s; import without --apply and resolve the native tables explicitly before syncing", t.name)
-		}
 		server, ok := c.Servers[proof.CanonicalName]
 		if proof.Name == "" || !ok || !config.Allows(server.Harnesses, t.name) {
 			return nil, fmt.Errorf("MCP adoption %q has no enabled canonical server %q for %s", proof.Name, proof.CanonicalName, t.name)
@@ -337,22 +335,16 @@ func prepareAdoption(c *config.Config, opts Options, all []target, selected map[
 	}
 	for _, proof := range opts.AdoptSkills {
 		t, ok := targets[proof.Harness]
-		if !ok || !selected[proof.Harness] {
-			return nil, fmt.Errorf("skill adoption names an unselected or unknown harness %q", proof.Harness)
+		nativePath, pathErr := scopePath(home, proof.Path)
+		if !ok {
+			return nil, fmt.Errorf("skill adoption names an unknown harness %q", proof.Harness)
 		}
-		var canonical *config.Skill
-		for i := range c.Skills {
-			if c.Skills[i].Name == proof.CanonicalName {
-				canonical = &c.Skills[i]
-				break
-			}
-		}
-		if canonical == nil || !config.Allows(canonical.Harnesses, t.name) {
+		canonical := canonicalSkill(c, proof.CanonicalName)
+		if canonical == nil {
 			return nil, fmt.Errorf("skill adoption has no enabled canonical skill %q for %s", proof.CanonicalName, t.name)
 		}
-		destination := filepath.Join(t.skills, filepath.Base(canonical.Path))
-		nativePath, pathErr := scopePath(home, proof.Path)
-		if pathErr != nil || !sameAdoptionPath(nativePath, destination) || sameAdoptionPath(destination, canonical.Path) {
+		destination := nativePath
+		if pathErr != nil || !nativeSkillSource(home, t, destination) || filepath.Base(destination) != filepath.Base(canonical.Path) || sameAdoptionPath(destination, canonical.Path) {
 			return nil, fmt.Errorf("skill adoption path is not the generated native destination for %q: %s", proof.CanonicalName, proof.Path)
 		}
 		if !validSHA256(proof.TreeSHA256) {
@@ -402,9 +394,15 @@ func (p *Plan) adoptedMCP(t target, before []byte, previous map[string]string) (
 		return previous, false, nil
 	}
 	proofs := p.adoption.mcp[t.path]
-	document, err := uniqueJSONObject(before)
+	var document map[string]any
+	var err error
+	if t.toml {
+		err = toml.Unmarshal(bytes.TrimPrefix(before, []byte{0xef, 0xbb, 0xbf}), &document)
+	} else {
+		document, err = uniqueJSONObject(before)
+	}
 	if err != nil {
-		return nil, false, fmt.Errorf("cannot adopt ambiguous native JSON: %w", err)
+		return nil, false, fmt.Errorf("cannot adopt ambiguous native configuration: %w", err)
 	}
 	entries, ok := document[t.key].(map[string]any)
 	if !ok {

@@ -11,24 +11,59 @@ import (
 
 const visibleMenuOptions = 10
 
-// Reserve the last option row for Back on short navigation menus. Decorate the
-// rendered view rather than adding dummy options: one Down still moves directly
-// from the last item to Back, and accessible numbering never contains spacers.
-func padNavigationBack(field *huh.Select[string], options []huh.Option[string], rows int) string {
-	view := field.View()
-	if len(options) == 0 || len(options) > visibleMenuOptions || !isTerminalAction(options[len(options)-1].Value) || field.GetFiltering() {
-		return view
+// Pin the action outside the scrollable body. Both navigation and checkbox
+// menus use native Huh rows and the same terminal-cell cursor handling.
+func hasMenuCursor(line string) bool {
+	frame := Theme().Focused.Base.GetHorizontalFrameSize()
+	return ansi.Strip(ansi.Cut(line, frame, frame+2)) == "> "
+}
+
+func emptyMenuLine(line string) bool {
+	frame := Theme().Focused.Base.GetHorizontalFrameSize()
+	return strings.TrimSpace(ansi.Strip(ansi.Cut(line, frame, lipgloss.Width(line)))) == ""
+}
+
+func menuOptionLabel(line string) string {
+	frame := Theme().Focused.Base.GetHorizontalFrameSize()
+	return strings.TrimSpace(ansi.Strip(ansi.Cut(line, frame+2, lipgloss.Width(line))))
+}
+
+// Measure a wrapped native option without reproducing Huh's word wrapping.
+// Whitespace includes layout padding and separators; all label bytes remain.
+func menuOptionEnd(lines []string, start int, label string) int {
+	remaining := strings.Join(strings.Fields(label), "")
+	for i := start; i < len(lines); i++ {
+		part := strings.Join(strings.Fields(menuOptionLabel(lines[i])), "")
+		var ok bool
+		remaining, ok = strings.CutPrefix(remaining, part)
+		if !ok {
+			break
+		}
+		if remaining == "" {
+			return i + 1
+		}
 	}
-	lines := strings.Split(view, "\n")
-	back := len(lines) - 1
-	if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(lines[back])), options[len(options)-1].Key) {
-		return view
+	return start + 1
+}
+
+func renderPinnedAction(view string, header, rows int, label string, active bool) string {
+	if active {
+		lines := strings.Split(view, "\n")
+		frame := Theme().Focused.Base.GetHorizontalFrameSize()
+		for i := header; i < len(lines); i++ {
+			if hasMenuCursor(lines[i]) {
+				lines[i] = ansi.Cut(lines[i], 0, frame) + "  " + ansi.Cut(lines[i], frame+2, lipgloss.Width(lines[i]))
+			}
+		}
+		view = strings.Join(lines, "\n")
 	}
-	// Measure Huh's own wrapped header independently of its option viewport.
-	probe := *field
-	probe.Height(1)
-	header := lipgloss.Height(probe.View()) - 1
-	return padBottomAction(view, header, rows)
+	cursor := "  "
+	if active {
+		cursor = "> "
+	}
+	base := Theme().Focused.Base
+	line := base.Width(max(0, lipgloss.Width(view)-base.GetHorizontalBorderSize())).Render(cursor + label)
+	return padBottomAction(view+"\n"+line, header, rows)
 }
 
 func isTerminalAction(id string) bool { return id == "back" || id == "exit" }

@@ -147,7 +147,7 @@ func TestNavigationColoredSelectKeepsPlainSearchableKeysAndWidths(t *testing.T) 
 	_, _ = colored.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
 	_, _ = colored.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("0")})
 	filtered := colored.View()
-	if !strings.Contains(ansi.Strip(filtered), "MCP servers  ·  0") || strings.Contains(filtered, "Refresh") || strings.Contains(filtered, "Exit") {
+	if !strings.Contains(ansi.Strip(filtered), "MCP servers  ·  0") || strings.Contains(filtered, "Refresh") || !strings.Contains(filtered, "Exit") {
 		t.Fatalf("filtering by 0 included unrelated ANSI-colored choices: %q", filtered)
 	}
 }

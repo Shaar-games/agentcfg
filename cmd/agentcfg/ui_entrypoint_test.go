@@ -115,7 +115,7 @@ func TestHarnessesStillUseDirectHuhCheckboxes(t *testing.T) {
 	if err := run(context.Background(), []string{"harnesses"}, strings.NewReader("0\n"), &rendered, &diagnostics); err != nil {
 		t.Fatalf("agentcfg harnesses: %v (%s)", err, diagnostics.String())
 	}
-	if !strings.Contains(rendered.String(), "Harness availability") || !strings.Contains(rendered.String(), "Claude Code") {
+	if !strings.Contains(rendered.String(), "Select your AI harnesses") || !strings.Contains(rendered.String(), "Claude Code") {
 		t.Fatalf("direct harness checkbox list unavailable: %s", rendered.String())
 	}
 }

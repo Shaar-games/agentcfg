@@ -41,7 +41,7 @@ func restore(ctx context.Context, flags *flag.FlagSet, home string, args []strin
 			_, err := fmt.Fprintln(output, "Preview only; run restore in an interactive terminal or use --yes to apply explicitly.")
 			return err
 		}
-		confirmed, err := terminalConfirm(ctx, input, output, "Restore the pre-init configuration?", "Native changes are rechecked before restoration. Canonical sources and their backups are archived, not deleted.")
+		confirmed, err := terminalConfirm(ctx, input, output, "Restore the pre-init configuration?", "")
 		if err != nil || !confirmed {
 			return err
 		}

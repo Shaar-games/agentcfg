@@ -35,18 +35,19 @@ choices, previews the proposal, and requests confirmation **before creating
 canonical sources**. It does not execute discovered MCPs or skills.
 `agentcfg init --plain` produces only a read-only discovery preview.
 
-At the end of **interactive** `agentcfg init`, a separate native
-synchronization preview is shown and Huh confirmation **offers to apply it**.
-No `--apply` flag is required for initialization. **`agentcfg init --yes`
-confirms canonical creation only and never performs native synchronization.**
-For scripts, preview with `agentcfg sync --plain` and invoke
-`agentcfg sync --apply --yes` separately to authorize native changes. Neither
-command bypasses conflict or compare-and-swap (CAS) checks.
-Only native entries selected in discovery with exact revalidated proofs can be
-adopted: supported JSON/JSONC MCP entries and identical skill trees, with
-backups before authorized changes. Unrelated native settings and files are
-preserved. **Native TOML MCP adoption is refused**; ambiguous ownership,
-unexpected collisions or concurrent changes are never silently overwritten.
+A single confirmation approves the complete initialization: canonical import,
+broker proxies in selected harnesses, and physical skill copies. `init --yes`
+explicitly approves the same migration without prompts; `init --plain` remains
+read-only. There is no successful canonical-only init mode.
+
+All imported MCPs are available to the globally selected harnesses; their former
+native location is provenance, not an availability filter. All portable native
+skills are centralized, including skills from unselected harnesses, and copied
+according to their explicit `metadata.harness` filters. Their original locations
+are backed up and retired. JSON/JSONC and Codex TOML adoption preserve unrelated
+native settings. Incomplete imports and concurrent edits block initialization;
+a failed migration attempts to restore the native baseline and archives its
+canonical imports for review. `agentcfg restore` reverses a completed init.
 
 The configuration loader itself remains read-only. Initialization is an
 explicit CLI operation that reads supported installed harness locations and
@@ -126,7 +127,9 @@ Server overrides replace only fields explicitly present. For example, `"harnesse
 
 `shared` is the server default and requests a shared upstream instance. `isolated` requests a separate upstream connection for each client. Choose the latter when an MCP relies on private session state or client callbacks; see the runtime documentation for the supported shared-session operations.
 
-Harness-native discovery may still overlap the generated skill destinations. For example, a harness that reads `~/.agents/skills/` directly can see skills installed there for Codex, even if its own agentcfg filter excludes them. The canonical sources under `~/.agentcfg/skills/` are deliberately separate from the native discovery directory. A distribution filter is not an isolation or authorization boundary.
+Skills are distributed into each selected harness's own directory; Codex uses `~/.codex/skills/` (its [supported legacy user location](https://github.com/openai/codex/blob/main/codex-rs/ext/skills/src/host_roots.rs)), rather than the shared `~/.agents/skills/`. During initialization, imported skills from every native location are backed up and removed after their canonical copies have been verified; enabled destinations are replaced with physical copies. Existing agentcfg-managed shared skills migrate on the next sync. Unimported skills and manually modified managed entries are protected. `agentcfg restore` restores the original shared imports when an initialization restore point exists.
+
+The canonical sources remain under `~/.agentcfg/skills/`. Harness-native discovery can still read additional locations independently of agentcfg; distribution filters are not an isolation or authorization boundary.
 
 ## Portable manifests
 

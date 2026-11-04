@@ -12,17 +12,14 @@ harnesses sélectionnés. Ouvrir `agentcfg config` pour choisir les destinations
 et les skills dans les listes Huh, puis examiner `agentcfg sync` avant toute
 application avec `agentcfg sync --apply`.
 
-Lors de la première configuration, `agentcfg init` découvre les MCP et skills
-présents dans les dossiers natifs des harnesses installés. Il affiche les
-éléments à sélectionner et une prévisualisation, puis exige une confirmation Huh
-avant la création de `~/.agentcfg/`. `agentcfg init --plain` montre ce plan
-en lecture seule. **À la fin de `agentcfg init` interactif, une confirmation
-distincte propose d'appliquer la synchronisation native**, après
-prévisualisation. Aucun `--apply` n'est nécessaire pour ce parcours.
-**`agentcfg init --yes` crée uniquement la configuration canonique, sans
-synchronisation native.** Pour les scripts, exécuter ensuite explicitement
-`agentcfg sync --plain` pour prévisualiser, puis `agentcfg sync --apply --yes`
-pour autoriser l'écriture native. Ces commandes conservent les protections.
+Lors de la première configuration, `agentcfg init` importe les MCP et skills
+natifs dans `~/.agentcfg/`, remplace les MCP des harnesses sélectionnés par les
+proxies du broker et copie les skills depuis les sources canoniques. Une seule
+confirmation autorise ce parcours complet. `init --yes` autorise la même
+migration sans formulaire ; `init --plain` reste une prévisualisation sans écriture.
+Après un init réussi, `~/.agentcfg/` est la seule source de vérité. Les imports
+incomplets ou ambigus bloquent l'initialisation ; un échec de migration tente de
+restaurer l'état natif et archive les sources importées pour permettre un nouvel essai.
 
 Les menus d'action et de navigation sont des **Huh Select** : les flèches
 choisissent et **Entrée valide directement**. Les cases à cocher (MultiSelect)
@@ -35,13 +32,13 @@ une modification concurrente bloque l'opération concernée. Pour une
 prévisualisation ordinaire ultérieure, `agentcfg sync --plain` produit une
 sortie sans formulaire ; l'écriture nécessite toujours `--apply`.
 
-Lors de l'application de sync proposée par `init` et explicitement confirmée,
-seules les entrées natives
-sélectionnées et prouvées par le scanner peuvent être adoptées : MCP JSON/JSONC
-avec empreinte du fichier complet, et skills dont le contenu est identique à
-la source canonique. La **confirmation Huh finale** autorise leur remplacement
-ciblé, avec sauvegarde et revalidation CAS avant écriture. L'adoption de serveurs
-MCP en TOML Codex est refusée ; les autres entrées non prouvées restent intactes.
+L'initialisation adopte uniquement les entrées prouvées par le scanner, avec
+sauvegarde et revalidation CAS : MCP JSON/JSONC ou TOML Codex, et arbres de skills
+identiques à leur copie canonique. Les définitions upstream restent dans
+`~/.agentcfg/mcp.json` ; les fichiers natifs utilisent `agentcfg connect`.
+Les skills importés sont retirés de leurs emplacements d'origine, y compris
+ceux des harnesses non sélectionnés, puis copiés dans les destinations activées.
+Les autres clés de configuration native sont conservées.
 
 Un serveur MCP est généré individuellement dans chaque harness sélectionné.
 Les filtres de l’entrée canonique et les overrides des plugins sont évalués
@@ -79,14 +76,14 @@ sauvegardes. Une restauration ne remplace pas un fichier modifié concurremment.
 ## Skills
 
 Le dossier complet d’un skill est lié ou copié, pas seulement `SKILL.md`.
-`auto` tente un lien symbolique et copie si le système le refuse. `symlink`
+`copy` est le mode par défaut de la CLI. Le mode explicite `auto` tente un lien symbolique et copie si le système le refuse. `symlink`
 refuse de continuer lorsqu’un lien n’est pas disponible. `copy` convient lorsque
 le harness ou le système ne suit pas les liens. Aucune réécriture des noms du
 frontmatter n’est effectuée ; les collisions entre noms natifs doivent être
 résolues dans les sources.
 
 La source `~/.agentcfg/skills/` est distincte des destinations natives, notamment
-`~/.agents/skills/` pour Codex. Le contenu de chaque fichier du skill source,
+`~/.codex/skills/` pour Codex (emplacement utilisateur historique encore pris en charge). Le contenu de chaque fichier du skill source,
 dont `SKILL.md`, est conservé octet pour octet en mode copie. Aucun fichier de
 marquage n'est ajouté aux nouvelles copies. Les anciens marqueurs
 `.agentcfg-origin.json` restent reconnus à la lecture pour compatibilité.
@@ -96,9 +93,15 @@ version, même lorsqu’ils restent dans le plugin. Cela évite les copies ambig
 ou les références qui s’échappent de la destination. Un dossier source complet
 peut en revanche être résolu avant création du lien de destination.
 
-Les filtres ne peuvent pas empêcher un harness de scanner de lui-même les
-destinations natives, par exemple `~/.agents/skills/`. Ils ne constituent donc pas une ACL. Les sources ne
-sont jamais effacées pour contourner le scanner natif d’un logiciel.
+Les skills importés depuis `~/.agents/skills/` sont retirés de ce dossier partagé
+pendant init, après vérification de leur copie canonique. Les anciennes distributions gérées à cet emplacement migrent lors du
+prochain sync. Les originaux sont sauvegardés ; `restore` peut les remettre à leur
+place grâce au point de restauration initial. Aucun skill non importé ni aucune
+modification manuelle ne sont effacés.
+
+Les filtres ne peuvent pas empêcher un harness de scanner de lui-même d’autres
+emplacements. Ils ne constituent donc pas une ACL. Les sources canoniques ne
+sont jamais supprimées pour contourner le scanner natif d’un logiciel.
 
 ## Portée utilisateur
 

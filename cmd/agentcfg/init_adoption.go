@@ -76,9 +76,6 @@ func initAdoptionProofs(inventory *bootstrap.Plan, selectedServers map[string]ma
 		}
 	}
 	for _, candidate := range inventory.Skills {
-		if !candidate.Selected {
-			continue
-		}
 		chosen := false
 		for _, skill := range selectedSkills {
 			if skill.Name == candidate.Name && skill.Source == candidate.Source {
@@ -90,8 +87,9 @@ func initAdoptionProofs(inventory *bootstrap.Plan, selectedServers map[string]ma
 			continue
 		}
 		for _, origin := range candidate.Origins {
-			if !slices.Contains(harnesses, origin.Harness) {
-				continue
+			physical, err := physicalOrigin(origin.Source)
+			if err != nil {
+				return nil, nil, err
 			}
 			if candidate.TreeSHA256 == "" {
 				return nil, nil, fmt.Errorf("native skill %q has no verified scanner tree fingerprint", candidate.Name)
@@ -101,10 +99,6 @@ func initAdoptionProofs(inventory *bootstrap.Plan, selectedServers map[string]ma
 				return nil, nil, errors.New("duplicate native skill adoption origin")
 			}
 			seenSkills[key] = true
-			physical, err := physicalOrigin(origin.Source)
-			if err != nil {
-				return nil, nil, err
-			}
 			skills = append(skills, syncer.SkillAdoption{
 				Harness: origin.Harness, Path: physical,
 				CanonicalName: candidate.Name, TreeSHA256: candidate.TreeSHA256,

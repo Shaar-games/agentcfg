@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"agentcfg/internal/pathutil"
+	"agentcfg/internal/syncer"
 )
 
 type target struct {
@@ -22,9 +23,9 @@ type target struct {
 // absent: that registry cannot resolve its platform/profile user configuration.
 var targets = []target{
 	{name: "claude-code", configs: []string{".claude.json"}, skills: []string{".claude/skills"}, key: "mcpServers"},
-	{name: "codex", configs: []string{".codex/config.toml"}, skills: []string{".agents/skills"}, key: "mcp_servers", toml: true},
+	{name: "codex", configs: []string{".codex/config.toml"}, skills: []string{".agents/skills", ".codex/skills"}, key: "mcp_servers", toml: true},
 	{name: "cursor", configs: []string{".cursor/mcp.json"}, skills: []string{".cursor/skills"}, key: "mcpServers"},
-	{name: "opencode", configs: []string{".config/opencode/opencode.json", ".config/opencode/opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"}, skills: []string{".config/opencode/skills", ".opencode/skills"}, key: "mcp"},
+	{name: "opencode", configs: syncer.OpenCodeUserConfigPaths(), skills: []string{".config/opencode/skills", ".opencode/skills"}, key: "mcp"},
 	{name: "gemini", configs: []string{".gemini/settings.json"}, skills: []string{".gemini/skills"}, key: "mcpServers"},
 	{name: "antigravity", configs: []string{".gemini/config/mcp_config.json"}, skills: []string{".gemini/config/skills"}, key: "mcpServers"},
 }

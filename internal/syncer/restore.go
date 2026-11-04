@@ -50,7 +50,7 @@ func CreateInitRestorePoint(home string) error {
 // Later syncs never replace the pre-init baseline. Existing installations with
 // no marker are left untouched; guessing their original state would lose data.
 func (p *Plan) captureInitRestore() error {
-	if p.stateExists || p.root != p.base || len(p.Changes) == 0 {
+	if p.stateExists && !p.migratesSharedSkills || p.root != p.base || len(p.Changes) == 0 {
 		return nil
 	}
 	path := filepath.Join(p.root, ".agentcfg", initRestoreFile)
@@ -65,52 +65,37 @@ func (p *Plan) captureInitRestore() error {
 	if err := json.Unmarshal(data, &point); err != nil || point.Version != 1 {
 		return errors.New("invalid initialization restore point")
 	}
-	if len(point.Native) != 0 {
+	if len(point.Native) != 0 && !p.migratesSharedSkills {
 		return nil
 	}
 	for _, change := range p.Changes {
+		if p.stateExists && (!IsSharedSkillPath(p.base, change.Path) && filepath.Dir(change.Path) != filepath.Join(p.base, ".codex", "skills")) {
+			continue
+		}
 		relative, err := filepath.Rel(p.base, change.Path)
-		if err != nil || !withinScope(relative) {
-			return errors.New("restore target escapes user home")
+		if err != nil {
+			return err
 		}
-		entry := restoreEntry{Path: filepath.ToSlash(relative), BeforeExists: change.exists, AfterAbsent: change.remove}
-		if change.skill == nil {
-			entry.Before = change.before
-			entry.BeforeHash = rawDigest(change.before)
-			entry.AfterHash = rawDigest(change.after)
+		index := -1
+		for i := range point.Native {
+			if point.Native[i].Path == filepath.ToSlash(relative) {
+				index = i
+				break
+			}
+		}
+		var previous *restoreEntry
+		if index >= 0 {
+			previous = &point.Native[index]
+		}
+		entry, err := p.captureRestoreEntry(change, previous)
+		if err != nil {
+			return err
+		}
+		if index < 0 {
+			point.Native = append(point.Native, entry)
 		} else {
-			entry.Skill = true
-			entry.AfterAbsent = change.skill.remove
-			entry.AfterSource = change.skill.source
-			if !entry.AfterAbsent {
-				entry.AfterHash, err = SkillTreeSHA256(change.skill.source)
-				if err != nil {
-					return err
-				}
-			}
-			if change.exists {
-				entry.Backup = filepath.ToSlash(filepath.Join("restore", "skills", rawDigest([]byte(relative))[:16]))
-				backup := filepath.Join(p.root, ".agentcfg", filepath.FromSlash(entry.Backup))
-				if err := ensureNoSymlinkParents(p.root, backup); err != nil {
-					return err
-				}
-				entry.BeforeHash, err = SkillTreeSHA256(change.Path)
-				if err != nil {
-					return err
-				}
-				if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
-					return err
-				}
-				if err := copySkill(change.Path, backup); err != nil {
-					return err
-				}
-				hash, err := SkillTreeSHA256(backup)
-				if err != nil || hash != entry.BeforeHash {
-					return errors.New("restore skill copy differs from the native original")
-				}
-			}
+			point.Native[index] = entry
 		}
-		point.Native = append(point.Native, entry)
 	}
 	encoded, err := json.MarshalIndent(point, "", "  ")
 	if err != nil {
@@ -122,6 +107,59 @@ func (p *Plan) captureInitRestore() error {
 		}
 		return fileUnchanged(path, data, true)
 	})
+}
+
+// Existing entries retain their original backup across the shared-root
+// migration; only the expected post-sync state is updated.
+func (p *Plan) captureRestoreEntry(change Change, previous *restoreEntry) (restoreEntry, error) {
+	relative, err := filepath.Rel(p.base, change.Path)
+	if err != nil || !withinScope(relative) {
+		return restoreEntry{}, errors.New("restore target escapes user home")
+	}
+	entry := restoreEntry{Path: filepath.ToSlash(relative), BeforeExists: change.exists}
+	if previous != nil {
+		entry = *previous
+	}
+	entry.AfterAbsent = change.remove
+	if change.skill == nil {
+		if previous == nil {
+			entry.Before = change.before
+			entry.BeforeHash = rawDigest(change.before)
+		}
+		entry.AfterHash = rawDigest(change.after)
+	} else {
+		entry.Skill = true
+		entry.AfterAbsent = change.skill.remove
+		entry.AfterSource = change.skill.source
+		if !entry.AfterAbsent {
+			entry.AfterHash, err = SkillTreeSHA256(change.skill.source)
+			if err != nil {
+				return restoreEntry{}, err
+			}
+		}
+		if previous == nil && change.exists {
+			entry.Backup = filepath.ToSlash(filepath.Join("restore", "skills", rawDigest([]byte(relative))[:16]))
+			backup := filepath.Join(p.root, ".agentcfg", filepath.FromSlash(entry.Backup))
+			if err := ensureNoSymlinkParents(p.root, backup); err != nil {
+				return restoreEntry{}, err
+			}
+			entry.BeforeHash, err = SkillTreeSHA256(change.Path)
+			if err != nil {
+				return restoreEntry{}, err
+			}
+			if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
+				return restoreEntry{}, err
+			}
+			if err := copySkill(change.Path, backup); err != nil {
+				return restoreEntry{}, err
+			}
+			hash, err := SkillTreeSHA256(backup)
+			if err != nil || hash != entry.BeforeHash {
+				return restoreEntry{}, errors.New("restore skill copy differs from the native original")
+			}
+		}
+	}
+	return entry, nil
 }
 
 // RestorePlan reuses sync's preimage checks, atomic replacements, backups and
@@ -231,6 +269,16 @@ func restoreTarget(base, relative string, skill bool) (string, error) {
 		return "", errors.New("invalid initialization restore path")
 	}
 	path := filepath.Join(base, filepath.FromSlash(relative))
+	if skill && legacySkillPath(base, path) {
+		return path, nil
+	}
+	if !skill {
+		for _, candidate := range OpenCodeUserConfigPaths() {
+			if path == filepath.Join(base, candidate) {
+				return path, nil
+			}
+		}
+	}
 	for _, target := range registry(base, "user") {
 		if !skill && path == target.path || skill && filepath.Dir(path) == target.skills {
 			return path, nil

@@ -260,7 +260,7 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 		return encoder.Encode(status)
 	case "stop":
 		if interactive && !yes {
-			confirmed, err := terminalConfirm(ctx, input, output, "Stop the agentcfg broker?", "Managed MCP processes will be closed. This does not alter user configuration.")
+			confirmed, err := terminalConfirm(ctx, input, output, "Managed MCP processes will be closed. This does not alter user configuration.", "")
 			if err != nil {
 				return err
 			}
@@ -271,9 +271,7 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 		if err := broker.Stop(ctx, root); err != nil {
 			return err
 		}
-		if interactive {
-			return terminalNote(ctx, input, output, "Broker stopped", "Shutdown requested for the active user's agentcfg broker.")
-		}
+
 		_, err := fmt.Fprintln(output, "Broker shutdown requested.")
 		return err
 	default:
@@ -340,7 +338,7 @@ func synchronize(ctx context.Context, flags *flag.FlagSet, root *string, args []
 	plain := flags.Bool("plain", false, "plain output without Huh terminal forms")
 	yes := flags.Bool("yes", false, "skip Huh confirmation for --apply")
 	scope := "user"
-	mode := flags.String("skill-mode", "auto", "auto (symlink, copy fallback), symlink, or copy")
+	mode := flags.String("skill-mode", "copy", "copy (default), auto (symlink, copy fallback), or symlink")
 	binary := flags.String("binary", "", "absolute installed agentcfg binary path (defaults to current executable)")
 	if err := parse(flags, args); err != nil {
 		return helpResult(err)
@@ -367,8 +365,8 @@ func synchronize(ctx context.Context, flags *flag.FlagSet, root *string, args []
 	}
 	interactive := terminalPresentation(input, output, *plain)
 	if interactive {
-		title := "User-scope synchronization preview"
-		if err := terminalNote(ctx, input, output, title, fmt.Sprintf("%d planned change(s):\n%s\nOriginal SKILL.md files are never rewritten during distribution.", len(plan.Changes), changes.String())); err != nil {
+		title := "Sync preview"
+		if err := terminalNote(ctx, input, output, title, fmt.Sprintf("%d file(s)\n%s", len(plan.Changes), changes.String())); err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {
 				return nil
 			}
@@ -387,7 +385,7 @@ func synchronize(ctx context.Context, flags *flag.FlagSet, root *string, args []
 		return nil
 	}
 	if interactive && !*yes && len(plan.Changes) > 0 {
-		confirmed, err := terminalConfirm(ctx, input, output, "Apply these user-level changes?", "The plan is revalidated before writing. Unmanaged configuration is preserved.")
+		confirmed, err := terminalConfirm(ctx, input, output, "Apply changes?", "")
 		if err != nil {
 			return err
 		}

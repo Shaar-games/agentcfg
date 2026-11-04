@@ -259,10 +259,10 @@ func TestAdoptionRefusesAmbiguousJSON(t *testing.T) {
 	}
 }
 
-func TestAdoptionRefusesNativeTOMLWithoutWriting(t *testing.T) {
+func TestAdoptionSupportsNativeTOMLWithoutPlanningWrites(t *testing.T) {
 	f := newAdoptionFixture(t, "codex", false)
-	if _, err := BuildPlan(f.cfg, f.opts); err == nil || !strings.Contains(err.Error(), "TOML MCP adoption is not supported") {
-		t.Fatalf("unsupported TOML adoption did not fail explicitly: %v", err)
+	if _, err := BuildPlan(f.cfg, f.opts); err != nil {
+		t.Fatal(err)
 	}
 	assertAdoptionBytes(t, f.target.path, f.before)
 	assertNoAdoptionManifest(t, f.opts.Home)

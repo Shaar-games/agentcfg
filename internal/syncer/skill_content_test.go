@@ -33,7 +33,7 @@ func TestSkillInstallationPreservesOriginalSKILLmdBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{
-		filepath.Join(home, ".agents", "skills", "review", "SKILL.md"),
+		filepath.Join(home, ".codex", "skills", "review", "SKILL.md"),
 		filepath.Join(home, ".gemini", "config", "skills", "review", "SKILL.md"),
 		source,
 	} {
@@ -46,7 +46,7 @@ func TestSkillInstallationPreservesOriginalSKILLmdBytes(t *testing.T) {
 		}
 	}
 	for _, directory := range []string{
-		filepath.Join(home, ".agents", "skills", "review"),
+		filepath.Join(home, ".codex", "skills", "review"),
 		filepath.Join(home, ".gemini", "config", "skills", "review"),
 	} {
 		entries, err := os.ReadDir(directory)

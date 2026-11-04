@@ -18,7 +18,13 @@ func registry(base, scope string) []target {
 	opencode := "opencode.json"
 	if scope == "user" {
 		claude = ".claude.json"
-		opencode = filepath.Join(".config", "opencode", "opencode.json")
+		opencode = OpenCodeUserConfigPaths()[0]
+		for _, candidate := range OpenCodeUserConfigPaths() {
+			if _, err := os.Stat(filepath.Join(base, candidate)); err == nil {
+				opencode = candidate
+				break
+			}
+		}
 	}
 	if _, err := os.Stat(filepath.Join(base, opencode+"c")); err == nil {
 		if _, err := os.Stat(filepath.Join(base, opencode)); os.IsNotExist(err) {
@@ -36,6 +42,9 @@ func registry(base, scope string) []target {
 	}
 	if scope == "user" {
 		for i := range values {
+			if values[i].name == "codex" {
+				values[i].skills = ".codex/skills"
+			}
 			if values[i].name == "opencode" {
 				values[i].skills = ".config/opencode/skills"
 			}
@@ -46,6 +55,13 @@ func registry(base, scope string) []target {
 		values[i].skills = filepath.Join(base, filepath.FromSlash(values[i].skills))
 	}
 	return values
+}
+
+// Preferred and legacy user locations are shared by discovery, projection and
+// restore. A lone existing legacy config stays active instead of being bypassed.
+func OpenCodeUserConfigPaths() []string {
+	return []string{filepath.Join(".config", "opencode", "opencode.json"), filepath.Join(".config", "opencode", "opencode.jsonc"),
+		filepath.Join(".opencode", "opencode.json"), filepath.Join(".opencode", "opencode.jsonc")}
 }
 
 func proxyEntry(t target, binary, root, name string) map[string]any {

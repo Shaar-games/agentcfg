@@ -28,6 +28,15 @@ type skillChange struct {
 	adoptionHash                         string
 }
 
+func canonicalSkill(c *config.Config, name string) *config.Skill {
+	for i := range c.Skills {
+		if c.Skills[i].Name == name {
+			return &c.Skills[i]
+		}
+	}
+	return nil
+}
+
 func treeFingerprint(path string) (string, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -103,9 +112,7 @@ func (p *Plan) planSkills(t target, c *config.Config, selected bool, mode string
 			return fmt.Errorf("skills %s and %s both install as %s; rename one at its source", other.Name, skill.Name, destination)
 		}
 		desired[destination] = skill
-		if t.name == "codex" && len(skill.Harnesses) != 0 {
-			p.Warnings = append(p.Warnings, "Codex skill destination .agents/skills may also be discovered by other harnesses; filters control generated files, not native discovery")
-		}
+
 	}
 	paths := map[string]bool{}
 	for path := range desired {
@@ -114,6 +121,13 @@ func (p *Plan) planSkills(t target, c *config.Config, selected bool, mode string
 	for path := range old.Skills {
 		if filepath.Dir(path) == t.skills {
 			paths[path] = true
+		}
+	}
+	if p.adoption != nil {
+		for path := range p.adoption.skills {
+			if sameAdoptionPath(filepath.Dir(path), t.skills) {
+				paths[path] = true
+			}
 		}
 	}
 	if len(paths) == 0 {
@@ -128,10 +142,32 @@ func (p *Plan) planSkills(t target, c *config.Config, selected bool, mode string
 	}
 	sort.Strings(ordered)
 	for _, destination := range ordered {
+		if desired[destination].Path == "" && p.adoption != nil && p.adoption.skills[destination].CanonicalName != "" {
+			if err := p.planImportedSkillRemoval(destination, c); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := p.planSkill(destination, desired[destination], desired[destination].Path != "", mode, old.Skills[destination]); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func (p *Plan) planImportedSkillRemoval(path string, c *config.Config) error {
+	proof := p.adoption.skills[path]
+	canonical := canonicalSkill(c, proof.CanonicalName)
+	if canonical == nil {
+		return fmt.Errorf("native skill has no confirmed canonical import: %s", path)
+	}
+	if err := p.planSkill(path, *canonical, true, "copy", skillRecord{}); err != nil {
+		return err
+	}
+	delete(p.state.Skills, path)
+	change := &p.Changes[len(p.Changes)-1]
+	change.skill.remove = true
+	change.Action = "remove imported skill"
 	return nil
 }
 

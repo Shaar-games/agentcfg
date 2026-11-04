@@ -43,7 +43,7 @@ func configure(ctx context.Context, home string, input io.Reader, output io.Writ
 		return err
 	}
 	if !ready {
-		description := "No initialized configuration was found. Discover existing user-level MCP servers and skills now?"
+		description := ""
 		var partial *syncer.RestorePlan
 		if _, err := os.Lstat(filepath.Join(home, ".agentcfg")); err == nil {
 			partial, err = syncer.BuildRestorePlan(home)
@@ -53,7 +53,7 @@ func configure(ctx context.Context, home string, input io.Reader, output io.Writ
 			if len(partial.Changes) != 0 {
 				return errors.New("incomplete canonical configuration with native changes; review agentcfg restore --plain before initializing again")
 			}
-			description = "Incomplete canonical sources were found. Archive them at " + partial.Archive + " and initialize again? Native files stay untouched until the later synchronization confirmation."
+			description = "Incomplete canonical sources.\nArchive: " + partial.Archive
 		}
 		confirmed, err := terminalConfirm(ctx, input, output, "Initialize agentcfg first?", description)
 		if err != nil || !confirmed {

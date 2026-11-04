@@ -14,8 +14,6 @@ Share local MCP servers, route skills and manage user-level harness configuratio
 
 <img src="docs/demo/agentcfg-config.gif" width="850" alt="Animated agentcfg config menu selecting community-inspired example MCP servers" />
 
-*Real `agentcfg config` recording, using safe, synthetic community-inspired fixtures. [VHS tape](docs/demo/agentcfg-config.tape).*
-
 </div>
 
 ## What it does
@@ -52,7 +50,7 @@ agentcfg list           # Browse configured items
 agentcfg sync           # Preview changes to native harness configuration
 ```
 
-`init` asks before creating canonical files, then offers a separate preview and confirmation before native sync. `init --plain` is read-only; `init --yes` creates **canonical files only**.
+`init` asks once before importing sources and migrating the selected harnesses. After success, `~/.agentcfg` is the single source of truth: MCPs connect through the broker and skills are copied from the canonical inventory. `init --plain` is read-only; `init --yes` approves the complete migration.
 
 Opening `agentcfg config` before setup offers to run `init`. Use `agentcfg restore --plain` to preview recovery to the pre-init state, then `agentcfg restore` to confirm. Native files are checked before restoration; canonical sources and backups are archived. [Recovery details](docs/cli.md#agentcfg-restore-return-to-the-pre-init-state).
 
@@ -61,8 +59,6 @@ Use `agentcfg mcp`, `agentcfg skill` or `agentcfg harness` to jump directly to a
 ## Browse the configuration
 
 <img src="docs/demo/agentcfg-list.gif" width="850" alt="Animated agentcfg list browsing synthetic Vercel skills and Context7 and Playwright MCP entries" />
-
-*Recorded with `agentcfg list`. The example names reference [Context7](https://github.com/upstash/context7), [Playwright MCP](https://github.com/microsoft/playwright-mcp) and [Vercel Agent Skills](https://github.com/vercel-labs/agent-skills); nothing is downloaded, executed or connected. [Tape and fixtures](docs/demo/).*
 
 ## How sharing works
 

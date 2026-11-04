@@ -129,7 +129,7 @@ func TestInitAdoptionProofsRejectChangedScannerSource(t *testing.T) {
 	}
 }
 
-func TestInitCodexTOMLAdoptionRefusesUnownedCollision(t *testing.T) {
+func TestInitCodexTOMLAdoptionReplacesProvenNativeEntry(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
 		t.Fatal(err)
@@ -157,14 +157,20 @@ func TestInitCodexTOMLAdoptionRefusesUnownedCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = syncer.BuildPlan(cfg, syncer.Options{Root: home, Home: home, Scope: "user", Binary: filepath.Join(home, "agentcfg.exe"),
+	plan, err := syncer.BuildPlan(cfg, syncer.Options{Root: home, Home: home, Scope: "user", Binary: filepath.Join(home, "agentcfg.exe"),
 		AdoptExisting: true, AdoptMCP: mcp, AdoptSkills: skills})
-	if err == nil || !strings.Contains(err.Error(), "TOML") {
-		t.Fatalf("unsafe TOML adoption was not rejected: %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(mustRead(t, native), []byte("agentcfg.exe")) {
+		t.Fatal("Codex did not receive the broker proxy")
 	}
 }
 
-func TestInitYesWithCodexTOMLCreatesCanonicalButDoesNotAdoptNative(t *testing.T) {
+func TestInitYesWithCodexTOMLMigratesAndRestoresNative(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
 		t.Fatal(err)
@@ -183,18 +189,25 @@ func TestInitYesWithCodexTOMLCreatesCanonicalButDoesNotAdoptNative(t *testing.T)
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	err = runInitWizard(context.Background(), home, proposal, initOptions{Yes: true}, nil, &output)
+	err = runInitWizard(context.Background(), home, proposal, initOptions{Yes: true, Binary: cliBinary(t)}, nil, &output)
 	if err != nil {
 		t.Fatalf("canonical import of native TOML must remain allowed: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".agentcfg", "mcp.json")); err != nil {
 		t.Fatalf("canonical import not created: %v", err)
 	}
-	if after, err := os.ReadFile(native); err != nil || !bytes.Equal(after, original) {
-		t.Fatalf("native Codex TOML was modified: %s, %v", after, err)
+	if after, err := os.ReadFile(native); err != nil || bytes.Equal(after, original) {
+		t.Fatalf("native Codex TOML was not migrated: %s, %v", after, err)
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".agentcfg", "sync-user.json")); !os.IsNotExist(err) {
-		t.Fatalf("native adoption occurred without consent: %v", err)
+	restore, err := syncer.BuildRestorePlan(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restore.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(mustRead(t, native), original) {
+		t.Fatal("restore did not recover original Codex TOML")
 	}
 }
 

@@ -3,11 +3,28 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestPlainInitKeepsAllSkippedSourceDetails(t *testing.T) {
+	proposal := initProposal{Servers: map[string]map[string]any{}}
+	for i := 0; i < 15; i++ {
+		proposal.Warnings = append(proposal.Warnings, fmt.Sprintf("Skipped fixture %02d", i))
+	}
+	var output bytes.Buffer
+	if err := runInitWizard(context.Background(), t.TempDir(), proposal, initOptions{Plain: true}, nil, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, warning := range proposal.Warnings {
+		if !strings.Contains(output.String(), warning) {
+			t.Fatalf("plain details lost %q", warning)
+		}
+	}
+}
 
 func TestInitReadOnlyPreviewDoesNotWriteWithoutApproval(t *testing.T) {
 	for _, opts := range []initOptions{{Plain: true}, {Plain: true, Yes: true}, {}} {

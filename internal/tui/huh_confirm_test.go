@@ -39,7 +39,7 @@ func noBackupCreated(t *testing.T, root string) {
 
 func assertConfirmBehavior(t *testing.T, output string, expect bool) {
 	t.Helper()
-	seen := strings.Contains(output, "Are you sure?")
+	seen := strings.Contains(output, "Save changes?")
 	if seen != expect {
 		t.Fatalf("confirmation shown=%t want=%t: %q", seen, expect, output)
 	}

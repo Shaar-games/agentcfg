@@ -38,13 +38,7 @@ func terminalNote(ctx context.Context, input io.Reader, output io.Writer, title,
 
 func terminalConfirm(ctx context.Context, input io.Reader, output io.Writer, title, description string) (bool, error) {
 	confirmed := false
-	// Huh's accessible Confirm prints only its title, not Description. Keep
-	// the operation visible even though the shared title is "Are you sure?".
-	if !terminalPresentation(input, output, false) || os.Getenv("AGENTCFG_ACCESSIBLE") == "1" {
-		if _, err := fmt.Fprintln(output, strings.TrimSpace(title+"\n"+description)); err != nil {
-			return false, err
-		}
-	}
+
 	err := terminalForm(ctx, input, output, terminalConfirmation(title, description, &confirmed))
 	if errors.Is(err, huh.ErrUserAborted) {
 		return false, nil
@@ -52,42 +46,16 @@ func terminalConfirm(ctx context.Context, input io.Reader, output io.Writer, tit
 	return confirmed, err
 }
 
-// All interactive mutations share the same explicit, default-negative prompt.
-// Keep the operation and its consequences in the description, not in a second
-// confirmation dialect that differs from the configuration menus.
-func terminalConfirmation(title, description string, confirmed *bool) *huh.Confirm {
-	return huh.NewConfirm().
-		Title("Are you sure?").
-		Description(strings.TrimSpace(title + "\n" + description)).
-		Affirmative("Yes!").
-		Negative("No.").
-		Value(confirmed)
+// The shared field shows the action once, without a generic extra question.
+func terminalConfirmation(title, description string, confirmed *bool) huh.Field {
+	return tui.Confirmation(strings.TrimSpace(title), strings.TrimSpace(description), confirmed)
 }
 
 func terminalHarnessSelection(ctx context.Context, input io.Reader, output io.Writer, initial []string) ([]string, error) {
-	options := []struct{ name, id string }{
-		{"Claude Code", "claude-code"},
-		{"Codex", "codex"},
-		{"Cursor", "cursor"},
-		{"OpenCode", "opencode"},
-		{"Gemini CLI", "gemini"},
-		{"Google Antigravity", "antigravity"},
-	}
 	var selected []string
-	choices := make([]huh.Option[string], 0, len(options))
-	for _, h := range options {
-		active := false
-		for _, existing := range initial {
-			if h.id == existing {
-				active = true
-				break
-			}
-		}
-		choices = append(choices, huh.NewOption(h.name, h.id).Selected(active))
-	}
+	choices := tui.HarnessOptions(nil, initial)
 	err := terminalForm(ctx, input, output, huh.NewMultiSelect[string]().
-		Title("Select user-level AI harnesses").
-		Description("Space toggles a harness. agentcfg will create only missing global source files.").
+		Title("Select your AI harnesses").
 		Options(choices...).
 		Value(&selected))
 	if err != nil {

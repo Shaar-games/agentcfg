@@ -32,7 +32,7 @@ type harnessInfo struct {
 
 var harnesses = [...]harnessInfo{
 	{"claude-code", "Claude Code", "~/.claude.json", "~/.claude/skills", true, ""},
-	{"codex", "Codex", "~/.codex/config.toml", "~/.agents/skills", true, ""},
+	{"codex", "Codex", "~/.codex/config.toml", "~/.codex/skills", true, ""},
 	{"cursor", "Cursor", "~/.cursor/mcp.json", "~/.cursor/skills", true, ""},
 	{"opencode", "OpenCode", "~/.config/opencode/opencode.json", "~/.config/opencode/skills", true, "Existing opencode.jsonc is used when applicable."},
 	{"gemini", "Gemini CLI", "~/.gemini/settings.json", "~/.gemini/skills", true, ""},
@@ -380,8 +380,13 @@ func resizeNaturalForm(form *huh.Form, group *huh.Group, fields []huh.Field, wid
 			rows = max(1, min(visibleMenuOptions, available-chrome))
 		}
 		bodyRows := rows
-		if _, ok := field.(*backMultiSelect); ok {
+		switch f := field.(type) {
+		case *backMultiSelect:
 			bodyRows = max(1, rows-1)
+		case *navigationField:
+			if f.hasBottomAction() {
+				bodyRows = max(1, rows-1)
+			}
 		}
 		sizeMenuField(field, bodyRows)
 		if nav, ok := field.(bottomActionLayout); ok {
@@ -437,11 +442,7 @@ func safeHuhText(value string) string {
 // No callers write user settings or SKILL.md before receiving a Yes! result.
 func (s interfaceSession) confirmChange() (bool, error) {
 	var confirm bool
-	err := s.form(huh.NewConfirm().
-		Title("Are you sure?").
-		Affirmative("Yes!").
-		Negative("No.").
-		Value(&confirm))
+	err := s.form(Confirmation("Save changes?", "", &confirm))
 	return confirm, err
 }
 
@@ -551,18 +552,10 @@ func (s interfaceSession) configureHarnesses() error {
 	if err != nil {
 		return err
 	}
-	choices := make([]huh.Option[string], 0, len(harnesses))
-	for _, h := range harnesses {
-		if !h.UserScopeEnabled {
-			continue
-		}
-		choices = append(choices, huh.NewOption(h.Label, h.ID).
-			Selected(slices.Contains(cfg.Settings.Harnesses, h.ID)))
-	}
+	choices := HarnessOptions(nil, cfg.Settings.Harnesses)
 	var selected []string
 	err = s.form(s.multiSelectWithBack(huh.NewMultiSelect[string]().
-		Title("Harness availability").
-		Description("Choose the harnesses to enable. Changes are reviewed before saving.").
+		Title("Select your AI harnesses").
 		Options(choices...).
 		Value(&selected), choices))
 	if isCancelled(err) {
@@ -610,7 +603,7 @@ func (s interfaceSession) configureMCP() error {
 		}
 		choices := statusNavigationOptions(rows)
 		choices = append(choices, huh.NewOption("Back", "back"))
-		name, err := s.selectAction("MCP servers", "Shared reuses the upstream process; isolated keeps session state separate.", choices...)
+		name, err := s.selectAction("MCP servers", "", choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -670,20 +663,10 @@ func (s interfaceSession) configureMCPHarnesses(server config.Server, configured
 	if len(configured) == 0 {
 		return s.note("No harnesses configured", "Enable a harness in agentcfg config before assigning MCP availability.")
 	}
-	choices := make([]huh.Option[string], 0, len(configured))
-	for _, id := range configured {
-		for _, h := range harnesses {
-			if h.ID == id && h.UserScopeEnabled {
-				choices = append(choices, huh.NewOption(h.Label, id).
-					Selected(config.Allows(server.Harnesses, id)))
-				break
-			}
-		}
-	}
+	choices := HarnessOptions(configured, harnessAvailability(configured, server.Harnesses))
 	var selected []string
 	err := s.form(huh.NewMultiSelect[string]().
 		Title("MCP availability: " + safeHuhText(server.Name)).
-		Description("Unchecked MCPs are unavailable for that harness. Changes are reviewed before saving.").
 		Options(choices...).
 		Value(&selected))
 	if isCancelled(err) {
@@ -774,7 +757,7 @@ func (s interfaceSession) configureSkills() error {
 		}
 		choices := statusNavigationOptions(rows)
 		choices = append(choices, huh.NewOption("Back", "back"))
-		name, err := s.selectAction("Agent Skills", "Counts: enabled harnesses. Enter opens availability; source edits only.", choices...)
+		name, err := s.selectAction("Agent Skills", "Enabled harnesses", choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -809,21 +792,13 @@ func (s interfaceSession) configureSkill(name string) error {
 	if selected == nil {
 		return fmt.Errorf("skill %q no longer exists; refresh", name)
 	}
-	choices := make([]huh.Option[string], 0, len(cfg.Settings.Harnesses))
+	choices := HarnessOptions(cfg.Settings.Harnesses, harnessAvailability(cfg.Settings.Harnesses, selected.Harnesses))
 	var enabled []string
-	for _, h := range harnesses {
-		if !h.UserScopeEnabled || !slices.Contains(cfg.Settings.Harnesses, h.ID) {
-			continue
-		}
-		active := config.Allows(selected.Harnesses, h.ID)
-		choices = append(choices, huh.NewOption(h.Label, h.ID).Selected(active))
-	}
 	if len(choices) == 0 {
 		return s.note("No harnesses configured", "Enable a harness in agentcfg config before assigning skill availability.")
 	}
 	err = s.form(huh.NewMultiSelect[string]().
 		Title("Skill availability: " + safeHuhText(name)).
-		Description("Space toggles, Enter reviews changes, Ctrl+C cancels. No selection means metadata.harness: none.").
 		Options(choices...).
 		Value(&enabled))
 	if isCancelled(err) {
@@ -871,7 +846,7 @@ func (s interfaceSession) showPlugins() error {
 	choices := statusNavigationOptions(rows)
 	choices = append(choices, huh.NewOption("Back", "back"))
 	for {
-		choice, err := s.selectAction("Portable Agent Plugins", "Counts: MCP / skills. Enter shows details; package files stay untouched.", choices...)
+		choice, err := s.selectAction("Portable Agent Plugins", "MCPs / skills", choices...)
 		if isCancelled(err) {
 			return nil
 		}

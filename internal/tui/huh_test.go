@@ -67,7 +67,7 @@ func TestHuhConfigMenuOpensNativeHarnessCheckboxes(t *testing.T) {
 	if err := RunMenu(context.Background(), root, in, &output); err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{"agentcfg", "Harness availability", "Claude Code", "Codex", "Confirm selection"} {
+	for _, marker := range []string{"agentcfg", "Select your AI harnesses", "Claude Code", "Codex", "Confirm selection"} {
 		if !strings.Contains(output.String(), marker) {
 			t.Fatalf("missing menu or harness checkbox content %q: %s", marker, output.String())
 		}
@@ -146,7 +146,7 @@ func TestHuhDefaultOpensCheckboxListWithoutMenu(t *testing.T) {
 	if err := Run(context.Background(), root, terminalByteReader{strings.NewReader("0\n")}, &rendered); err != nil {
 		t.Fatal(err)
 	}
-	for _, label := range []string{"Harness availability", "Claude Code", "Codex", "Cursor", "Confirm selection", "Back"} {
+	for _, label := range []string{"Select your AI harnesses", "Claude Code", "Codex", "Cursor", "Confirm selection", "Back"} {
 		if !strings.Contains(rendered.String(), label) {
 			t.Fatalf("missing checkbox content %q: %s", label, rendered.String())
 		}
