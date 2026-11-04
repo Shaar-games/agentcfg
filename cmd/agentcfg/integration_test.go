@@ -25,8 +25,13 @@ import (
 var buildOnce sync.Once
 var testBinary string
 var buildError error
+var buildEnvironment []string
 
 func TestMain(m *testing.M) {
+	// Harness fixtures replace HOME and cache locations. Build with the original
+	// Go environment so shuffled tests cannot download a read-only module cache
+	// into a fixture home or make compilation depend on which test runs first.
+	buildEnvironment = os.Environ()
 	code := m.Run()
 	if testBinary != "" {
 		_ = os.RemoveAll(filepath.Dir(testBinary))
@@ -47,6 +52,7 @@ func cliBinary(t *testing.T) string {
 			testBinary += ".exe"
 		}
 		command := exec.Command("go", "build", "-o", testBinary, ".")
+		command.Env = buildEnvironment
 		if output, err := command.CombinedOutput(); err != nil {
 			buildError = fmt.Errorf("build CLI: %w\n%s", err, output)
 			return
