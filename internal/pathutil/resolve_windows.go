@@ -23,7 +23,7 @@ func Resolve(path string) (string, error) {
 	if strings.HasPrefix(absolute, "\\\\.\\") {
 		return "", fmt.Errorf("device namespace is not a package filesystem path")
 	}
-	name, err := windows.UTF16PtrFromString(extendedWindowsPath(absolute))
+	name, err := windows.UTF16PtrFromString(WindowsAPIPath(absolute))
 	if err != nil {
 		return "", err
 	}
@@ -56,7 +56,7 @@ func Resolve(path string) (string, error) {
 // On filesystems where long-name expansion is unsupported, retain the handle
 // spelling rather than treating an optional API failure as a missing file.
 func expandLongWindowsPath(path string) string {
-	name, err := windows.UTF16PtrFromString(extendedWindowsPath(path))
+	name, err := windows.UTF16PtrFromString(WindowsAPIPath(path))
 	if err != nil {
 		return path
 	}
@@ -74,7 +74,8 @@ func expandLongWindowsPath(path string) string {
 	return path
 }
 
-func extendedWindowsPath(path string) string {
+// WindowsAPIPath preserves long absolute paths and UNC paths for Win32 calls.
+func WindowsAPIPath(path string) string {
 	if strings.HasPrefix(path, "\\\\?\\") {
 		return path
 	}

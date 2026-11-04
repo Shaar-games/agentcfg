@@ -3,6 +3,7 @@ package syncer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -212,5 +213,35 @@ func TestNativeLayoutRejectsOverlappingRestoreTargets(t *testing.T) {
 	point.Layout = append(point.Layout, point.Layout[0])
 	if err := validateNativeLayout(f.opts.Home, point); err == nil {
 		t.Fatal("overlapping native layout restore entries were accepted")
+	}
+}
+
+func TestNativeLayoutStagingIsPrivateAndLegacyJournalsStillRestore(t *testing.T) {
+	f, _, entries := nativeLayoutFixture(t, false)
+	entry := entries[0]
+	staged := filepath.Join(f.opts.Home, filepath.FromSlash(entry.Staged))
+	original := filepath.Join(f.opts.Home, ".agentcfg", filepath.FromSlash(entry.Original))
+	if !sameAdoptionPath(filepath.Dir(staged), filepath.Dir(original)) {
+		t.Fatal("staging remains in a native harness discovery directory")
+	}
+	point, _, err := readInitPoint(f.opts.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	point.Layout[0].Staged = filepath.ToSlash(filepath.Join(filepath.Dir(filepath.FromSlash(entry.Path)), ".agentcfg-layout-legacy"))
+	data, err := json.Marshal(point)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(f.opts.Home, ".agentcfg", initRestoreFile), string(data))
+	restore, err := BuildRestorePlan(f.opts.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restore.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Readlink(filepath.Join(f.opts.Home, filepath.FromSlash(entry.Path))); err != nil {
+		t.Fatal("legacy restore journal did not restore original link")
 	}
 }

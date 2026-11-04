@@ -32,6 +32,13 @@ sans modifier les sources. Les tests Windows nécessitant des symlinks signalent
 un skip si le système ne permet pas leur création ; les jonctions sont testées
 séparément sans ce privilège.
 
+Les tests Windows ouvrent réellement le fichier ou le dossier de staging sans
+partage de suppression pour reproduire `Access is denied` et les violations de
+partage. Ils vérifient la reprise après libération, le verrou persistant borné,
+l'annulation, le refus d'une destination étrangère, le remplacement MCP et la
+restauration des skills legacy liés ou contenant une jonction et un asset en
+lecture seule. Les journaux de staging des anciennes versions restent couverts.
+
 Les plugins combinent des liens sur le répertoire canonique, le catalogue,
 le package, les manifestes, les composants MCP, les commandes et les skills.
 Les tests d'édition vérifient que les liens sources restent présents et qu'une

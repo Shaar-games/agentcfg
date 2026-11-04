@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/fsops"
 	"agentcfg/internal/fsstate"
 	"agentcfg/internal/pathutil"
 
@@ -352,7 +353,19 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 	if err := binding(); err != nil {
 		return err
 	}
-	if err := os.Rename(tempName, path); err != nil {
+	if err := fsops.Replace(context.Background(), tempName, path, func() error {
+		if err := binding(); err != nil {
+			return err
+		}
+		latest, exists, err := readSettings(path)
+		if err != nil {
+			return err
+		}
+		if exists != existed || !bytes.Equal(latest, original) {
+			return errors.New("settings changed while waiting to replace; refresh before retrying")
+		}
+		return nil
+	}); err != nil {
 		return fmt.Errorf("atomically replace settings: %w", err)
 	}
 	return nil

@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"agentcfg/internal/fsops"
 )
 
 const initRestoreFile = "init-restore.json"
@@ -505,7 +508,7 @@ func (r *RestorePlan) Apply() error {
 	if _, err := os.Lstat(r.Archive); !os.IsNotExist(err) {
 		return errors.New("restore archive destination already exists")
 	}
-	if err := os.Rename(canonical, r.Archive); err != nil {
+	if err := fsops.Rename(context.Background(), canonical, r.Archive, nil); err != nil {
 		return fmt.Errorf("native files restored, but canonical archive failed (retry restore): %w", err)
 	}
 	return nil

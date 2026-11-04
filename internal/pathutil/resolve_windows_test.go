@@ -16,7 +16,7 @@ func TestResolveNormalizesNTFSShortAndLongPath(t *testing.T) {
 	if err := os.Mkdir(long, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	ptr, err := windows.UTF16PtrFromString(extendedWindowsPath(long))
+	ptr, err := windows.UTF16PtrFromString(WindowsAPIPath(long))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/fsops"
 	"agentcfg/internal/pathutil"
 
 	"github.com/gofrs/flock"
@@ -49,7 +51,7 @@ func atomicWriteChecked(path string, data []byte, mode os.FileMode, check func()
 			return err
 		}
 	}
-	return os.Rename(temp, path)
+	return fsops.Replace(context.Background(), temp, path, check)
 }
 
 func fileUnchanged(path string, before []byte, existed bool) error {
@@ -540,7 +542,7 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 		if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
 			return nil, err
 		}
-		if err := os.Rename(change.Path, backup); err != nil {
+		if err := fsops.Rename(context.Background(), change.Path, backup, func() error { return p.checkChange(change) }); err != nil {
 			return nil, err
 		}
 	}
@@ -580,7 +582,7 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 				if _, err := os.Lstat(change.skill.source); !os.IsNotExist(err) {
 					return fmt.Errorf("original skill link backup was replaced during restore: %s", change.skill.source)
 				}
-				if err := os.Rename(change.Path, change.skill.source); err != nil {
+				if err := fsops.Rename(context.Background(), change.Path, change.skill.source, nil); err != nil {
 					return err
 				}
 			} else if err := os.RemoveAll(change.Path); err != nil {
@@ -593,17 +595,33 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 			return fmt.Errorf("cannot restore skill backup over a new destination: %s", change.Path)
 		}
 		if change.exists {
-			return os.Rename(backup, change.Path)
+			return fsops.Rename(context.Background(), backup, change.Path, nil)
 		}
 		return nil
 	}
 	if change.skill.restoreLink {
-		if err := os.Rename(change.skill.source, change.Path); err != nil {
+		if err := fsops.Rename(context.Background(), change.skill.source, change.Path, nil); err != nil {
 			return undo, err
 		}
 		installed = true
 	} else if staged != "" {
-		if err := os.Rename(staged, change.Path); err != nil {
+		checkStage := func() error {
+			if err := p.checkScopeIdentity(); err != nil {
+				return err
+			}
+			if err := ensureNoSymlinkParents(p.base, filepath.Dir(change.Path)); err != nil {
+				return err
+			}
+			actual, err := installedFingerprint(staged)
+			if err != nil {
+				return err
+			}
+			if actual != installedHash {
+				return fmt.Errorf("staged skill changed while waiting to install: %s", change.Path)
+			}
+			return nil
+		}
+		if err := fsops.Rename(context.Background(), staged, change.Path, checkStage); err != nil {
 			return undo, err
 		}
 		installed = true

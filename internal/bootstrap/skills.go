@@ -24,6 +24,10 @@ func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
 		return
 	}
 	for _, entry := range entries {
+		// Private work from older versions must never become an import candidate.
+		if strings.HasPrefix(entry.Name(), ".agentcfg-layout-") || strings.HasPrefix(entry.Name(), ".agentcfg-stage-") {
+			continue
+		}
 		if plan.budget.skills <= 0 || plan.budget.entries <= 0 || plan.budget.bytes <= 0 {
 			plan.warnSkill(harness, source, "discovery skill budget reached; remaining entries require a separate review")
 			break

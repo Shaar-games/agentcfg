@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/fsops"
 	"agentcfg/internal/fsstate"
 	"agentcfg/internal/pathutil"
 	"agentcfg/internal/syncer"
@@ -122,7 +123,7 @@ func writeInitialSourcesContext(ctx context.Context, home string, settings confi
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.Rename(staged, destination); err != nil {
+	if err := fsops.Rename(ctx, staged, destination, ctx.Err); err != nil {
 		return fmt.Errorf("publish canonical sources: %w", err)
 	}
 	return nil

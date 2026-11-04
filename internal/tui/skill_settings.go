@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/fsops"
 	"agentcfg/internal/fsstate"
 	"agentcfg/internal/pathutil"
 
@@ -213,7 +214,20 @@ func applySkillHarnessSelectionChecked(root string, selected config.Skill, desir
 	if err != nil || currentAgents != agents {
 		return errors.New("canonical settings directory link changed during editing")
 	}
-	if err := os.Rename(temporary.Name(), path); err != nil {
+	if err := fsops.Replace(context.Background(), temporary.Name(), path, func() error {
+		if err := skillFileUnchanged(path, original); err != nil {
+			return err
+		}
+		source, err := checkedSkillSource(current.Root, *found)
+		if err != nil || source != path {
+			return errors.New("skill source link changed while waiting to replace")
+		}
+		canonical, err := pathutil.Resolve(logicalAgents)
+		if err != nil || canonical != agents {
+			return errors.New("canonical directory link changed while waiting to replace")
+		}
+		return nil
+	}); err != nil {
 		return fmt.Errorf("atomically replace SKILL.md: %w", err)
 	}
 	return nil

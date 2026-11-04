@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"agentcfg/internal/fsops"
 	"agentcfg/internal/fsstate"
 )
 
@@ -176,17 +177,20 @@ func MaterializeInitLinks(ctx context.Context, home string, harnesses []string, 
 			return err
 		}
 		entry.BaselineHash = snapshot.State
-		temp, err := os.CreateTemp(filepath.Dir(path), ".agentcfg-layout-*")
-		if err != nil {
+		// Keep incomplete skill trees outside every native discovery root. The
+		// restore folder already shares the original entry's filesystem: the
+		// original must be movable here before this transaction can proceed.
+		staged := filepath.Join(filepath.Dir(baseline), "staged")
+		if err := ensureNoSymlinkParents(base, staged); err != nil {
 			return err
 		}
-		staged := temp.Name()
-		if err := temp.Close(); err != nil {
+		if _, err := os.Lstat(staged); !os.IsNotExist(err) {
+			if err == nil {
+				return errors.New("native layout staging already exists")
+			}
 			return err
 		}
-		if err := os.Remove(staged); err != nil {
-			return err
-		}
+
 		stagedRelative, err := filepath.Rel(base, staged)
 		if err != nil || !withinScope(stagedRelative) {
 			return errors.New("native staging path escapes user home")
@@ -226,14 +230,71 @@ func MaterializeInitLinks(ctx context.Context, home string, harnesses []string, 
 		if _, err := fsstate.Copy(baseline, staged, options(true)); err != nil {
 			return err
 		}
-		original := filepath.Join(base, ".agentcfg", filepath.FromSlash(entry.Original))
-		if err := os.Rename(path, original); err != nil {
+		if err := swapPreparedLayout(ctx, base, entry); err != nil {
 			return err
 		}
-		if err := os.Rename(staged, path); err != nil {
-			_ = os.Rename(original, path)
+	}
+	return nil
+}
+
+func layoutEntryUnchanged(ctx context.Context, home, path, expected string) error {
+	if err := ensureNoSymlinkParents(home, filepath.Dir(path)); err != nil {
+		return err
+	}
+	options := layoutOptions(false)
+	options.Context = ctx
+	snapshot, err := fsstate.Capture(path, options)
+	if err != nil {
+		return err
+	}
+	if snapshot.State != expected {
+		return fmt.Errorf("native layout changed while waiting to rename: %s", path)
+	}
+	return nil
+}
+
+// Keep both moves and their rollback on the same checked retry path. A busy
+// staged asset must not abandon an already detached original native entry.
+func swapPreparedLayout(ctx context.Context, home string, entry nativeLayoutEntry) error {
+	path, original, baseline, err := validateLayoutEntry(home, entry)
+	if err != nil {
+		return err
+	}
+	staged := filepath.Join(home, filepath.FromSlash(entry.Staged))
+	checkOriginal := func() error {
+		if err := layoutEntryUnchanged(ctx, home, path, entry.OriginalHash); err != nil {
 			return err
 		}
+		if err := layoutEntryUnchanged(ctx, home, baseline, entry.BaselineHash); err != nil {
+			return err
+		}
+		options := layoutOptions(true)
+		options.Context = ctx
+		expanded, err := fsstate.Capture(path, options)
+		if err != nil {
+			return err
+		}
+		saved, err := fsstate.Capture(baseline, options)
+		if err != nil {
+			return err
+		}
+		if expanded.Fingerprint != saved.Fingerprint {
+			return fmt.Errorf("native contents changed before detaching: %s", path)
+		}
+		return nil
+	}
+	if err := fsops.Rename(ctx, path, original, checkOriginal); err != nil {
+		return err
+	}
+	checkStage := func() error {
+		if err := layoutEntryUnchanged(ctx, home, original, entry.OriginalHash); err != nil {
+			return err
+		}
+		return layoutEntryUnchanged(ctx, home, staged, entry.BaselineHash)
+	}
+	if err := fsops.Rename(ctx, staged, path, checkStage); err != nil {
+		undoErr := fsops.Rename(context.Background(), original, path, func() error { return layoutEntryUnchanged(context.Background(), home, original, entry.OriginalHash) })
+		return errors.Join(err, undoErr)
 	}
 	return nil
 }
@@ -272,10 +333,13 @@ func validateLayoutEntry(home string, entry nativeLayoutEntry) (string, string, 
 		return "", "", "", errors.New("native layout target is not a user harness location")
 	}
 	staged := filepath.Join(home, filepath.FromSlash(entry.Staged))
-	if filepath.IsAbs(entry.Staged) || !withinScope(filepath.FromSlash(entry.Staged)) || filepath.Dir(staged) != filepath.Dir(path) || !strings.HasPrefix(filepath.Base(staged), ".agentcfg-layout-") {
+	folder := filepath.Join("restore", "layout", rawDigest([]byte(entry.Path))[:16])
+	privateStage := filepath.Join(home, ".agentcfg", folder, "staged")
+	legacyStage := filepath.Dir(staged) == filepath.Dir(path) && strings.HasPrefix(filepath.Base(staged), ".agentcfg-layout-")
+	if filepath.IsAbs(entry.Staged) || !withinScope(filepath.FromSlash(entry.Staged)) || !sameAdoptionPath(staged, privateStage) && !legacyStage {
 		return "", "", "", errors.New("invalid native layout staging path")
 	}
-	folder := filepath.Join("restore", "layout", rawDigest([]byte(entry.Path))[:16])
+
 	if filepath.FromSlash(entry.Original) != filepath.Join(folder, "original") || filepath.FromSlash(entry.Baseline) != filepath.Join(folder, "baseline") {
 		return "", "", "", errors.New("invalid native layout backup path")
 	}
@@ -392,10 +456,10 @@ func restoreNativeLayout(home string, point initRestorePoint) error {
 			return rollback(err)
 		}
 		if _, err := os.Lstat(path); os.IsNotExist(err) && len(point.Native) == 0 {
-			if err := os.Rename(original, path); err != nil {
+			if err := fsops.Rename(context.Background(), original, path, nil); err != nil {
 				return rollback(err)
 			}
-			undos = append(undos, func() error { return os.Rename(path, original) })
+			undos = append(undos, func() error { return fsops.Rename(context.Background(), path, original, nil) })
 			continue
 		}
 		saved, err := fsstate.Capture(baseline, layoutOptions(false))
@@ -438,19 +502,19 @@ func restoreNativeLayout(home string, point initRestorePoint) error {
 		if _, err := os.Lstat(discard); !os.IsNotExist(err) {
 			return rollback(errors.New("native layout restore staging already exists"))
 		}
-		if err := os.Rename(path, discard); err != nil {
+		if err := fsops.Rename(context.Background(), path, discard, nil); err != nil {
 			return rollback(err)
 		}
 		installed := false
 		undos = append(undos, func() error {
 			if installed {
-				if err := os.Rename(path, original); err != nil {
+				if err := fsops.Rename(context.Background(), path, original, nil); err != nil {
 					return err
 				}
 			}
-			return os.Rename(discard, path)
+			return fsops.Rename(context.Background(), discard, path, nil)
 		})
-		if err := os.Rename(original, path); err != nil {
+		if err := fsops.Rename(context.Background(), original, path, nil); err != nil {
 			return rollback(err)
 		}
 		installed = true
@@ -463,10 +527,12 @@ func checkLayoutStaging(home string, entry nativeLayoutEntry, remove bool) error
 	if err := ensureNoSymlinkParents(home, filepath.Dir(staged)); err != nil {
 		return err
 	}
-	snapshot, err := fsstate.Capture(staged, layoutOptions(false))
-	if os.IsNotExist(err) {
+	if _, err := os.Lstat(staged); os.IsNotExist(err) {
 		return nil
+	} else if err != nil {
+		return err
 	}
+	snapshot, err := fsstate.Capture(staged, layoutOptions(false))
 	if err != nil {
 		return err
 	}

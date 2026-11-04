@@ -181,6 +181,14 @@ junction types, by moving the saved entries back. Unrelated files in a linked
 harness directory are preserved. A changed source, changed backup or manual edit
 blocks replacement. Broken links, cycles, special files and trees exceeding the
 snapshot limits produce an error before their native entries are replaced.
+Layout staging stays in the private `~/.agentcfg/restore/layout/` directory,
+outside native skill discovery. Windows rename sharing/access conflicts are
+retried for up to five seconds, with identity, content and ownership checks
+repeated before retrying. Cancellation returns through rollback; persistent locks
+or permission errors leave the originals and recovery data intact. No permissions
+are elevated or protections disabled. Older restore journals with sibling staging
+paths remain readable.
+
 Native layout snapshots are bounded to 100,000 entries, 512 MiB total and 64 MiB
 per file; the smaller skill discovery limits still apply to imported skills.
 
