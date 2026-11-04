@@ -108,6 +108,11 @@ func applySkillHarnessSelectionChecked(root string, selected config.Skill, desir
 	if err := requireRealDirectory(agents); err != nil {
 		return fmt.Errorf("source directory: %w", err)
 	}
+	// No-op and stale selections must not create a synchronization lock.
+	// Repeat this validation after acquiring the lock before any source edit.
+	if _, err := checkSkillSelection(current, selected, desired, configured); err != nil {
+		return err
+	}
 	// The synchronizer also reads SKILL.md sources while applying a plan.
 	// Coordinate with its lock to avoid a stale or mixed native projection.
 	lockPath := filepath.Join(agents, "sync.lock")
@@ -131,27 +136,9 @@ func applySkillHarnessSelectionChecked(root string, selected config.Skill, desir
 	if err != nil {
 		return fmt.Errorf("reload current skill configuration: %w", err)
 	}
-	if configured != nil && !slices.Equal(current.Settings.Harnesses, configured) {
-		return errors.New("configured harnesses changed; refresh skill availability")
-	}
-	var found *config.Skill
-	for i := range current.Skills {
-		if current.Skills[i].Name == selected.Name {
-			found = &current.Skills[i]
-			break
-		}
-	}
-	if found == nil || filepath.Clean(found.Path) != filepath.Clean(selected.Path) || !slices.Equal(found.Harnesses, selected.Harnesses) {
-		return fmt.Errorf("skill %q changed since it was loaded; refresh before editing", selected.Name)
-	}
-	unchanged := true
-	for harness, enabled := range desired {
-		if config.Allows(found.Harnesses, harness) != enabled {
-			unchanged = false
-		}
-	}
-	if unchanged {
-		return errNoChange
+	found, err := checkSkillSelection(current, selected, desired, configured)
+	if err != nil {
+		return err
 	}
 	path, err := checkedSkillSource(current.Root, *found)
 	if err != nil {
@@ -218,6 +205,28 @@ func applySkillHarnessSelectionChecked(root string, selected config.Skill, desir
 		return fmt.Errorf("atomically replace SKILL.md: %w", err)
 	}
 	return nil
+}
+
+func checkSkillSelection(current *config.Config, selected config.Skill, desired map[string]bool, configured []string) (*config.Skill, error) {
+	if configured != nil && !slices.Equal(current.Settings.Harnesses, configured) {
+		return nil, errors.New("configured harnesses changed; refresh skill availability")
+	}
+	var found *config.Skill
+	for i := range current.Skills {
+		if current.Skills[i].Name == selected.Name {
+			found = &current.Skills[i]
+			break
+		}
+	}
+	if found == nil || filepath.Clean(found.Path) != filepath.Clean(selected.Path) || !slices.Equal(found.Harnesses, selected.Harnesses) {
+		return nil, fmt.Errorf("skill %q changed since it was loaded; refresh before editing", selected.Name)
+	}
+	for harness, enabled := range desired {
+		if config.Allows(found.Harnesses, harness) != enabled {
+			return found, nil
+		}
+	}
+	return nil, errNoChange
 }
 
 func checkedSkillSource(root string, skill config.Skill) (string, error) {

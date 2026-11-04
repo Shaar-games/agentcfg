@@ -106,7 +106,7 @@ func (s interfaceSession) listMCP(cfg *config.Config) error {
 	rows := make([]navigationStatus, 0, len(names))
 	for _, name := range names {
 		server := cfg.Servers[name]
-		rows = append(rows, navigationStatus{title: safeHuhText(name), detail: server.Type + "  ·  " + sharing(server), id: name})
+		rows = append(rows, navigationStatus{title: safeHuhText(name), detail: server.Type + "  ·  " + sharing(server), id: navigationItemValue(name)})
 	}
 	choices := statusNavigationOptions(rows)
 	choices = append(choices, huh.NewOption("Back to inventory", "back"))
@@ -118,7 +118,11 @@ func (s interfaceSession) listMCP(cfg *config.Config) error {
 		if err != nil {
 			return err
 		}
-		server := cfg.Servers[choice]
+		name, ok := navigationItemName(choice)
+		if !ok {
+			return fmt.Errorf("unexpected MCP inventory selection")
+		}
+		server := cfg.Servers[name]
 		var enabled []string
 		for _, h := range harnesses {
 			if h.UserScopeEnabled && enabledForHarness(cfg.Settings.Harnesses, h.ID) && config.Allows(server.Harnesses, h.ID) {
@@ -131,7 +135,7 @@ func (s interfaceSession) listMCP(cfg *config.Config) error {
 		} else {
 			info += "\nHTTP endpoint: " + server.URL
 		}
-		if err := s.note("MCP: "+safeHuhText(choice), info); err != nil && !isCancelled(err) {
+		if err := s.note("MCP: "+safeHuhText(name), info); err != nil && !isCancelled(err) {
 			return err
 		}
 	}
@@ -146,7 +150,7 @@ func (s interfaceSession) listSkills(cfg *config.Config) error {
 				active++
 			}
 		}
-		rows = append(rows, navigationStatus{title: safeHuhText(skill.Name), detail: fmt.Sprintf("%d harness(es)", active), id: skill.Name})
+		rows = append(rows, navigationStatus{title: safeHuhText(skill.Name), detail: fmt.Sprintf("%d harness(es)", active), id: navigationItemValue(skill.Name)})
 	}
 	choices := statusNavigationOptions(rows)
 	choices = append(choices, huh.NewOption("Back to inventory", "back"))
@@ -158,8 +162,12 @@ func (s interfaceSession) listSkills(cfg *config.Config) error {
 		if err != nil {
 			return err
 		}
+		name, ok := navigationItemName(choice)
+		if !ok {
+			return fmt.Errorf("unexpected skill inventory selection")
+		}
 		for _, skill := range cfg.Skills {
-			if skill.Name != choice {
+			if skill.Name != name {
 				continue
 			}
 			var enabled []string
@@ -173,7 +181,7 @@ func (s interfaceSession) listSkills(cfg *config.Config) error {
 				status = "none"
 			}
 			info := fmt.Sprintf("Source: %s\nAvailable to: %s\n\nListed only; SKILL.md content is not modified.", skill.Path, status)
-			if err := s.note("Skill: "+safeHuhText(choice), info); err != nil && !isCancelled(err) {
+			if err := s.note("Skill: "+safeHuhText(name), info); err != nil && !isCancelled(err) {
 				return err
 			}
 			break

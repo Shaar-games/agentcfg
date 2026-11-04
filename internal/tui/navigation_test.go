@@ -157,3 +157,55 @@ func TestAccessibleNavigationDoesNotEmitANSICodesOrExtraBlankLines(t *testing.T)
 		t.Fatalf("accessible navigation wrote to temporary home: %v %v", entries, err)
 	}
 }
+
+func TestColoredNavigationMatchesWholeOptionNotOverlappingLabel(t *testing.T) {
+	options := []huh.Option[string]{
+		huh.NewOption("Exit", "exit"),
+		huh.NewOption("Exit to parent menu", "back"),
+		huh.NewOption("Refresh", "refresh"),
+	}
+	var selected string
+	field := huh.NewSelect[string]().Title("Navigation").Options(options...).Value(&selected)
+	renderer := lipgloss.NewRenderer(io.Discard)
+	renderer.SetColorProfile(termenv.TrueColor)
+	colored := &coloredNavigationSelect{Select: field, options: options, renderer: renderer}
+	form, group := newNaturalForm(strings.NewReader(""), io.Discard, colored)
+	resizeNaturalForm(form, group, []huh.Field{colored}, 80)
+	_, _ = form.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	view := colored.View()
+	red := renderer.NewStyle().Foreground(navExitColor).Render("Exit")
+	amber := renderer.NewStyle().Foreground(navBackColor).Render("Exit to parent menu")
+	cyan := renderer.NewStyle().Foreground(navFreshColor).Render("Refresh")
+	for _, item := range []string{red, amber, cyan} {
+		if count := strings.Count(view, item); count != 1 {
+			t.Fatalf("expected one correct option color (got %d) for %q in view:\n%s", count, item, view)
+		}
+	}
+	if lipgloss.Width(view) != lipgloss.Width(field.View()) {
+		t.Fatal("colorizing ambiguous labels altered visible width")
+	}
+}
+
+func TestNavigationPlainModeRespectsNoColorAndExplicitAccessibility(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("CLICOLOR", "1")
+	t.Setenv("AGENTCFG_ACCESSIBLE", "")
+	if !navigationPlainMode() {
+		t.Fatal("NO_COLOR must prohibit UI option coloring")
+	}
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CLICOLOR", "0")
+	if !navigationPlainMode() {
+		t.Fatal("CLICOLOR=0 must prohibit UI option coloring")
+	}
+	t.Setenv("CLICOLOR", "1")
+	t.Setenv("AGENTCFG_ACCESSIBLE", "1")
+	if !navigationPlainMode() {
+		t.Fatal("accessible Huh prompts must be plain")
+	}
+	// A non-terminal reader/writer never gains ANSI even with color requested.
+	s := interfaceSession{ctx: context.Background(), in: strings.NewReader("1\n"), out: &bytes.Buffer{}}
+	if s.navigationSupportsColor() {
+		t.Fatal("non-TTY screen unexpectedly enabled option coloring")
+	}
+}

@@ -54,6 +54,8 @@ type Plan struct {
 	state                 manifest
 	sourceConfigDigest    string
 	adoption              *adoptionState
+	rootIdentity          os.FileInfo
+	baseIdentity          os.FileInfo
 }
 
 func freshManifest() manifest {
@@ -144,6 +146,14 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	}
 	p := &Plan{root: opts.Root, base: base, statePath: filepath.Join(opts.Root, ".agentcfg", "sync-"+opts.Scope+".json"),
 		state: freshManifest(), Changes: []Change{}, Warnings: append([]string{}, c.Warnings...)}
+	p.rootIdentity, err = os.Lstat(p.root)
+	if err != nil {
+		return nil, err
+	}
+	p.baseIdentity, err = os.Lstat(p.base)
+	if err != nil {
+		return nil, err
+	}
 	// Protect the plan against changes to canonical MCP/harness settings between
 	// dry-run and apply. Test fixtures sometimes construct Config directly; in
 	// that case we cannot claim a matching on-disk snapshot and skip this guard.
@@ -225,6 +235,9 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 		return nil, err
 	}
 	sort.Slice(p.Changes, func(i, j int) bool { return p.Changes[i].Path < p.Changes[j].Path })
+	if err := p.checkScopeIdentity(); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,13 @@ type skillImport struct {
 // and config.Load validates the complete proposal. It never replaces an
 // existing canonical tree, native harness file, or source SKILL.md.
 func writeInitialSources(home string, settings config.Settings, servers map[string]map[string]any, skills []skillImport) error {
+	return writeInitialSourcesContext(context.Background(), home, settings, servers, skills)
+}
+
+func writeInitialSourcesContext(ctx context.Context, home string, settings config.Settings, servers map[string]map[string]any, skills []skillImport) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	absolute, err := filepath.Abs(home)
 	if err != nil {
 		return err
@@ -72,6 +80,9 @@ func writeInitialSources(home string, settings config.Settings, servers map[stri
 		return err
 	}
 	for _, skill := range skills {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if !validImportName(skill.Name) {
 			return fmt.Errorf("invalid imported skill name %q", skill.Name)
 		}
@@ -103,6 +114,9 @@ func writeInitialSources(home string, settings config.Settings, servers map[stri
 		if err == nil {
 			return errors.New("canonical destination appeared during initialization; nothing overwritten")
 		}
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := os.Rename(staged, destination); err != nil {

@@ -290,3 +290,114 @@ func TestPluginDiscoveryIncludesEmptyPluginAndInvalidManifest(t *testing.T) {
 		}
 	}
 }
+
+func TestSettingsNoOpDoesNotCreateFiles(t *testing.T) {
+	t.Run("pristine home", func(t *testing.T) {
+		root := t.TempDir()
+		cfg, err := config.Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := setHarnessSelection(root, cfg.Settings.Harnesses, cfg.Settings.Harnesses); !errors.Is(err, errNoChange) {
+			t.Fatalf("unchanged defaults: %v", err)
+		}
+		entries, err := os.ReadDir(root)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("no-op created files in an empty home: %v (%v)", entries, err)
+		}
+	})
+	for _, operation := range []string{"harness", "selection", "sharing", "server availability"} {
+		t.Run(operation, func(t *testing.T) {
+			root := settingsFixture(t)
+			original := `{"harnesses":["codex","cursor"]}`
+			putSettings(t, root, original)
+			cfg, err := config.Load(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch operation {
+			case "harness":
+				err = setHarnessEnabled(root, "codex", true, true)
+			case "selection":
+				err = setHarnessSelection(root, cfg.Settings.Harnesses, cfg.Settings.Harnesses)
+			case "sharing":
+				err = setServerSharing(root, "alpha", "shared", "shared")
+			case "server availability":
+				err = setServerHarnessSelection(root, cfg.Servers["alpha"], cfg.Settings.Harnesses, cfg.Settings.Harnesses)
+			}
+			if !errors.Is(err, errNoChange) {
+				t.Fatalf("unchanged selection: %v", err)
+			}
+			entries, err := os.ReadDir(filepath.Join(root, ".agentcfg"))
+			if err != nil || len(entries) != 2 {
+				t.Fatalf("no-op created a lock, backup or temporary file: %v (%v)", entries, err)
+			}
+			if got, err := os.ReadFile(settingsFile(root)); err != nil || string(got) != original {
+				t.Fatalf("no-op changed settings: %q (%v)", got, err)
+			}
+		})
+	}
+}
+
+func TestServerAvailabilityRejectsChangedDefinition(t *testing.T) {
+	for _, tt := range []struct{ name, before, after string }{
+		{"command", `{"command":"node"}`, `{"command":"changed-program"}`},
+		{"arguments", `{"command":"node","args":["first"]}`, `{"command":"node","args":["second"]}`},
+		{"environment", `{"command":"node","env":{"MODE":"first"}}`, `{"command":"node","env":{"MODE":"second"}}`},
+		{"url", `{"url":"https://example.invalid/first"}`, `{"url":"https://example.invalid/second"}`},
+		{"headers", `{"url":"https://example.invalid/mcp","headers":{"X-Fixture":"first"}}`, `{"url":"https://example.invalid/mcp","headers":{"X-Fixture":"second"}}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := settingsFixture(t)
+			original := `{"harnesses":["codex","cursor"]}`
+			putSettings(t, root, original)
+			path := filepath.Join(root, ".agentcfg", "mcp.json")
+			writeSource := func(definition string) {
+				t.Helper()
+				if err := os.WriteFile(path, []byte(`{"mcpServers":{"alpha":`+definition+`}}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeSource(tt.before)
+			cfg, err := config.Load(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := cfg.Servers["alpha"]; !ok {
+				t.Fatalf("invalid fixture: %v", cfg.Warnings)
+			}
+			writeSource(tt.after)
+			if err := setServerHarnessSelection(root, cfg.Servers["alpha"], []string{"codex"}, cfg.Settings.Harnesses); err == nil || !strings.Contains(err.Error(), "changed") {
+				t.Fatalf("stale checklist changed availability for another server definition: %v", err)
+			}
+			if got, err := os.ReadFile(settingsFile(root)); err != nil || string(got) != original {
+				t.Fatalf("rejected checklist changed settings: %q (%v)", got, err)
+			}
+			if entries, err := os.ReadDir(filepath.Join(root, ".agentcfg")); err != nil || len(entries) != 2 {
+				t.Fatalf("rejected checklist created files: %v (%v)", entries, err)
+			}
+		})
+	}
+}
+
+func TestServerAvailabilityPreservesConcurrentSharingEdit(t *testing.T) {
+	root := settingsFixture(t)
+	putSettings(t, root, `{"harnesses":["codex","cursor"]}`)
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setServerSharing(root, "alpha", "isolated", "shared"); err != nil {
+		t.Fatal(err)
+	}
+	if err := setServerHarnessSelection(root, cfg.Servers["alpha"], []string{"codex"}, cfg.Settings.Harnesses); err != nil {
+		t.Fatal(err)
+	}
+	current, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server := current.Servers["alpha"]; server.Sharing != "isolated" || !config.Allows(server.Harnesses, "codex") || config.Allows(server.Harnesses, "cursor") {
+		t.Fatalf("availability edit lost the independent sharing edit: %+v", server)
+	}
+}

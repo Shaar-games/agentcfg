@@ -66,33 +66,7 @@ func runAuth(ctx context.Context, home string, args []string, input io.Reader, o
 		if err != nil {
 			return err
 		}
-		if *asJSON {
-			encoded, err := json.MarshalIndent(state, "", "  ")
-			if err != nil {
-				return err
-			}
-			if interactive {
-				var summary strings.Builder
-				fmt.Fprintf(&summary, "MCP: %s\nAccount: %s\nAuthenticated: %t\nRefresh available: %t\n", name, state.Account, state.Authenticated, state.CanRefresh)
-				if !state.Expiry.IsZero() {
-					fmt.Fprintf(&summary, "Expires: %s\n", state.Expiry.Format(time.RFC3339))
-				}
-				if len(state.Scopes) > 0 {
-					fmt.Fprintf(&summary, "Scopes: %s\n", strings.Join(state.Scopes, ", "))
-				}
-				return terminalNote(ctx, input, output, "OAuth credentials status", summary.String())
-			}
-			_, err = fmt.Fprintln(output, string(encoded))
-			return err
-		}
-		fmt.Fprintf(output, "MCP: %s\nAccount: %s\nAuthenticated: %t\nRefresh available: %t\n", name, state.Account, state.Authenticated, state.CanRefresh)
-		if !state.Expiry.IsZero() {
-			fmt.Fprintf(output, "Expires: %s\n", state.Expiry.Format(time.RFC3339))
-		}
-		if len(state.Scopes) > 0 {
-			fmt.Fprintf(output, "Scopes: %s\n", strings.Join(state.Scopes, ", "))
-		}
-		return nil
+		return presentAuthStatus(ctx, input, output, name, state, interactive, *asJSON)
 	case "logout":
 		if interactive && !*yes {
 			confirmed, err := terminalConfirm(ctx, input, output, "Forget local OAuth credentials?", "Only local encrypted records are removed. Remote tokens are not revoked.")
@@ -121,12 +95,37 @@ func runAuth(ctx context.Context, home string, args []string, input io.Reader, o
 	}
 }
 
+func presentAuthStatus(ctx context.Context, input io.Reader, output io.Writer, name string, state auth.Status, interactive, asJSON bool) error {
+	// An explicit machine-readable format wins even when stdout is a terminal.
+	if asJSON {
+		encoder := json.NewEncoder(output)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(state)
+	}
+	var summary strings.Builder
+	fmt.Fprintf(&summary, "MCP: %s\nAccount: %s\nAuthenticated: %t\nRefresh available: %t\n", name, state.Account, state.Authenticated, state.CanRefresh)
+	if !state.Expiry.IsZero() {
+		fmt.Fprintf(&summary, "Expires: %s\n", state.Expiry.Format(time.RFC3339))
+	}
+	if len(state.Scopes) > 0 {
+		fmt.Fprintf(&summary, "Scopes: %s\n", strings.Join(state.Scopes, ", "))
+	}
+	if interactive {
+		return terminalNote(ctx, input, output, "OAuth credentials status", summary.String())
+	}
+	_, err := io.WriteString(output, summary.String())
+	return err
+}
+
 func authorizationCodeFetcher(redirect string, input io.Reader, output io.Writer, noBrowser bool) sdkauth.AuthorizationCodeFetcher {
 	return authorizationCodeFetcherWithForm(redirect, input, output, noBrowser, false)
 }
 
 func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output io.Writer, noBrowser, interactive bool) sdkauth.AuthorizationCodeFetcher {
 	return func(ctx context.Context, args *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if args == nil || args.URL == "" {
 			return nil, errors.New("OAuth authorization endpoint was not provided")
 		}
@@ -181,10 +180,14 @@ func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output i
 				}()
 			}
 		}
-		fmt.Fprintf(output, "Open this authorization URL in your browser:\n%s\n", args.URL)
+		if _, err := fmt.Fprintf(output, "Open this authorization URL in your browser:\n%s\n", args.URL); err != nil {
+			return nil, err
+		}
 		if !noBrowser {
 			if err := openBrowser(args.URL); err != nil {
-				fmt.Fprintf(output, "Browser could not be opened automatically (%v). Open the URL manually.\n", err)
+				if _, writeErr := fmt.Fprintf(output, "Browser could not be opened automatically (%v). Open the URL manually.\n", err); writeErr != nil {
+					return nil, writeErr
+				}
 			}
 		}
 		if received != nil {
@@ -210,10 +213,19 @@ func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output i
 			}
 			return auth.ParseAuthorizationResponse(redirect, strings.TrimSpace(response))
 		}
-		fmt.Fprintln(output, "Paste the complete final redirected URL here and press Enter:")
-		response, err := bufio.NewReader(input).ReadString('\n')
+		if _, err := fmt.Fprintln(output, "Paste the complete final redirected URL here and press Enter:"); err != nil {
+			return nil, err
+		}
+		// Match the parser's URL size limit before allocating an unbounded line.
+		response, err := bufio.NewReader(io.LimitReader(input, (16<<10)+2)).ReadString('\n')
 		if err != nil && len(response) == 0 {
 			return nil, fmt.Errorf("read OAuth callback URL: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if len(response) > (16<<10)+1 {
+			return nil, errors.New("OAuth response URL exceeds size limit")
 		}
 		return auth.ParseAuthorizationResponse(redirect, strings.TrimSpace(response))
 	}

@@ -19,6 +19,8 @@ import (
 	"agentcfg/internal/syncer"
 	"agentcfg/internal/tui"
 	"agentcfg/internal/updater"
+
+	"github.com/charmbracelet/huh"
 )
 
 // Set at release build time: -ldflags '-X main.version=vX.Y.Z'.
@@ -34,6 +36,9 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, input io.Reader, output, diagnostics io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		_, err := fmt.Fprintln(output, `agentcfg — shared MCP processes and declarative skills
 
@@ -169,12 +174,13 @@ func runCategory(ctx context.Context, category string, flags *flag.FlagSet, home
 	if err != nil {
 		return err
 	}
+	var body strings.Builder
 	switch category {
 	case "harness", "harnesses":
-		_, err = fmt.Fprintln(output, "Enabled harnesses:", strings.Join(cfg.Settings.Harnesses, ", "))
+		fmt.Fprintln(&body, "Enabled harnesses:", strings.Join(cfg.Settings.Harnesses, ", "))
 	case "skill", "skills":
 		for _, skill := range cfg.Skills {
-			fmt.Fprintf(output, "%s  %s\n", skill.Name, availableHarnesses(cfg.Settings.Harnesses, skill.Harnesses))
+			fmt.Fprintf(&body, "%s  %s\n", skill.Name, availableHarnesses(cfg.Settings.Harnesses, skill.Harnesses))
 		}
 	default:
 		names := make([]string, 0, len(cfg.Servers))
@@ -184,9 +190,10 @@ func runCategory(ctx context.Context, category string, flags *flag.FlagSet, home
 		sort.Strings(names)
 		for _, name := range names {
 			server := cfg.Servers[name]
-			fmt.Fprintf(output, "%s  %s  %s\n", name, server.Type, availableHarnesses(cfg.Settings.Harnesses, server.Harnesses))
+			fmt.Fprintf(&body, "%s  %s  %s\n", name, server.Type, availableHarnesses(cfg.Settings.Harnesses, server.Harnesses))
 		}
 	}
+	_, err = io.WriteString(output, body.String())
 	return err
 }
 
@@ -272,7 +279,9 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 			return err
 		}
 		for _, warning := range cfg.Warnings {
-			fmt.Fprintln(diagnostics, "warning:", warning)
+			if _, err := fmt.Fprintln(diagnostics, "warning:", warning); err != nil {
+				return err
+			}
 		}
 		if command == "list" {
 			if interactive {
@@ -286,7 +295,9 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 				return err
 			}
 		} else {
-			fmt.Fprintln(output, message)
+			if _, err := fmt.Fprintln(output, message); err != nil {
+				return err
+			}
 		}
 		if len(cfg.Warnings) != 0 {
 			return fmt.Errorf("validation has %d warning(s); invalid components are disabled", len(cfg.Warnings))
@@ -296,25 +307,27 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 }
 
 func printInventory(cfg *config.Config, output io.Writer) error {
+	var body strings.Builder
 	names := make([]string, 0, len(cfg.Servers))
 	for name := range cfg.Servers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	fmt.Fprintln(output, "MCP servers:")
+	fmt.Fprintln(&body, "MCP servers:")
 	for _, name := range names {
 		server := cfg.Servers[name]
 		sharing := server.Sharing
 		if sharing == "" {
 			sharing = "shared"
 		}
-		fmt.Fprintf(output, "  %s  [%s, %s]\n", name, server.Type, sharing)
+		fmt.Fprintf(&body, "  %s  [%s, %s]\n", name, server.Type, sharing)
 	}
-	fmt.Fprintln(output, "Skills:")
+	fmt.Fprintln(&body, "Skills:")
 	for _, skill := range cfg.Skills {
-		fmt.Fprintf(output, "  %s  %s\n", skill.Name, skill.Path)
+		fmt.Fprintf(&body, "  %s  %s\n", skill.Name, skill.Path)
 	}
-	_, err := fmt.Fprintln(output, "Harnesses:", strings.Join(cfg.Settings.Harnesses, ", "))
+	fmt.Fprintln(&body, "Harnesses:", strings.Join(cfg.Settings.Harnesses, ", "))
+	_, err := io.WriteString(output, body.String())
 	return err
 }
 
@@ -341,7 +354,9 @@ func synchronize(ctx context.Context, flags *flag.FlagSet, root *string, args []
 		return err
 	}
 	for _, warning := range plan.Warnings {
-		fmt.Fprintln(diagnostics, "warning:", warning)
+		if _, err := fmt.Fprintln(diagnostics, "warning:", warning); err != nil {
+			return err
+		}
 	}
 	var changes strings.Builder
 	for _, change := range plan.Changes {
@@ -351,14 +366,20 @@ func synchronize(ctx context.Context, flags *flag.FlagSet, root *string, args []
 	if interactive {
 		title := "User-scope synchronization preview"
 		if err := terminalNote(ctx, input, output, title, fmt.Sprintf("%d planned change(s):\n%s\nOriginal SKILL.md files are never rewritten during distribution.", len(plan.Changes), changes.String())); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return nil
+			}
 			return err
 		}
 	} else {
-		fmt.Fprint(output, changes.String())
+		if _, err := io.WriteString(output, changes.String()); err != nil {
+			return err
+		}
 	}
 	if !*apply {
 		if !interactive {
-			fmt.Fprintf(output, "Preview: %d change(s); nothing written. Use --apply to apply.\n", len(plan.Changes))
+			_, err := fmt.Fprintf(output, "Preview: %d change(s); nothing written. Use --apply to apply.\n", len(plan.Changes))
+			return err
 		}
 		return nil
 	}
@@ -370,6 +391,11 @@ func synchronize(ctx context.Context, flags *flag.FlagSet, root *string, args []
 		if !confirmed {
 			return nil
 		}
+	}
+	// Cancellation before the transaction starts must not authorize a write.
+	// Once Apply starts, it retains its own all-or-rollback guarantees.
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := plan.Apply(); err != nil {
 		return err

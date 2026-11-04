@@ -2,10 +2,13 @@ package tui
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agentcfg/internal/config"
 
 	"github.com/gofrs/flock"
 )
@@ -23,6 +26,9 @@ func TestSettingsAndSkillEditsRespectActiveSyncLock(t *testing.T) {
 			t.Fatalf("acquire synchronization lock: %v", err)
 		}
 		defer lock.Close()
+		if err := setHarnessEnabled(root, "codex", true, true); !errors.Is(err, errNoChange) {
+			t.Fatalf("no-op attempted to acquire the active synchronization lock: %v", err)
+		}
 		if err := setHarnessEnabled(root, "cursor", true, false); err == nil || !strings.Contains(err.Error(), "lock") {
 			t.Fatalf("TUI changed harnesses during synchronization: %v", err)
 		}
@@ -50,6 +56,9 @@ func TestSettingsAndSkillEditsRespectActiveSyncLock(t *testing.T) {
 			t.Fatalf("acquire synchronization lock: %v", err)
 		}
 		defer lock.Close()
+		if err := setSkillHarness(root, skill, "codex", true); !errors.Is(err, errNoChange) {
+			t.Fatalf("skill no-op attempted to acquire the active synchronization lock: %v", err)
+		}
 		if err := setSkillHarness(root, skill, "codex", false); err == nil || !strings.Contains(err.Error(), "lock") {
 			t.Fatalf("TUI changed skill source during synchronization: %v", err)
 		}
@@ -64,4 +73,45 @@ func TestSettingsAndSkillEditsRespectActiveSyncLock(t *testing.T) {
 			t.Fatalf("skill edit after synchronization: %v", err)
 		}
 	})
+}
+
+func TestConcurrentSettingsEditsDoNotMixSnapshots(t *testing.T) {
+	root := settingsFixture(t)
+	original := `{"harnesses":["codex"],"runtime":{"idleTimeout":"7m"}}`
+	putSettings(t, root, original)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, choice := range []string{"cursor", "gemini"} {
+		go func(selected string) {
+			<-start
+			results <- setHarnessSelection(root, []string{selected}, []string{"codex"})
+		}(choice)
+	}
+	close(start)
+	first, second := <-results, <-results
+	writes := 0
+	for _, err := range []error{first, second} {
+		if err == nil {
+			writes++
+		} else if !strings.Contains(err.Error(), "changed") {
+			t.Fatalf("expected a stale snapshot error, got %v", err)
+		}
+	}
+	if writes != 1 {
+		t.Fatalf("wanted exactly one successful writer: %v / %v", first, second)
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Settings.Harnesses) != 1 || (cfg.Settings.Harnesses[0] != "cursor" && cfg.Settings.Harnesses[0] != "gemini") || cfg.Settings.Runtime.IdleTimeout != "7m" {
+		t.Fatalf("concurrent edit mixed or discarded settings: %+v", cfg.Settings)
+	}
+	backups, err := filepath.Glob(settingsFile(root) + ".bak-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("expected one backup for one successful write: %v (%v)", backups, err)
+	}
+	if got, err := os.ReadFile(backups[0]); err != nil || string(got) != original {
+		t.Fatalf("backup no longer matches the approved preimage: %q (%v)", got, err)
+	}
 }

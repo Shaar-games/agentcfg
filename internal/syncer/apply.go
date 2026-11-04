@@ -96,7 +96,26 @@ func (p *Plan) checkAdoptionSources() error {
 	return nil
 }
 
+// A matching spelling and matching bytes do not identify a replaced home.
+// Preserve the directory identities captured by BuildPlan, including across
+// alias spellings, before accepting any later path-based check.
+func (p *Plan) checkScopeIdentity() error {
+	for _, scope := range []struct {
+		path string
+		info os.FileInfo
+	}{{p.root, p.rootIdentity}, {p.base, p.baseIdentity}} {
+		current, err := os.Lstat(scope.path)
+		if err != nil || scope.info == nil || !current.IsDir() || redirected(current) || !os.SameFile(scope.info, current) {
+			return fmt.Errorf("scope root changed since planning: %s", scope.path)
+		}
+	}
+	return nil
+}
+
 func (p *Plan) preflight() error {
+	if err := p.checkScopeIdentity(); err != nil {
+		return err
+	}
 	if p.adoption == nil {
 		if err := p.checkCanonicalSource(); err != nil {
 			return err
@@ -121,6 +140,9 @@ func (p *Plan) preflight() error {
 }
 
 func (p *Plan) checkChange(change Change) error {
+	if err := p.checkScopeIdentity(); err != nil {
+		return err
+	}
 	if change.source != "" {
 		if err := ensureNoSymlinkParents(p.root, change.source); err != nil {
 			return err
@@ -194,14 +216,34 @@ func (p *Plan) Apply() error {
 	if err := p.recheckAdoptionScope(); err != nil {
 		return err
 	}
+	if err := p.checkScopeIdentity(); err != nil {
+		return err
+	}
+	if len(p.Changes) == 0 {
+		encoded, err := json.MarshalIndent(p.state, "", "  ")
+		if err != nil {
+			return err
+		}
+		encoded = append(encoded, '\n')
+		empty := !p.stateExists && p.state.Version == 1 && len(p.state.Configs)+len(p.state.Skills)+len(p.state.Blocks)+len(p.state.Instructions) == 0
+		if empty || bytes.Equal(encoded, p.stateBefore) {
+			// Validate a no-op without creating a directory or lock. A manifest
+			// update still takes the regular locked path, even with no changes.
+			return p.preflight()
+		}
+	}
 	lockDir := filepath.Join(p.base, ".agentcfg")
-	if err := ensureNoSymlinkParents(p.base, lockDir); err != nil {
+	lockPath := filepath.Join(lockDir, "sync.lock")
+	if err := ensureNoSymlinkParents(p.base, lockPath); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(lockDir, 0o700); err != nil {
 		return err
 	}
-	lock := flock.New(filepath.Join(lockDir, "sync.lock"))
+	if err := ensureNoSymlinkParents(p.base, lockPath); err != nil {
+		return err
+	}
+	lock := flock.New(lockPath)
 	defer lock.Close()
 	locked, err := lock.TryLock()
 	if err != nil {
@@ -254,10 +296,19 @@ func (p *Plan) Apply() error {
 	if bytes.Equal(encoded, p.stateBefore) {
 		return nil
 	}
-	if err := fileUnchanged(p.statePath, p.stateBefore, p.stateExists); err != nil {
+	checkState := func() error {
+		if err := p.checkScopeIdentity(); err != nil {
+			return err
+		}
+		if err := ensureNoSymlinkParents(p.root, p.statePath); err != nil {
+			return err
+		}
+		return fileUnchanged(p.statePath, p.stateBefore, p.stateExists)
+	}
+	if err := checkState(); err != nil {
 		return rollback(err)
 	}
-	if err := atomicWrite(p.statePath, encoded, 0o600); err != nil {
+	if err := atomicWriteChecked(p.statePath, encoded, 0o600, checkState); err != nil {
 		return rollback(err)
 	}
 	return nil
@@ -266,6 +317,12 @@ func (p *Plan) Apply() error {
 func (p *Plan) applyChange(change Change, backup string) (func() error, error) {
 	if change.skill != nil {
 		return p.applySkill(change, backup)
+	}
+	check := func() error {
+		if err := p.checkAdoptionSources(); err != nil {
+			return err
+		}
+		return p.checkChange(change)
 	}
 	mode := os.FileMode(0o600)
 	if change.exists {
@@ -279,43 +336,54 @@ func (p *Plan) applyChange(change Change, backup string) (func() error, error) {
 		}
 	}
 	if change.remove {
+		if err := check(); err != nil {
+			return nil, err
+		}
 		if change.exists {
 			if err := os.Remove(change.Path); err != nil {
 				return nil, err
 			}
 		}
 		return func() error {
-			if err := fileUnchanged(change.Path, nil, false); err != nil {
+			check := func() error {
+				if err := p.checkScopeIdentity(); err != nil {
+					return err
+				}
+				if err := ensureNoSymlinkParents(p.base, change.Path); err != nil {
+					return err
+				}
+				return fileUnchanged(change.Path, nil, false)
+			}
+			if err := check(); err != nil {
 				return err
 			}
 			if change.exists {
-				return atomicWrite(change.Path, change.before, mode)
+				return atomicWriteChecked(change.Path, change.before, mode, check)
 			}
 			return nil
 		}, nil
-	}
-	var check func() error
-	if change.adopted {
-		check = func() error {
-			if err := p.checkAdoptionSources(); err != nil {
-				return err
-			}
-			return p.checkChange(change)
-		}
 	}
 	if err := atomicWriteChecked(change.Path, change.after, mode, check); err != nil {
 		return nil, err
 	}
 	return func() error {
-		unchanged := fileUnchanged
-		if change.adopted {
-			unchanged = p.adoptedFileUnchanged
+		check := func() error {
+			if err := p.checkScopeIdentity(); err != nil {
+				return err
+			}
+			if err := ensureNoSymlinkParents(p.base, change.Path); err != nil {
+				return err
+			}
+			if change.adopted {
+				return p.adoptedFileUnchanged(change.Path, change.after, true)
+			}
+			return fileUnchanged(change.Path, change.after, true)
 		}
-		if err := unchanged(change.Path, change.after, true); err != nil {
+		if err := check(); err != nil {
 			return err
 		}
 		if change.exists {
-			return atomicWrite(change.Path, change.before, mode)
+			return atomicWriteChecked(change.Path, change.before, mode, check)
 		}
 		return os.Remove(change.Path)
 	}, nil
@@ -389,11 +457,11 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 		if err := p.checkAdoptionSources(); err != nil {
 			return nil, err
 		}
-		// Copying can take time. Recheck the native tree immediately before
-		// moving it into the backup, including its original content proof.
-		if err := p.checkChange(change); err != nil {
-			return nil, err
-		}
+	}
+	// Copying can take time. Recheck every native tree immediately before
+	// moving it into the backup, including adoption proofs when applicable.
+	if err := p.checkChange(change); err != nil {
+		return nil, err
 	}
 	if change.exists {
 		if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
@@ -409,6 +477,15 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 		installedFingerprint = adoptionTreeFingerprint
 	}
 	undo := func() error {
+		if err := p.checkScopeIdentity(); err != nil {
+			return err
+		}
+		if err := ensureNoSymlinkParents(p.base, filepath.Dir(change.Path)); err != nil {
+			return err
+		}
+		if err := ensureNoSymlinkParents(p.base, filepath.Dir(backup)); err != nil {
+			return err
+		}
 		if installed {
 			current, err := installedFingerprint(change.Path)
 			if err != nil {

@@ -31,15 +31,31 @@ func open(ctx context.Context, root string) (net.Conn, error) {
 	return ipc.Dial(ctx, endpoint)
 }
 
-func exchange(connection net.Conn, request wire.Message) (*wire.Reader, wire.Message, error) {
-	_ = connection.SetDeadline(time.Now().Add(15 * time.Second))
-	if err := wire.NewWriter(connection).Write(request); err != nil {
+func exchange(ctx context.Context, connection net.Conn, request wire.Message) (*wire.Reader, wire.Message, error) {
+	if err := ctx.Err(); err != nil {
 		return nil, nil, err
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	if err := connection.SetDeadline(deadline); err != nil {
+		return nil, nil, err
+	}
+	defer connection.SetDeadline(time.Time{}) // the MCP stream has its own lifetime
+	// A context can be cancelled without having a deadline (for example Ctrl+C
+	// while a menu is querying status). Interrupt both reads and writes as well.
+	stopCancellation := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stopCancellation()
+	if err := wire.NewWriter(connection).Write(request); err != nil {
+		return nil, nil, exchangeError(ctx, err)
 	}
 	reader := wire.NewReader(connection)
 	response, err := reader.Read()
-	_ = connection.SetDeadline(time.Time{})
 	if err != nil {
+		return nil, nil, exchangeError(ctx, err)
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
 	if raw := response["error"]; raw != nil {
@@ -55,6 +71,17 @@ func exchange(connection net.Conn, request wire.Message) (*wire.Reader, wire.Mes
 	return reader, response, nil
 }
 
+func exchangeError(ctx context.Context, err error) error {
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
+	// The socket and context deadline timers can fire in either order.
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return err
+}
+
 // GetStatus never starts a broker. A missing endpoint is reported as stopped.
 // An idle broker can close its IPC listener between Dial and the status reply,
 // especially on Windows named pipes. Only a transport-disconnect error is
@@ -62,12 +89,18 @@ func exchange(connection net.Conn, request wire.Message) (*wire.Reader, wire.Mes
 func GetStatus(ctx context.Context, root string) (Status, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return Status{}, err
+	}
 	for attempt := 0; attempt < 3; attempt++ {
 		connection, err := open(ctx, root)
 		if err != nil {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return Status{}, contextErr
+			}
 			return Status{Backends: []BackendStatus{}}, nil
 		}
-		_, response, err := exchange(connection, hello("status"))
+		_, response, err := exchange(ctx, connection, hello("status"))
 		_ = connection.Close()
 		if err != nil {
 			if attempt < 2 && ctx.Err() == nil && statusConnectionClosed(err) {
@@ -93,7 +126,7 @@ func Stop(ctx context.Context, root string) error {
 		return fmt.Errorf("broker is not reachable: %w", err)
 	}
 	defer connection.Close()
-	_, _, err = exchange(connection, hello("stop"))
+	_, _, err = exchange(ctx, connection, hello("stop"))
 	return err
 }
 
@@ -193,7 +226,7 @@ func Connect(ctx context.Context, root, name, harness string, input io.Reader, o
 	defer connection.Close()
 	request := hello("connect")
 	request["server"], request["harness"] = wire.Raw(name), wire.Raw(harness)
-	reader, _, err := exchange(connection, request)
+	reader, _, err := exchange(ctx, connection, request)
 	if err != nil {
 		return err
 	}

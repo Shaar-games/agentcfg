@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"agentcfg/internal/auth"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
@@ -33,6 +37,52 @@ func TestOAuthManualRedirectURLInput(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Paste the complete final redirected URL") {
 		t.Fatal("manual input instructions missing")
+	}
+}
+
+func TestOAuthStatusJSONWinsOverInteractivePresentation(t *testing.T) {
+	var output bytes.Buffer
+	state := auth.Status{Enabled: true, Account: "fixture", Scopes: []string{"read"}}
+	// No input is supplied: --json must never start a form or await a key.
+	if err := presentAuthStatus(context.Background(), nil, &output, "fixture", state, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(output.Bytes()) || strings.Contains(output.String(), "\x1b[") {
+		t.Fatalf("--json was not pure JSON in an interactive terminal: %q", output.String())
+	}
+	var decoded auth.Status
+	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil || decoded.Account != state.Account {
+		t.Fatalf("unexpected JSON status: %+v, %v", decoded, err)
+	}
+}
+
+func TestOAuthStatusPropagatesOutputFailure(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		err := presentAuthStatus(context.Background(), nil, failingOutput{}, "fixture", auth.Status{}, false, asJSON)
+		if !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("asJSON=%t swallowed output error: %v", asJSON, err)
+		}
+	}
+}
+
+func TestOAuthManualInputIsBoundedAndOutputFailureStopsBeforeReading(t *testing.T) {
+	args := &sdkauth.AuthorizationArgs{URL: "https://issuer.example/authorize?state=test"}
+	input := strings.NewReader(strings.Repeat("x", 1<<20))
+	fetcher := authorizationCodeFetcher("https://example.org/callback", input, io.Discard, true)
+	if _, err := fetcher(context.Background(), args); err == nil {
+		t.Fatal("oversized callback was accepted")
+	}
+	if read := (1 << 20) - input.Len(); read > (16<<10)+2 {
+		t.Fatalf("read %d bytes before enforcing callback size limit", read)
+	}
+	input = strings.NewReader("https://example.org/callback?state=test&code=fixture\n")
+	before := input.Len()
+	fetcher = authorizationCodeFetcher("https://example.org/callback", input, failingOutput{}, true)
+	if _, err := fetcher(context.Background(), args); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("authorization display failure was lost: %v", err)
+	}
+	if input.Len() != before {
+		t.Fatal("authorization read input after failing to display its instructions")
 	}
 }
 

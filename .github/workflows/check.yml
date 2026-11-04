@@ -29,8 +29,17 @@ jobs:
           cache: true
       - name: Static checks
         run: go vet ./...
+      - name: Go formatting
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Go files require formatting:\n%s\n' "$unformatted"
+            exit 1
+          fi
       - name: Unit and integration tests
-        run: go test -count=1 -timeout=120s ./...
+        run: go test -shuffle=on -count=1 -timeout=120s ./...
       - name: CLI build
         run: go build -o ${{ runner.temp }}/agentcfg${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd/agentcfg
       - name: No-argument CLI help

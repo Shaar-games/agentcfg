@@ -20,7 +20,9 @@ import (
 	"agentcfg/internal/config"
 	"agentcfg/internal/syncer"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/term"
 )
 
@@ -48,21 +50,314 @@ type interfaceSession struct {
 }
 
 func (s interfaceSession) form(fields ...huh.Field) error {
-	form := huh.NewForm(huh.NewGroup(fields...)).
-		WithInput(s.in).WithOutput(s.out).WithTheme(Theme())
+	return RunForm(s.ctx, s.in, s.out, fields...)
+}
+
+// RunForm is the shared Huh runner for the TUI and CLI wizard. Huh normally
+// caps a Group's height to the terminal and then passes that reduced height to
+// Select, which converts a natural list into an internal scrollable viewport.
+// Keep its original controls, styling and key bindings, but give the form its
+// actual content height at startup and after terminal resizes. When the list is
+// taller than the physical terminal, the terminal handles its own scrollback;
+// Huh never hides options in an internal navigation viewport.
+func RunForm(ctx context.Context, input io.Reader, output io.Writer, fields ...huh.Field) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if input == nil {
+		input = strings.NewReader("") // Never fall back to a real process stdin.
+	}
+	if output == nil {
+		output = io.Discard // A nil writer must not use the process stdout.
+	}
+	reader, readState := formInput(input)
+	writer, writeState := formOutput(output)
+	var resizedTooSmall bool
+	native := isNativeTerminal(input, output)
+	explicitAccessible := os.Getenv("AGENTCFG_ACCESSIBLE") == "1"
+	var overflow *bool
+	if native && !explicitAccessible {
+		overflow = &resizedTooSmall
+	}
+	form, group := newNaturalFormWithOverflow(reader, writer, overflow, fields...)
 	// Huh switches to a numbered accessible prompt when TERM=dumb. Windows
 	// consoles can still render the native checkbox UI in that environment;
 	// only override the fallback when both streams are real terminals.
-	if os.Getenv("AGENTCFG_ACCESSIBLE") == "1" {
+	// Redirected/non-terminal streams must use the deterministic numbered Huh
+	// mode regardless of TERM, not a Bubble Tea program requiring a live TTY.
+	accessible := explicitAccessible || !native
+	if accessible {
 		form.WithAccessible(true)
 	} else if runtime.GOOS == "windows" {
-		in, inOK := s.in.(*os.File)
-		out, outOK := s.out.(*os.File)
-		if inOK && outOK && term.IsTerminal(in.Fd()) && term.IsTerminal(out.Fd()) {
+		if native {
 			form.WithAccessible(false)
 		}
 	}
-	return form.RunWithContext(s.ctx)
+	if native && !accessible {
+		out := output.(*os.File)
+		width, terminalHeight, sizeErr := term.GetSize(out.Fd())
+		if sizeErr == nil && terminalHeight > 0 && resizeNaturalForm(form, group, fields, width) > terminalHeight {
+			// Huh native Select cannot show more lines than the physical TTY and
+			// Bubble Tea's renderer would otherwise truncate the first options.
+			// Its official accessible mode prints every numbered option without
+			// creating a second/foreign UI or a hidden viewport.
+			form.WithAccessible(true)
+			accessible = true
+		}
+	}
+	if accessible || runtime.GOOS != "windows" && strings.EqualFold(os.Getenv("TERM"), "dumb") {
+		readState, writeState = checkedAccessibleStreams(form, input, output, readState, writeState)
+	}
+	err := form.RunWithContext(ctx)
+	if err == nil && resizedTooSmall {
+		if _, writeErr := fmt.Fprintln(writer, "Terminal is smaller than this menu; showing the complete numbered list."); writeErr != nil {
+			return writeErr
+		}
+		form.WithAccessible(true)
+		readState, writeState = checkedAccessibleStreams(form, input, output, readState, writeState)
+		err = form.RunWithContext(ctx)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if readState != nil && readState.err != nil {
+		return readState.err
+	}
+	if writeState != nil && writeState.err != nil {
+		return writeState.err
+	}
+	return err
+}
+
+func checkedAccessibleStreams(form *huh.Form, input io.Reader, output io.Writer, readState *checkedFormInput, writeState *checkedFormOutput) (*checkedFormInput, *checkedFormOutput) {
+	// Native TTYs stay unwrapped for Bubble Tea's cursor/key handling, but
+	// Huh's accessible Scanner needs bounded reads and observable EOF/errors.
+	if readState == nil && input != nil {
+		readState = &checkedFormInput{r: input}
+		form.WithInput(readState)
+	}
+	if writeState == nil && output != nil {
+		writeState = &checkedFormOutput{w: output}
+	}
+	if writeState != nil {
+		// Huh's accessible RunAccessible prints Theme() styled titles even on a
+		// real color TTY. Keep this mode strictly textual without changing the
+		// global renderer or NO_COLOR for the user's other CLI sessions.
+		form.WithOutput(&plainAccessibleWriter{w: writeState})
+	}
+	return readState, writeState
+}
+
+// plainAccessibleWriter strips ANSI control strings incrementally. A simple
+// ansi.Strip per Write is insufficient because a terminal writer may receive
+// ESC[...m split across separate writes. Huh accessible prompts must not leak
+// SGR or cursor-control sequences even when the native theme is colored.
+type plainAccessibleWriter struct {
+	w     io.Writer
+	state uint8
+}
+
+const (
+	plainText uint8 = iota
+	plainEscape
+	plainCSI
+	plainOSC
+	plainString
+	plainOSCEscape
+	plainStringEscape
+)
+
+func (w *plainAccessibleWriter) Write(p []byte) (int, error) {
+	clean := make([]byte, 0, len(p))
+	for _, b := range p {
+		switch w.state {
+		case plainText:
+			switch b {
+			case 0x1b:
+				w.state = plainEscape
+			default:
+				clean = append(clean, b)
+			}
+		case plainEscape:
+			switch b {
+			case '[':
+				w.state = plainCSI
+			case ']':
+				w.state = plainOSC
+			case 'P', '_', '^', 'X':
+				w.state = plainString
+			default:
+				w.state = plainText // Drop standalone ESC command too.
+			}
+		case plainCSI:
+			if b >= 0x40 && b <= 0x7e {
+				w.state = plainText
+			}
+		case plainOSC:
+			if b == 0x07 {
+				w.state = plainText
+			} else if b == 0x1b {
+				w.state = plainOSCEscape
+			}
+		case plainString:
+			if b == 0x1b {
+				w.state = plainStringEscape
+			}
+		case plainOSCEscape:
+			if b == '\\' {
+				w.state = plainText
+			} else if b != 0x1b {
+				w.state = plainOSC
+			}
+		case plainStringEscape:
+			if b == '\\' {
+				w.state = plainText
+			} else if b != 0x1b {
+				w.state = plainString
+			}
+		}
+	}
+	if len(clean) != 0 {
+		n, err := w.w.Write(clean)
+		if err != nil {
+			return 0, err
+		}
+		if n != len(clean) {
+			return 0, io.ErrShortWrite
+		}
+	}
+	return len(p), nil
+}
+
+func isNativeTerminal(input io.Reader, output io.Writer) bool {
+	in, inOK := input.(*os.File)
+	out, outOK := output.(*os.File)
+	return inOK && outOK && term.IsTerminal(in.Fd()) && term.IsTerminal(out.Fd())
+}
+
+// Huh's accessible PromptString builds a new bufio.Scanner for each field.
+// Without bounded reads a scanner buffers subsequent input (e.g. the next
+// screen's answers), leaving the following form at EOF. It also silently
+// interprets EOF as the default choice. Record EOF so no change can be saved
+// when the user never answered, and preserve native TTY streams unchanged.
+type checkedFormInput struct {
+	r   io.Reader
+	err error
+}
+
+func (r *checkedFormInput) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	n, err := r.r.Read(p[:1])
+	if err != nil {
+		r.err = err
+	}
+	return n, err
+}
+
+func formInput(input io.Reader) (io.Reader, *checkedFormInput) {
+	if input == nil {
+		return nil, nil
+	}
+	if file, ok := input.(*os.File); ok && term.IsTerminal(file.Fd()) {
+		return input, nil
+	}
+	r := &checkedFormInput{r: input}
+	return r, r
+}
+
+type checkedFormOutput struct {
+	w   io.Writer
+	err error
+}
+
+func (w *checkedFormOutput) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	n, err := w.w.Write(p)
+	if err != nil {
+		w.err = err
+	} else if n != len(p) {
+		w.err = io.ErrShortWrite
+	}
+	return n, w.err
+}
+
+func formOutput(output io.Writer) (io.Writer, *checkedFormOutput) {
+	if output == nil {
+		return nil, nil
+	}
+	if file, ok := output.(*os.File); ok && term.IsTerminal(file.Fd()) {
+		return output, nil
+	}
+	w := &checkedFormOutput{w: output}
+	return w, w
+}
+
+func newNaturalForm(input io.Reader, output io.Writer, fields ...huh.Field) (*huh.Form, *huh.Group) {
+	return newNaturalFormWithOverflow(input, output, nil, fields...)
+}
+
+func newNaturalFormWithOverflow(input io.Reader, output io.Writer, overflow *bool, fields ...huh.Field) (*huh.Form, *huh.Group) {
+	group := huh.NewGroup(fields...)
+	form := huh.NewForm(group).WithTheme(Theme())
+	// This Bubble Tea hook modifies Huh's own dimensions, not its UI. A
+	// terminal resize never clamps the visible choice set to terminal rows.
+	options := []tea.ProgramOption{tea.WithReportFocus(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+		if size, ok := msg.(tea.WindowSizeMsg); ok {
+			return updateNaturalWindowSize(form, group, fields, size, overflow)
+		}
+		return msg
+	})}
+	if overflow != nil {
+		// Native Huh forms otherwise leave their previous rendered footer on
+		// the primary screen after Ctrl+C. The next menu then starts below it
+		// and eventually scrolls the user's terminal. Bubble Tea's alternate
+		// screen restores the exact primary screen on both completion and
+		// abort; it never erases the user's existing scrollback history.
+		options = append(options, tea.WithAltScreen())
+	}
+	form.WithProgramOptions(options...)
+	form.WithInput(input).WithOutput(output)
+	resizeNaturalForm(form, group, fields, 0)
+	return form, group
+}
+
+func updateNaturalWindowSize(form *huh.Form, group *huh.Group, fields []huh.Field, size tea.WindowSizeMsg, overflow *bool) tea.Msg {
+	natural := resizeNaturalForm(form, group, fields, size.Width)
+	if overflow != nil && size.Height > 0 && natural > size.Height {
+		*overflow = true
+		return tea.QuitMsg{}
+	}
+	return size
+}
+
+func resizeNaturalForm(form *huh.Form, group *huh.Group, fields []huh.Field, width int) int {
+	if width > 0 {
+		form.WithWidth(width)
+	}
+	for _, field := range fields {
+		// A previous narrow render may have caused a Select to retain Huh's
+		// reduced viewport. Restore natural sizing before measuring its content.
+		switch selectField := field.(type) {
+		case *huh.Select[string]:
+			selectField.Height(0)
+		case *coloredNavigationSelect:
+			selectField.Select.Height(0)
+		}
+		_, _ = field.Update(nil)
+	}
+	height := lipgloss.Height(group.Content())
+	if header := group.Header(); header != "" {
+		height += lipgloss.Height(header)
+	}
+	if footer := group.Footer(); footer != "" {
+		height += lipgloss.Height(footer) + 1
+	}
+	form.WithHeight(max(1, height))
+	return max(height, lipgloss.Height(form.View()))
 }
 
 func (s interfaceSession) selectAction(title, description string, choices ...huh.Option[string]) (string, error) {
@@ -82,7 +377,7 @@ func (s interfaceSession) selectAction(title, description string, choices ...huh
 }
 
 func (s interfaceSession) note(title, description string) error {
-	return s.form(huh.NewNote().Title(title).Description(safeHuhText(description)).Height(17))
+	return s.form(huh.NewNote().Title(title).Description(safeHuhText(description)))
 }
 
 // Huh Notes render Markdown. Backslashes in a native Windows path would be
@@ -280,7 +575,7 @@ func (s interfaceSession) configureMCP() error {
 		sort.Strings(names)
 		rows := make([]navigationStatus, 0, len(names))
 		for _, name := range names {
-			rows = append(rows, navigationStatus{title: safeHuhText(name), detail: cfg.Servers[name].Type + "  ·  " + sharing(cfg.Servers[name]), id: name})
+			rows = append(rows, navigationStatus{title: safeHuhText(name), detail: cfg.Servers[name].Type + "  ·  " + sharing(cfg.Servers[name]), id: navigationItemValue(name)})
 		}
 		choices := statusNavigationOptions(rows)
 		choices = append(choices, huh.NewOption("Back to main menu", "back"))
@@ -293,6 +588,10 @@ func (s interfaceSession) configureMCP() error {
 		}
 		if name == "back" || name == "" {
 			return nil
+		}
+		name, valid := navigationItemName(name)
+		if !valid {
+			return fmt.Errorf("unexpected MCP selection")
 		}
 		server := cfg.Servers[name]
 		choice, err := s.selectAction(name, fmt.Sprintf("Transport: %s  ·  Sharing: %s", server.Type, sharing(server)),
@@ -440,7 +739,7 @@ func (s interfaceSession) configureSkills() error {
 					count++
 				}
 			}
-			rows = append(rows, navigationStatus{title: safeHuhText(skill.Name), detail: fmt.Sprintf("%d harness(es)", count), id: skill.Name})
+			rows = append(rows, navigationStatus{title: safeHuhText(skill.Name), detail: fmt.Sprintf("%d harness(es)", count), id: navigationItemValue(skill.Name)})
 		}
 		choices := statusNavigationOptions(rows)
 		choices = append(choices, huh.NewOption("Back to main menu", "back"))
@@ -453,6 +752,10 @@ func (s interfaceSession) configureSkills() error {
 		}
 		if name == "back" || name == "" {
 			return nil
+		}
+		name, valid := navigationItemName(name)
+		if !valid {
+			return fmt.Errorf("unexpected skill selection")
 		}
 		if err := s.configureSkill(name); err != nil {
 			return err

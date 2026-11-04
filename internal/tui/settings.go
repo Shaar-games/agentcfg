@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -168,7 +169,11 @@ func setServerHarnessSelection(root string, snapshot config.Server, chosen, conf
 			return errors.New("configured harnesses changed; refresh the MCP checklist")
 		}
 		server, exists := cfg.Servers[snapshot.Name]
-		if !exists || server.Source != snapshot.Source || !slices.Equal(server.Harnesses, snapshot.Harnesses) {
+		// Availability approval belongs to the server shown by the checklist.
+		// A concurrent sharing-only edit is independent and is preserved below.
+		definition, previous := server, snapshot
+		definition.Sharing, previous.Sharing = "", ""
+		if !exists || !reflect.DeepEqual(definition, previous) {
 			return fmt.Errorf("MCP %q changed since checklist opened; refresh", snapshot.Name)
 		}
 		unchanged := true
@@ -240,6 +245,18 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 		return err
 	}
 	agentDir := filepath.Join(absolute, ".agentcfg")
+	if info, err := os.Lstat(agentDir); err == nil {
+		if !info.IsDir() || pathutil.IsRedirected(info) {
+			return fmt.Errorf("settings directory must be a real directory within %s", absolute)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	// Reject stale/invalid requests and no-ops before creating even a lock file.
+	// The mutation is prepared again after locking, against a fresh snapshot.
+	if _, _, _, err := prepareSettingsEdit(absolute, mutate); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(agentDir, 0o700); err != nil {
 		return fmt.Errorf("prepare agentcfg settings directory: %w", err)
 	}
@@ -269,38 +286,10 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 	}
 	defer lock.Unlock()
 
-	cfg, err := config.Load(absolute)
-	if err != nil {
-		return fmt.Errorf("settings validation: %w", err)
-	}
 	path := settingsFile(absolute)
-	original, existed, err := readSettings(path)
+	original, updated, existed, err := prepareSettingsEdit(absolute, mutate)
 	if err != nil {
 		return err
-	}
-	fields := make(map[string]json.RawMessage)
-	if existed {
-		if err := json.Unmarshal(bytes.TrimPrefix(original, []byte{0xef, 0xbb, 0xbf}), &fields); err != nil || fields == nil {
-			return errors.New("settings file must be a valid JSON object")
-		}
-	}
-	if err := mutate(cfg, fields); err != nil {
-		return err
-	}
-
-	updated, err := json.MarshalIndent(fields, "", "  ")
-	if err != nil {
-		return err
-	}
-	updated = append(updated, '\n')
-	if bytes.HasPrefix(original, []byte{0xef, 0xbb, 0xbf}) {
-		updated = append([]byte{0xef, 0xbb, 0xbf}, updated...)
-	}
-	if len(updated) > maxSettingsBytes {
-		return fmt.Errorf("settings exceed %d bytes", maxSettingsBytes)
-	}
-	if bytes.Equal(original, updated) {
-		return nil
 	}
 
 	// Do not overwrite user changes made during preparation; agentcfg writers
@@ -352,6 +341,52 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 		return fmt.Errorf("atomically replace settings: %w", err)
 	}
 	return nil
+}
+
+// prepareSettingsEdit is read-only; mutate must only edit its in-memory fields.
+// Bracket config.Load with the raw preimage so parsed checks and preserved JSON
+// cannot silently refer to different settings versions.
+func prepareSettingsEdit(root string, mutate func(*config.Config, map[string]json.RawMessage) error) ([]byte, []byte, bool, error) {
+	path := settingsFile(root)
+	original, existed, err := readSettings(path)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("settings validation: %w", err)
+	}
+	latest, stillExists, err := readSettings(path)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if stillExists != existed || !bytes.Equal(latest, original) {
+		return nil, nil, false, errors.New("settings changed while loading; refresh before retrying")
+	}
+	fields := make(map[string]json.RawMessage)
+	if existed {
+		if err := json.Unmarshal(bytes.TrimPrefix(original, []byte{0xef, 0xbb, 0xbf}), &fields); err != nil || fields == nil {
+			return nil, nil, false, errors.New("settings file must be a valid JSON object")
+		}
+	}
+	if err := mutate(cfg, fields); err != nil {
+		return nil, nil, false, err
+	}
+	updated, err := json.MarshalIndent(fields, "", "  ")
+	if err != nil {
+		return nil, nil, false, err
+	}
+	updated = append(updated, '\n')
+	if bytes.HasPrefix(original, []byte{0xef, 0xbb, 0xbf}) {
+		updated = append([]byte{0xef, 0xbb, 0xbf}, updated...)
+	}
+	if len(updated) > maxSettingsBytes {
+		return nil, nil, false, fmt.Errorf("settings exceed %d bytes", maxSettingsBytes)
+	}
+	if bytes.Equal(original, updated) {
+		return nil, nil, false, errNoChange
+	}
+	return original, updated, existed, nil
 }
 
 func readSettings(path string) (data []byte, exists bool, err error) {

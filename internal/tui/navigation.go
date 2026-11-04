@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 )
 
@@ -28,6 +29,17 @@ var (
 // runes. This also works if a label later contains wide or combining glyphs.
 type navigationStatus struct {
 	title, detail, id string
+}
+
+// Item values are namespaced away from action sentinels (back/exit/refresh).
+// A legitimate MCP or skill called "back" must remain selectable; this prefix
+// is solely an internal Huh Option.Value and never changes its displayed name.
+const navigationItemPrefix = "item:"
+
+func navigationItemValue(id string) string { return navigationItemPrefix + id }
+
+func navigationItemName(value string) (string, bool) {
+	return strings.CutPrefix(value, navigationItemPrefix)
 }
 
 func statusNavigationOptions(rows []navigationStatus) []huh.Option[string] {
@@ -98,12 +110,22 @@ func navigationColor(id, label string) lipgloss.AdaptiveColor {
 func (s interfaceSession) navigationSupportsColor() bool {
 	// Accessible prompts display plain numbered options. Preserve their labels
 	// for screen readers, piping, TERM=dumb and non-interactive tests.
-	if os.Getenv("AGENTCFG_ACCESSIBLE") == "1" || runtime.GOOS != "windows" && strings.EqualFold(os.Getenv("TERM"), "dumb") {
+	if navigationPlainMode() {
 		return false
 	}
 	in, inOK := s.in.(*os.File)
 	out, outOK := s.out.(*os.File)
 	return inOK && outOK && term.IsTerminal(in.Fd()) && term.IsTerminal(out.Fd())
+}
+
+func navigationPlainMode() bool {
+	// Respect the established NO_COLOR convention even on color-capable TTYs.
+	// Huh itself may still run native forms when a Windows console reports a
+	// dumb TERM, so keep that platform exception separate from accessibility.
+	if os.Getenv("AGENTCFG_ACCESSIBLE") == "1" || os.Getenv("NO_COLOR") != "" || os.Getenv("CLICOLOR") == "0" {
+		return true
+	}
+	return runtime.GOOS != "windows" && strings.EqualFold(os.Getenv("TERM"), "dumb")
 }
 
 func (s interfaceSession) navigationSelect(field *huh.Select[string], options []huh.Option[string]) huh.Field {
@@ -128,17 +150,28 @@ func (s *coloredNavigationSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (s *coloredNavigationSelect) View() string {
-	view := s.Select.View()
-	for _, option := range s.options {
-		if option.Key == "" {
+	lines := strings.Split(s.Select.View(), "\n")
+	for i, line := range lines {
+		plain := strings.TrimRight(ansi.Strip(line), " ")
+		// Check the longest suffix first, so a `Back` option never colors the
+		// `Back` prefix inside a distinct `Back to menu` row. The option label
+		// remains unmodified for Huh's search/filter logic.
+		best := -1
+		for j, option := range s.options {
+			if option.Key != "" && strings.HasSuffix(plain, option.Key) && (best < 0 || len(option.Key) > len(s.options[best].Key)) {
+				best = j
+			}
+		}
+		if best < 0 {
 			continue
 		}
-		index := strings.LastIndex(view, option.Key)
-		if index < 0 {
+		option := s.options[best]
+		start := strings.LastIndex(line, option.Key)
+		if start < 0 {
 			continue
 		}
 		styled := s.renderer.NewStyle().Foreground(navigationColor(option.Value, option.Key)).Render(option.Key)
-		view = view[:index] + styled + view[index+len(option.Key):]
+		lines[i] = line[:start] + styled + line[start+len(option.Key):]
 	}
-	return view
+	return strings.Join(lines, "\n")
 }

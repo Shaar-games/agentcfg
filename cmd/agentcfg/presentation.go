@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"strings"
 
 	"agentcfg/internal/tui"
@@ -28,39 +27,34 @@ func terminalPresentation(input io.Reader, output io.Writer, plain bool) bool {
 }
 
 func terminalForm(ctx context.Context, input io.Reader, output io.Writer, fields ...huh.Field) error {
-	form := huh.NewForm(huh.NewGroup(fields...)).
-		WithInput(input).
-		WithOutput(output).
-		WithTheme(tui.Theme())
-	// On Windows, a genuine interactive console can support Huh even if TERM
-	// is incorrectly set to dumb. Preserve numbered prompts for non-terminals.
-	if os.Getenv("AGENTCFG_ACCESSIBLE") == "1" {
-		form.WithAccessible(true)
-	} else if runtime.GOOS == "windows" && terminalPresentation(input, output, false) {
-		form.WithAccessible(false)
-	}
-	return form.RunWithContext(ctx)
+	return tui.RunForm(ctx, input, output, fields...)
 }
 
 func terminalNote(ctx context.Context, input io.Reader, output io.Writer, title, body string) error {
 	return terminalForm(ctx, input, output, huh.NewNote().
 		Title(title).
-		Description(strings.TrimSpace(body)).
-		Height(16))
+		Description(strings.TrimSpace(body)))
 }
 
 func terminalConfirm(ctx context.Context, input io.Reader, output io.Writer, title, description string) (bool, error) {
 	confirmed := false
-	err := terminalForm(ctx, input, output, huh.NewConfirm().
-		Title(title).
-		Description(description).
-		Affirmative("Yes").
-		Negative("Cancel").
-		Value(&confirmed))
+	err := terminalForm(ctx, input, output, terminalConfirmation(title, description, &confirmed))
 	if errors.Is(err, huh.ErrUserAborted) {
 		return false, nil
 	}
 	return confirmed, err
+}
+
+// All interactive mutations share the same explicit, default-negative prompt.
+// Keep the operation and its consequences in the description, not in a second
+// confirmation dialect that differs from the configuration menus.
+func terminalConfirmation(title, description string, confirmed *bool) *huh.Confirm {
+	return huh.NewConfirm().
+		Title("Are you sure?").
+		Description(strings.TrimSpace(title + "\n" + description)).
+		Affirmative("Yes!").
+		Negative("No.").
+		Value(confirmed)
 }
 
 func terminalHarnessSelection(ctx context.Context, input io.Reader, output io.Writer, initial []string) ([]string, error) {

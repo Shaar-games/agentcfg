@@ -184,6 +184,9 @@ func TestSkillMultiSelectPreservesNoChangeAndRejectsBadChoices(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".agentcfg", "backups")); !os.IsNotExist(err) {
 		t.Fatalf("no-op or invalid edit wrote backup directory: %v", err)
 	}
+	if _, err := os.Lstat(filepath.Join(root, ".agentcfg", "sync.lock")); !os.IsNotExist(err) {
+		t.Fatalf("no-op or invalid edit created a synchronization lock: %v", err)
+	}
 	if got := string(mustReadSkill(t, path)); got != "---\nname: review\ndescription: Review source\n---\n# Keep\n" {
 		t.Fatal("invalid edit changed source")
 	}
