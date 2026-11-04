@@ -18,6 +18,7 @@ import (
 
 	"agentcfg/internal/broker"
 	"agentcfg/internal/ipc"
+	"agentcfg/internal/pathutil"
 	"agentcfg/internal/wire"
 )
 
@@ -48,7 +49,11 @@ func cliBinary(t *testing.T) string {
 		command := exec.Command("go", "build", "-o", testBinary, ".")
 		if output, err := command.CombinedOutput(); err != nil {
 			buildError = fmt.Errorf("build CLI: %w\n%s", err, output)
+			return
 		}
+		// Match the installed executable identity across macOS /var aliases
+		// and Windows short-name temporary directories used by CI runners.
+		testBinary, buildError = pathutil.Resolve(testBinary)
 	})
 	if buildError != nil {
 		t.Fatal(buildError)

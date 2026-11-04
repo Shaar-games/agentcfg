@@ -11,6 +11,7 @@ import (
 
 	"agentcfg/internal/bootstrap"
 	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 	"agentcfg/internal/syncer"
 )
 
@@ -25,7 +26,7 @@ func initExecutable(binary string, required bool) (string, error) {
 	if !required {
 		return binary, nil
 	}
-	binary, err = filepath.EvalSymlinks(binary)
+	binary, err = pathutil.Resolve(binary)
 	if err != nil {
 		return "", fmt.Errorf("locate installed agentcfg executable: %w", err)
 	}
