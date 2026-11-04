@@ -37,9 +37,10 @@ numérotée plutôt que de masquer les premières options. Le mode accessible
 reste disponible explicitement et n'émet pas d'ANSI ; `NO_COLOR` désactive
 les couleurs des formulaires natifs sans supprimer leur navigation clavier.
 Les statuts sont alignés par largeur visuelle, pas par longueur en octets.
-Les formulaires natifs utilisent l'écran alternatif du terminal : Entrée et
-Ctrl+C restaurent l'écran principal et son historique, sans empiler les anciens
-menus ni effacer le scrollback de l'utilisateur.
+Les formulaires natifs restent dans le terminal, sous la commande lancée :
+aucun plein écran ni écran alternatif. Entrée et Ctrl+C nettoient uniquement
+la zone du formulaire et ramènent le curseur au début de cette zone, sans
+empiler les anciens menus ni effacer l'historique de l'utilisateur.
 
 Les confirmations de mutation utilisent `Are you sure?`, `Yes!` et `No.`, avec
 `No.` par défaut. Une annulation, une sélection inchangée ou un aperçu dont

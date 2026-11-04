@@ -108,7 +108,10 @@ func RunForm(ctx context.Context, input io.Reader, output io.Writer, fields ...h
 		readState, writeState = checkedAccessibleStreams(form, input, output, readState, writeState)
 	}
 	err := form.RunWithContext(ctx)
-	if err == nil && resizedTooSmall {
+	if resizedTooSmall && (err == nil || errors.Is(err, huh.ErrUserAborted)) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if _, writeErr := fmt.Fprintln(writer, "Terminal is smaller than this menu; showing the complete numbered list."); writeErr != nil {
 			return writeErr
 		}
@@ -305,19 +308,20 @@ func newNaturalFormWithOverflow(input io.Reader, output io.Writer, overflow *boo
 	// This Bubble Tea hook modifies Huh's own dimensions, not its UI. A
 	// terminal resize never clamps the visible choice set to terminal rows.
 	options := []tea.ProgramOption{tea.WithReportFocus(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
-		if size, ok := msg.(tea.WindowSizeMsg); ok {
-			return updateNaturalWindowSize(form, group, fields, size, overflow)
+		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			return updateNaturalWindowSize(form, group, fields, msg, overflow)
+		case tea.InterruptMsg:
+			if form.State == huh.StateAborted {
+				// Huh already marked this as cancelled and its final View is empty.
+				// Interrupt kills Tea's renderer before that empty frame is flushed,
+				// leaving the next inline form below the previous footer. Quit lets
+				// Tea clear only its own surface; Huh still returns ErrUserAborted.
+				return tea.QuitMsg{}
+			}
 		}
 		return msg
 	})}
-	if overflow != nil {
-		// Native Huh forms otherwise leave their previous rendered footer on
-		// the primary screen after Ctrl+C. The next menu then starts below it
-		// and eventually scrolls the user's terminal. Bubble Tea's alternate
-		// screen restores the exact primary screen on both completion and
-		// abort; it never erases the user's existing scrollback history.
-		options = append(options, tea.WithAltScreen())
-	}
 	form.WithProgramOptions(options...)
 	form.WithInput(input).WithOutput(output)
 	resizeNaturalForm(form, group, fields, 0)
@@ -325,9 +329,16 @@ func newNaturalFormWithOverflow(input io.Reader, output io.Writer, overflow *boo
 }
 
 func updateNaturalWindowSize(form *huh.Form, group *huh.Group, fields []huh.Field, size tea.WindowSizeMsg, overflow *bool) tea.Msg {
+	if form.State != huh.StateNormal {
+		return size
+	}
 	natural := resizeNaturalForm(form, group, fields, size.Width)
 	if overflow != nil && size.Height > 0 && natural > size.Height {
 		*overflow = true
+		// Finish the inline surface through Huh's own cancellation path before
+		// switching to its complete numbered list. RunForm recognizes this
+		// resize-only handoff; a genuine user cancellation remains an error.
+		_, _ = form.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 		return tea.QuitMsg{}
 	}
 	return size

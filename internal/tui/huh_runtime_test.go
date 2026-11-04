@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,6 +137,9 @@ func TestNativeResizeIntoOverflowFallsBackToCompleteHuhAccessibleList(t *testing
 	if _, ok := msg.(tea.QuitMsg); !ok || !fallback {
 		t.Fatalf("tiny terminal must quit native rendering before it clips or scrolls: %T, flag=%t", msg, fallback)
 	}
+	if form.View() != "" || form.State != huh.StateAborted {
+		t.Fatal("resize handoff must clear the inline form instead of leaving its footer behind")
+	}
 	// The same selected Huh Select runs in numbered accessible mode and keeps
 	// its highlighted value. The Enter default in accessible mode confirms it.
 	form.WithAccessible(true)
@@ -147,6 +153,20 @@ func TestNativeResizeIntoOverflowFallsBackToCompleteHuhAccessibleList(t *testing
 	msg = updateNaturalWindowSize(form, group, []huh.Field{field}, tea.WindowSizeMsg{Width: 120, Height: 100}, &noFallback)
 	if size, ok := msg.(tea.WindowSizeMsg); !ok || size.Height != 100 || noFallback {
 		t.Fatalf("a large terminal should keep native Huh layout unchanged: %T %v", msg, noFallback)
+	}
+}
+
+func TestResizeDoesNotReopenAnAlreadyCompletedOrAbortedForm(t *testing.T) {
+	for _, state := range []huh.FormState{huh.StateCompleted, huh.StateAborted} {
+		field := huh.NewSelect[string]().Options(longNavigationOptions(24)...)
+		form, group := newNaturalForm(strings.NewReader(""), io.Discard, field)
+		form.State = state
+		var fallback bool
+		size := tea.WindowSizeMsg{Width: 40, Height: 3}
+		msg := updateNaturalWindowSize(form, group, []huh.Field{field}, size, &fallback)
+		if msg != size || fallback || form.State != state {
+			t.Fatalf("resize reopened finished form: state=%v fallback=%v msg=%v", form.State, fallback, msg)
+		}
 	}
 }
 
@@ -210,7 +230,74 @@ func TestHuhAccessibleWriteErrorsAndCancellationAreNotApproved(t *testing.T) {
 	}
 }
 
-func TestNativeHuhAltScreenRestoresPrimarySurfaceOnEnterAndAbort(t *testing.T) {
+// Wait for a real rendered frame before sending input. Sending Enter/Ctrl+C
+// immediately can finish before the renderer paints, hiding cleanup defects.
+type inlineFrameOutput struct {
+	mu      sync.Mutex
+	buffer  bytes.Buffer
+	painted chan struct{}
+	once    sync.Once
+}
+
+func (w *inlineFrameOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buffer.Write(p)
+	if strings.Contains(w.buffer.String(), "NATIVE_MENU") {
+		w.once.Do(func() { close(w.painted) })
+	}
+	return n, err
+}
+
+func (w *inlineFrameOutput) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buffer.String()
+}
+
+// This bounded trace check only needs vertical cursor commands for the short,
+// non-wrapping fixture. A menu must leave the cursor at its starting row, never
+// move above it, or switch/clear the whole screen to hide an inline layout bug.
+func assertInlineSurfaceRestored(t *testing.T, contents string) {
+	t.Helper()
+	for _, forbidden := range []string{"\x1b[?1049", "\x1b[?1047", "\x1b[?47", "\x1b[2J", "\x1b[3J", "\x1b[H", "\x1b[1;1H"} {
+		if strings.Contains(contents, forbidden) {
+			t.Fatalf("inline menu switched or cleared the whole terminal (%q): %q", forbidden, contents)
+		}
+	}
+	commands := regexp.MustCompile("\x1b\\[([0-9;?]*)([A-Za-z])|\n")
+	row, highest := 0, 0
+	for _, command := range commands.FindAllStringSubmatch(contents, -1) {
+		if command[0] == "\n" {
+			row++
+		} else {
+			count := 1
+			if value, err := strconv.Atoi(command[1]); err == nil && value > 0 {
+				count = value
+			}
+			switch command[2] {
+			case "A", "F":
+				row -= count
+			case "B", "E":
+				row += count
+			case "H", "f", "d":
+				t.Fatalf("inline menu used absolute vertical positioning: %q", command[0])
+			}
+		}
+		if row < 0 {
+			t.Fatalf("menu cleanup moved into pre-existing terminal output: %q", contents)
+		}
+		highest = max(highest, row)
+	}
+	if highest < 2 {
+		t.Fatalf("test did not paint a multi-line menu before quitting: %q", contents)
+	}
+	if row != 0 {
+		t.Fatalf("menu left %d extra rows instead of restoring its own starting row: %q", row, contents)
+	}
+}
+
+func TestNativeHuhStaysInlineAndClearsOwnRowsOnEnterAndAbort(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	for _, tc := range []struct {
 		name  string
@@ -226,17 +313,24 @@ func TestNativeHuhAltScreenRestoresPrimarySurfaceOnEnterAndAbort(t *testing.T) {
 			input, userInput := io.Pipe()
 			defer input.Close()
 			defer userInput.Close()
-			var output bytes.Buffer
+			output := &inlineFrameOutput{painted: make(chan struct{})}
 			var selection string
-			field := huh.NewSelect[string]().Title("Native menu").Options(
+			field := huh.NewSelect[string]().Title("NATIVE_MENU").Options(
 				huh.NewOption("Continue", "continue"),
 				huh.NewOption("Back", "back"),
 			).Value(&selection)
-			var overflow bool // Native path enables Tea's alternate-screen option.
-			form, _ := newNaturalFormWithOverflow(input, &output, &overflow, field)
+			var overflow bool
+			form, _ := newNaturalFormWithOverflow(input, output, &overflow, field)
 			form.WithAccessible(false)
 			result := make(chan error, 1)
 			go func() { result <- form.RunWithContext(ctx) }()
+			select {
+			case <-output.painted:
+			case err := <-result:
+				t.Fatalf("form stopped before rendering: %v", err)
+			case <-ctx.Done():
+				t.Fatal("native form did not render its first frame")
+			}
 			go func() { _, _ = userInput.Write([]byte{tc.input}) }()
 			select {
 			case err := <-result:
@@ -246,16 +340,13 @@ func TestNativeHuhAltScreenRestoresPrimarySurfaceOnEnterAndAbort(t *testing.T) {
 				if !tc.abort && err != nil {
 					t.Fatalf("Enter must return normally: %v", err)
 				}
+				if tc.abort && form.State != huh.StateAborted {
+					t.Fatal("cleanup changed cancellation into a successful submission")
+				}
 			case <-ctx.Done():
 				t.Fatal("native Huh form failed to complete after keyboard input")
 			}
-			contents := output.String()
-			if !strings.Contains(contents, "\x1b[?1049h") || !strings.Contains(contents, "\x1b[?1049l") {
-				t.Fatalf("native screen was not restored on %s: %q", tc.name, contents)
-			}
-			if strings.LastIndex(contents, "\x1b[?1049l") < strings.Index(contents, "\x1b[?1049h") {
-				t.Fatalf("alternate screen closed before opening on %s: %q", tc.name, contents)
-			}
+			assertInlineSurfaceRestored(t, output.String())
 		})
 	}
 }
