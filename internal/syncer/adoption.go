@@ -31,6 +31,8 @@ type MCPAdoption struct {
 	Harness, Path, Name, CanonicalName string
 	FileSHA256                         string
 	CanonicalSHA256                    string
+	Inactive                           bool // scanner-observed native disable flag/policy
+	PolicyOnly                         bool // disable-list entry with no native upstream
 }
 
 // SkillAdoption authorizes one existing native skill directory. TreeSHA256 is
@@ -235,11 +237,12 @@ func hashSkillTree(root *os.Root, relative, destination string, h, legacy hash.H
 }
 
 type adoptionState struct {
-	home     string
-	homeInfo os.FileInfo
-	mcp      map[string]map[string]MCPAdoption
-	skills   map[string]SkillAdoption
-	targets  map[string]target
+	home           string
+	homeInfo       os.FileInfo
+	mcp            map[string]map[string]MCPAdoption
+	skills         map[string]SkillAdoption
+	targets        map[string]target
+	missingConfigs map[string]bool
 }
 
 func sameAdoptionPath(a, b string) bool {
@@ -289,6 +292,19 @@ func prepareAdoption(c *config.Config, opts Options, all []target, selected map[
 		return nil, errors.New("cannot capture the adoption home identity")
 	}
 	a := &adoptionState{home: home, homeInfo: homeInfo, mcp: map[string]map[string]MCPAdoption{}, skills: map[string]SkillAdoption{}, targets: map[string]target{}}
+	a.missingConfigs = map[string]bool{}
+	for _, primary := range all {
+		if !selected[primary.name] {
+			continue
+		}
+		for _, candidate := range configTargets(home, "user", primary) {
+			if _, err := os.Lstat(candidate.path); os.IsNotExist(err) {
+				a.missingConfigs[candidate.path] = true
+			} else if err != nil {
+				return nil, err
+			}
+		}
+	}
 	targets := map[string]target{}
 	for _, t := range all {
 		targets[t.name] = t
@@ -299,12 +315,20 @@ func prepareAdoption(c *config.Config, opts Options, all []target, selected map[
 		if !ok || !selected[proof.Harness] {
 			return nil, fmt.Errorf("MCP adoption names an unselected or unknown harness %q", proof.Harness)
 		}
+		primary := t
 		nativePath, pathErr := scopePath(home, proof.Path)
-		if pathErr != nil || !sameAdoptionPath(nativePath, t.path) {
+		matched := false
+		for _, candidate := range configTargets(home, "user", primary) {
+			if sameAdoptionPath(nativePath, candidate.path) {
+				t, matched = candidate, true
+				break
+			}
+		}
+		if pathErr != nil || !matched {
 			return nil, fmt.Errorf("MCP adoption path is not the active native configuration for %s: %s", proof.Harness, proof.Path)
 		}
 		server, ok := c.Servers[proof.CanonicalName]
-		if proof.Name == "" || !ok || !config.Allows(server.Harnesses, t.name) {
+		if proof.Name == "" || !ok || !config.Allows(server.Harnesses, t.name) && !proof.Inactive {
 			return nil, fmt.Errorf("MCP adoption %q has no enabled canonical server %q for %s", proof.Name, proof.CanonicalName, t.name)
 		}
 		if !validSHA256(proof.FileSHA256) || !validSHA256(proof.CanonicalSHA256) ||
@@ -332,7 +356,7 @@ func prepareAdoption(c *config.Config, opts Options, all []target, selected map[
 		proof.Path = t.path
 		a.mcp[t.path][proof.Name] = proof
 		canonicalTargets[t.path][proof.CanonicalName] = true
-		a.targets[t.name] = t
+		a.targets[t.name] = primary
 	}
 	for _, proof := range opts.AdoptSkills {
 		t, ok := targets[proof.Harness]
@@ -381,6 +405,24 @@ func (p *Plan) recheckAdoptionScope() error {
 	if err != nil || !sameAdoptionPath(resolved, p.adoption.home) {
 		return errors.New("adoption home changed since planning")
 	}
+	for path := range p.adoption.missingConfigs {
+		if _, err := os.Lstat(path); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		owned := false
+		for _, change := range p.Changes {
+			if sameAdoptionPath(change.Path, path) && !change.exists && change.skill == nil {
+				data, exists, err := p.readAdoptionFile(path)
+				owned = err == nil && exists && bytes.Equal(data, change.after)
+				break
+			}
+		}
+		if !owned {
+			return fmt.Errorf("native destination changed since discovery: configuration appeared at %s; refresh preview", path)
+		}
+	}
 	for _, current := range registry(p.base, "user") {
 		if expected, ok := p.adoption.targets[current.name]; ok &&
 			(!sameAdoptionPath(current.path, expected.path) || !sameAdoptionPath(current.skills, expected.skills)) {
@@ -406,7 +448,7 @@ func (p *Plan) adoptedMCP(t target, before []byte, previous map[string]string) (
 		return nil, false, fmt.Errorf("cannot adopt ambiguous native configuration: %w", err)
 	}
 	entries, ok := document[t.key].(map[string]any)
-	if !ok {
+	if !ok && document[t.key] != nil {
 		return nil, false, fmt.Errorf("adoption requires an existing %s object", t.key)
 	}
 	approved := make(map[string]string, len(previous)+len(proofs))
@@ -424,8 +466,26 @@ func (p *Plan) adoptedMCP(t target, before []byte, previous map[string]string) (
 			return nil, false, fmt.Errorf("native MCP configuration changed since discovery: %s", t.path)
 		}
 		entry, ok := entries[name].(map[string]any)
+		listed := false
+		if disabled, ok := document["disabledMcpServers"].([]any); ok {
+			for _, disabledName := range disabled {
+				if disabledName == name {
+					listed = true
+				}
+			}
+		}
+		if proof.PolicyOnly {
+			if _, exists := entries[name]; exists || !listed || !proof.Inactive {
+				return nil, false, fmt.Errorf("native disable-only policy changed for %q", name)
+			}
+			continue
+		}
 		if !ok {
 			return nil, false, fmt.Errorf("scanner-approved native MCP %q is absent or not an object", name)
+		}
+		inactive := entry["enabled"] == false || entry["disabled"] == true || listed
+		if inactive != proof.Inactive {
+			return nil, false, fmt.Errorf("native MCP enable/disable policy changed for %q", name)
 		}
 		approved[name] = digest(entry)
 		p.Warnings = append(p.Warnings, fmt.Sprintf("explicitly adopt native MCP %q as %q for %s (%s)", name, proof.CanonicalName, t.name, t.path))

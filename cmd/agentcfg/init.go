@@ -63,8 +63,9 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 }
 
 // proposalFromNative converts only the scanner's vetted, selected candidates
-// into portable canonical entries. Duplicate names are excluded (not renamed
-// or overwritten), and native provenance does not restrict canonical availability.
+// into portable canonical entries. Identical copies are merged; distinct native
+// definitions retain the unique names assigned by discovery. Disable policies
+// restrict availability independently of source provenance.
 func proposalFromNative(plan *bootstrap.Plan) (initProposal, error) {
 	if plan == nil {
 		return initProposal{}, errors.New("missing native discovery inventory")
@@ -83,9 +84,28 @@ func proposalFromNative(plan *bootstrap.Plan) (initProposal, error) {
 	if _, err := config.ValidateUserHarnesses(proposal.DetectedHarnesses); err != nil {
 		return initProposal{}, fmt.Errorf("invalid discovered harnesses: %w", err)
 	}
+	importedInactive := map[string]bool{}
+	for _, candidate := range plan.Servers {
+		if !candidate.Selected {
+			continue
+		}
+		for _, origin := range candidate.Origins {
+			if origin.Inactive {
+				importedInactive[origin.Harness+"\x00"+origin.Source+"\x00"+candidate.NativeName] = true
+			}
+		}
+	}
+	seenAdvisories := map[string]bool{}
 	for _, warning := range plan.Warnings {
 		if warning.Kind == bootstrap.WarningAdvisory {
-			proposal.Advisories = append(proposal.Advisories, fmt.Sprintf("MCP %q: %s", warning.Server, warning.Message))
+			message := fmt.Sprintf("MCP %q: %s", warning.Server, warning.Message)
+			if !seenAdvisories[message] {
+				proposal.Advisories = append(proposal.Advisories, message)
+				seenAdvisories[message] = true
+			}
+			continue
+		}
+		if warning.Kind == bootstrap.WarningInactive && importedInactive[warning.Harness+"\x00"+warning.Source+"\x00"+warning.Server] {
 			continue
 		}
 		if warning.Kind == bootstrap.WarningNativeRuntime {
@@ -118,6 +138,9 @@ func proposalFromNative(plan *bootstrap.Plan) (initProposal, error) {
 		// Native provenance is not an availability policy. The canonical entry
 		// is available to every globally selected harness after initialization.
 		delete(server, "harnesses")
+		if availability := plan.Availability(candidate); len(availability) != 0 {
+			server["harnesses"] = availability
+		}
 		proposal.Servers[candidate.Name] = server
 		proposal.ServerSources[candidate.Name] = strings.Join(tui.HarnessNames(candidate.Harnesses), ", ")
 	}

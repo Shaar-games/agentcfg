@@ -305,7 +305,8 @@ func (p *Plan) Apply() error {
 	if err := ensureNoSymlinkParents(p.base, backupRoot); err != nil {
 		return err
 	}
-	if err := p.captureInitRestore(backupRoot); err != nil {
+	undoJournal, err := p.captureInitRestore(backupRoot)
+	if err != nil {
 		return err
 	}
 	undos := []func() error{}
@@ -313,6 +314,11 @@ func (p *Plan) Apply() error {
 		var failures []error
 		for i := len(undos) - 1; i >= 0; i-- {
 			if err := undos[i](); err != nil {
+				failures = append(failures, err)
+			}
+		}
+		if len(failures) == 0 && undoJournal != nil {
+			if err := undoJournal(); err != nil {
 				failures = append(failures, err)
 			}
 		}
@@ -364,6 +370,25 @@ func (p *Plan) Apply() error {
 }
 
 func (p *Plan) applyChange(change Change, backup string) (func() error, error) {
+	cleanup, err := prepareNativeParent(p.base, change.Path)
+	if err != nil {
+		return cleanup, err
+	}
+	undo, err := p.applyPreparedChange(change, backup)
+	if cleanup == nil {
+		return undo, err
+	}
+	return func() error {
+		if undo != nil {
+			if err := undo(); err != nil {
+				return err
+			}
+		}
+		return cleanup()
+	}, err
+}
+
+func (p *Plan) applyPreparedChange(change Change, backup string) (func() error, error) {
 	if change.skill != nil {
 		return p.applySkill(change, backup)
 	}

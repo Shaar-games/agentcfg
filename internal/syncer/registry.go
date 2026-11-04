@@ -64,6 +64,21 @@ func OpenCodeUserConfigPaths() []string {
 		filepath.Join(".opencode", "opencode.json"), filepath.Join(".opencode", "opencode.jsonc")}
 }
 
+// A harness has one skills destination but may read multiple user MCP files.
+// Keep this expansion shared by init adoption, link preparation and normal sync.
+func configTargets(base, scope string, primary target) []target {
+	if scope != "user" || primary.name != "opencode" {
+		return []target{primary}
+	}
+	var result []target
+	for _, relative := range OpenCodeUserConfigPaths() {
+		candidate := primary
+		candidate.path = filepath.Join(base, relative)
+		result = append(result, candidate)
+	}
+	return result
+}
+
 func proxyEntry(t target, binary, root, name string) map[string]any {
 	args := []string{"connect", "--server", name, "--harness", t.name}
 	if t.name == "opencode" {

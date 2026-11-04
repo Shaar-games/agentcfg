@@ -15,6 +15,15 @@ func pointer(value string) string {
 }
 
 func editJSON(before []byte, key string, desired map[string]map[string]any, previous map[string]string) ([]byte, map[string]string, error) {
+	return editJSONWithPolicy(before, key, desired, previous, nil)
+}
+
+func editJSONWithPolicy(before []byte, key string, desired map[string]map[string]any, previous map[string]string, adopted map[string]MCPAdoption) ([]byte, map[string]string, error) {
+	if len(before) != 0 {
+		if _, err := uniqueJSONObject(before); err != nil {
+			return nil, nil, fmt.Errorf("ambiguous native JSON configuration: %w", err)
+		}
+	}
 	original := before
 	bom := []byte{0xef, 0xbb, 0xbf}
 	withBOM := bytes.HasPrefix(before, bom)
@@ -49,6 +58,21 @@ func editJSON(before []byte, key string, desired map[string]map[string]any, prev
 		}
 	}
 	patches := []map[string]any{}
+	if raw, exists := document["disabledMcpServers"]; exists && len(adopted) != 0 {
+		var disabled []string
+		if err := json.Unmarshal(raw, &disabled); err != nil {
+			return nil, nil, fmt.Errorf("disabledMcpServers must be a string array")
+		}
+		retained := []string{}
+		for _, name := range disabled {
+			if _, imported := adopted[name]; !imported {
+				retained = append(retained, name)
+			}
+		}
+		if len(retained) != len(disabled) {
+			patches = append(patches, map[string]any{"op": "replace", "path": "/disabledMcpServers", "value": retained})
+		}
+	}
 	if _, ok := document[key]; !ok && len(desired) != 0 {
 		patches = append(patches, map[string]any{"op": "add", "path": "/" + pointer(key), "value": map[string]any{}})
 	}

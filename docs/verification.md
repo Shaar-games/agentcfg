@@ -39,6 +39,18 @@ cible changée depuis l'aperçu est refusée. Les tests de récupération simule
 une copie interrompue, un échec de synchronisation, des fichiers de staging
 étrangers et un échec tardif de restauration suivi d'une nouvelle tentative.
 
+Les doublons MCP couvrent les six harnesses, les quatre fichiers OpenCode,
+les définitions identiques et différentes, les noms de destination déjà pris,
+les indicateurs et listes de désactivation ainsi que les overrides sans commande.
+Chaque parcours vérifie les proxies natifs, la disponibilité canonique, l'absence
+de changement au sync suivant et la restauration exacte des fichiers.
+Les transitions suivantes couvrent aussi les listes de désactivation sans entrée
+MCP, un fichier secondaire apparu après l'aperçu, la stabilité des noms quel que
+soit l'ordre de découverte, la restauration après des synchronisations ultérieures
+et le retour arrière du journal. Les fichiers étrangers et répertoires remplacés
+pendant un échec restent intacts.
+
+
 Les tests de la CLI vérifient notamment que `agentcfg` sans argument affiche
 l'aide et que `agentcfg config` ouvre la configuration Huh. Sur un terminal
 interactif, les menus de navigation et d'action utilisent **Huh Select** :

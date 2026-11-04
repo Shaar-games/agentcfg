@@ -47,6 +47,7 @@ type manifest struct {
 }
 
 type Plan struct {
+	restoring             bool
 	migratesSharedSkills  bool
 	extraPreflight        func() error
 	Changes               []Change `json:"changes"`
@@ -199,7 +200,6 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	}
 	knownPaths := map[string]bool{}
 	for _, t := range all {
-		knownPaths[t.path] = true
 		desired := map[string]map[string]any{}
 		if selected[t.name] {
 			for name, server := range c.Servers {
@@ -208,15 +208,29 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 				}
 			}
 		}
-		if len(desired) != 0 || len(old.Configs[t.path]) != 0 {
-			// An unselected, never-managed harness does not belong to this
-			// operation's write set. Its native directory may be a symlink,
-			// without making unrelated harnesses impossible to synchronize.
-			if err := ensureNoSymlinkParents(base, t.path); err != nil {
-				return nil, err
+		for _, native := range configTargets(base, opts.Scope, t) {
+			knownPaths[native.path] = true
+			adopting := p.adoption != nil && len(p.adoption.mcp[native.path]) != 0
+			if !selected[t.name] && len(old.Configs[native.path]) == 0 && !adopting {
+				continue
 			}
-			if err := p.planConfig(t, desired, old); err != nil {
-				return nil, err
+			if !sameAdoptionPath(native.path, t.path) && len(old.Configs[native.path]) == 0 && !adopting {
+				if _, err := os.Lstat(native.path); os.IsNotExist(err) {
+					continue
+				} else if err != nil {
+					return nil, err
+				}
+			}
+			if len(desired) != 0 || len(old.Configs[native.path]) != 0 || adopting {
+				// An unselected, never-managed harness does not belong to this
+				// operation's write set. Its native directory may be a symlink,
+				// without making unrelated harnesses impossible to synchronize.
+				if err := ensureNoSymlinkParents(base, native.path); err != nil {
+					return nil, err
+				}
+				if err := p.planConfig(native, desired, old); err != nil {
+					return nil, err
+				}
 			}
 		}
 		if err := p.planSkills(t, c, selected[t.name], opts.SkillMode, old); err != nil {
@@ -288,7 +302,11 @@ func (p *Plan) planConfig(t target, desired map[string]map[string]any, old manif
 			p.state.Blocks[t.path] = blockHash
 		}
 	} else {
-		after, owned, err = editJSON(before, t.key, desired, previous)
+		var proofs map[string]MCPAdoption
+		if adopted {
+			proofs = p.adoption.mcp[t.path]
+		}
+		after, owned, err = editJSONWithPolicy(before, t.key, desired, previous, proofs)
 	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", t.path, err)

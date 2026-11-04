@@ -100,6 +100,19 @@ func assertNoAdoptionManifest(t *testing.T, home string) {
 	}
 }
 
+func TestMCPInactiveProofMustMatchObservedNativePolicy(t *testing.T) {
+	f := newAdoptionFixture(t, "cursor", false)
+	f.opts.AdoptMCP[0].Inactive = true
+	server := f.cfg.Servers["echo"]
+	server.Harnesses = []string{"none"}
+	f.cfg.Servers["echo"] = server
+	if _, err := BuildPlan(f.cfg, f.opts); err == nil {
+		t.Fatal("inactive proof allowed an active native entry to be retired")
+	}
+	assertAdoptionBytes(t, f.target.path, f.before)
+	assertNoAdoptionManifest(t, f.opts.Home)
+}
+
 func TestAdoptionRequiresConsentAndSpecificProof(t *testing.T) {
 	for _, mode := range []string{"default", "proof-without-consent", "consent-without-proof", "unproved-skill"} {
 		t.Run(mode, func(t *testing.T) {

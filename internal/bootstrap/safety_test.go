@@ -66,8 +66,8 @@ func TestMergePreservesOriginsAndAllCollisionGroups(t *testing.T) {
 		t.Fatalf("%+v", plan)
 	}
 	for _, candidate := range plan.Servers {
-		if candidate.Selected || len(candidate.Warnings) == 0 {
-			t.Fatalf("server conflict selected: %+v", candidate)
+		if !candidate.Selected || candidate.NativeName != "same" || candidate.Name == "same" || len(candidate.Warnings) == 0 {
+			t.Fatalf("distinct native definitions were not retained separately: %+v", candidate)
 		}
 		if candidate.Server.Command == "node" {
 			if !reflect.DeepEqual(candidate.Harnesses, []string{"claude-code", "cursor"}) || len(candidate.Origins) != 2 || len(candidate.Sources) != 2 {
@@ -91,7 +91,7 @@ func TestMergePreservesOriginsAndAllCollisionGroups(t *testing.T) {
 	}
 }
 
-func TestMultipleOpenCodeLocationsRequireSelection(t *testing.T) {
+func TestMultipleOpenCodeLocationsMergeIdenticalDefinitions(t *testing.T) {
 	home := t.TempDir()
 	for _, path := range []string{".config/opencode/opencode.json", ".config/opencode/opencode.jsonc", ".opencode/opencode.json"} {
 		put(t, home, path, `{"mcp":{"same":{"type":"local","command":["node"]}}}`)
@@ -100,7 +100,7 @@ func TestMultipleOpenCodeLocationsRequireSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Servers) != 1 || plan.Servers[0].Selected || len(plan.Servers[0].Origins) != 3 {
+	if len(plan.Servers) != 1 || !plan.Servers[0].Selected || len(plan.Servers[0].Origins) != 3 {
 		t.Fatalf("%+v", plan)
 	}
 }

@@ -67,7 +67,10 @@ func MaterializeInitLinks(ctx context.Context, home string, harnesses []string, 
 	}
 	for _, target := range registry(base, "user") {
 		if selected[target.name] {
-			paths = append(paths, target.path, target.skills)
+			paths = append(paths, target.skills)
+			for _, config := range configTargets(base, "user", target) {
+				paths = append(paths, config.path)
+			}
 		}
 	}
 	for _, skill := range skills {
@@ -253,8 +256,13 @@ func validateLayoutEntry(home string, entry nativeLayoutEntry) (string, string, 
 	}
 	allowed := false
 	for _, target := range registry(home, "user") {
-		if pathUnder(path, target.path) || pathUnder(path, target.skills) || pathUnder(target.skills, path) {
+		if pathUnder(path, target.skills) || pathUnder(target.skills, path) {
 			allowed = true
+		}
+		for _, config := range configTargets(home, "user", target) {
+			if pathUnder(path, config.path) {
+				allowed = true
+			}
 		}
 	}
 	if pathUnder(filepath.Join(home, ".agents", "skills"), path) || pathUnder(path, filepath.Join(home, ".agents", "skills")) || pathUnder(filepath.Join(home, ".opencode", "skills"), path) {

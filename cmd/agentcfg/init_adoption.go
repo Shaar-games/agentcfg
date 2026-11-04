@@ -51,6 +51,10 @@ func initAdoptionProofs(inventory *bootstrap.Plan, selectedServers map[string]ma
 		if _, chosen := selectedServers[candidate.Name]; !chosen {
 			continue
 		}
+		nativeName := candidate.NativeName
+		if nativeName == "" {
+			nativeName = candidate.Name
+		}
 		for _, origin := range candidate.Origins {
 			if !slices.Contains(harnesses, origin.Harness) {
 				continue
@@ -70,7 +74,7 @@ func initAdoptionProofs(inventory *bootstrap.Plan, selectedServers map[string]ma
 			}
 			mcp = append(mcp, syncer.MCPAdoption{
 				Harness: origin.Harness, Path: physical,
-				Name: candidate.Name, CanonicalName: candidate.Name,
+				Name: nativeName, CanonicalName: candidate.Name, Inactive: origin.Inactive, PolicyOnly: origin.PolicyOnly,
 				FileSHA256: hash, CanonicalSHA256: candidate.CanonicalSHA256,
 			})
 		}

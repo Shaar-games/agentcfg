@@ -86,14 +86,7 @@ func Discover(home string) (*Plan, error) {
 			configs = append(configs, source)
 		}
 		for _, source := range configs {
-			start := len(plan.Servers)
 			discoverServers(root, plan, target, source)
-			if len(configs) > 1 {
-				for i := start; i < len(plan.Servers); i++ {
-					plan.Servers[i].Selected = false
-					plan.Servers[i].Warnings = append(plan.Servers[i].Warnings, "multiple native config locations exist; confirm which definition is active")
-				}
-			}
 		}
 		for _, relative := range target.skills {
 			source := filepath.Join(absolute, filepath.FromSlash(relative))

@@ -51,32 +51,29 @@ func CreateInitRestorePoint(home string) error {
 // captureInitRestore runs under the sync lock, before the first native write.
 // Later syncs never replace the pre-init baseline. Existing installations with
 // no marker are left untouched; guessing their original state would lose data.
-func (p *Plan) captureInitRestore(backupRoot string) error {
-	if p.stateExists && !p.migratesSharedSkills || p.root != p.base || len(p.Changes) == 0 {
-		return nil
+func (p *Plan) captureInitRestore(backupRoot string) (func() error, error) {
+	if p.restoring || p.root != p.base || len(p.Changes) == 0 {
+		return nil, nil
 	}
 	path := filepath.Join(p.root, ".agentcfg", initRestoreFile)
 	if err := ensureNoSymlinkParents(p.root, path); err != nil {
-		return err
+		return nil, err
 	}
 	data, exists, err := readOptional(path)
 	if err != nil || !exists {
-		return err
+		return nil, err
 	}
 	var point initRestorePoint
-	if err := json.Unmarshal(data, &point); err != nil || point.Version != 1 {
-		return errors.New("invalid initialization restore point")
-	}
-	if len(point.Native) != 0 && !p.migratesSharedSkills {
-		return nil
+	if len(data) > 16<<20 || json.Unmarshal(data, &point) != nil || point.Version != 1 {
+		return nil, errors.New("invalid initialization restore point")
 	}
 	for _, change := range p.Changes {
-		if p.stateExists && (!IsSharedSkillPath(p.base, change.Path) && filepath.Dir(change.Path) != filepath.Join(p.base, ".codex", "skills")) {
-			continue
-		}
 		relative, err := filepath.Rel(p.base, change.Path)
 		if err != nil {
-			return err
+			return nil, err
+		}
+		if _, err := restoreTarget(p.base, filepath.ToSlash(relative), change.skill != nil); err != nil {
+			continue
 		}
 		index := -1
 		for i := range point.Native {
@@ -89,9 +86,14 @@ func (p *Plan) captureInitRestore(backupRoot string) error {
 		if index >= 0 {
 			previous = &point.Native[index]
 		}
+		// A valid sync may preserve unrelated manual native edits. Do not adopt
+		// those edits into an automatic restore permission; restore must still refuse.
+		if previous != nil && change.skill == nil && (change.exists == previous.AfterAbsent || change.exists && rawDigest(change.before) != previous.AfterHash) {
+			continue
+		}
 		entry, err := p.captureRestoreEntry(change, previous, backupRoot)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if index < 0 {
 			point.Native = append(point.Native, entry)
@@ -101,18 +103,38 @@ func (p *Plan) captureInitRestore(backupRoot string) error {
 	}
 	encoded, err := json.MarshalIndent(point, "", "  ")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return atomicWriteChecked(path, append(encoded, '\n'), 0o600, func() error {
+	encoded = append(encoded, '\n')
+	if len(encoded) > 16<<20 {
+		return nil, errors.New("initialization restore point exceeds the byte limit")
+	}
+	if bytes.Equal(data, encoded) {
+		return nil, nil
+	}
+	// Preserve the old journal alongside native backups for interrupted recovery.
+	journalBackup := filepath.Join(backupRoot, initRestoreFile)
+	if err := ensureNoSymlinkParents(p.root, journalBackup); err != nil {
+		return nil, err
+	}
+	if err := atomicWriteChecked(journalBackup, data, 0600, func() error { return fileUnchanged(journalBackup, nil, false) }); err != nil {
+		return nil, err
+	}
+	if err := atomicWriteChecked(path, encoded, 0600, func() error {
 		if err := p.preflight(); err != nil {
 			return err
 		}
 		return fileUnchanged(path, data, true)
-	})
+	}); err != nil {
+		return nil, err
+	}
+	return func() error {
+		return atomicWriteChecked(path, data, 0600, func() error { return fileUnchanged(path, encoded, true) })
+	}, nil
 }
 
 // Existing entries retain their original backup across the shared-root
-// migration; only the expected post-sync state is updated.
+// migration and later canonical edits; only the expected post-sync state is updated.
 func (p *Plan) captureRestoreEntry(change Change, previous *restoreEntry, backupRoot string) (restoreEntry, error) {
 	relative, err := filepath.Rel(p.base, change.Path)
 	if err != nil || !withinScope(relative) {
@@ -238,7 +260,7 @@ func BuildRestorePlan(home string) (*RestorePlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{root: base, base: base, rootIdentity: info, baseIdentity: info,
+	p := &Plan{restoring: true, root: base, base: base, rootIdentity: info, baseIdentity: info,
 		statePath: filepath.Join(canonical, "sync-user.json"), state: freshManifest()}
 	p.canonicalIdentity, err = os.Stat(canonical)
 	if err != nil {
@@ -349,7 +371,7 @@ func restoreChange(p *Plan, path string, entry restoreEntry) (*Change, error) {
 		}
 		return &Change{Path: path, Action: "restore pre-init native configuration", before: current, after: entry.Before, exists: exists, remove: !entry.BeforeExists}, nil
 	}
-	if !entry.AfterAbsent && filepath.Dir(entry.AfterSource) != filepath.Join(p.root, ".agentcfg", "skills") {
+	if !entry.AfterAbsent && !filepath.IsAbs(entry.AfterSource) {
 		return nil, errors.New("invalid canonical skill source in initialization restore point")
 	}
 	current, err := treeFingerprint(path)

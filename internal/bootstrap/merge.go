@@ -2,47 +2,13 @@ package bootstrap
 
 import (
 	"sort"
-
-	"agentcfg/internal/syncer"
 )
 
 func mergeCandidates(plan *Plan) {
-	servers := []ServerCandidate{}
-	groups := map[string]int{}
-	names := map[string][]int{}
-	for _, item := range plan.Servers {
-		item.CanonicalSHA256 = syncer.ServerSHA256(item.Server)
-		item.ID = "server:" + item.Name + ":" + item.CanonicalSHA256
-		if index, ok := groups[item.ID]; ok {
-			old := &servers[index]
-			old.Harnesses = union(old.Harnesses, item.Harnesses)
-			old.Sources = union(old.Sources, item.Sources)
-			old.Origins = unionOrigins(old.Origins, item.Origins)
-			old.Warnings = union(old.Warnings, item.Warnings)
-			old.Selected = old.Selected && item.Selected
-			old.Server.Harnesses = append([]string(nil), old.Harnesses...)
-			old.Source, old.Server.Source = old.Sources[0], old.Sources[0]
-		} else {
-			groups[item.ID] = len(servers)
-			names[item.Name] = append(names[item.Name], len(servers))
-			servers = append(servers, item)
-		}
-	}
-	for _, name := range keys(names) {
-		if len(names[name]) < 2 {
-			continue
-		}
-		for _, index := range names[name] {
-			servers[index].Selected = false
-			servers[index].Warnings = union(servers[index].Warnings, []string{"conflicting native definitions share this server name; select at most one"})
-		}
-		plan.warn("", servers[names[name][0]].Source, "conflicting server definitions were left unselected")
-	}
-	sort.Slice(servers, func(i, j int) bool { return servers[i].ID < servers[j].ID })
-	plan.Servers = servers
+	mergeServerCandidates(plan)
 
 	skills := []SkillCandidate{}
-	groups, names = map[string]int{}, map[string][]int{}
+	groups, names := map[string]int{}, map[string][]int{}
 	for _, item := range plan.Skills {
 		item.ID = "skill:" + item.Name + ":" + item.Fingerprint
 		if index, ok := groups[item.ID]; ok {

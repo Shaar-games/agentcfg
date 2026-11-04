@@ -172,8 +172,8 @@ func TestDiscoverCopiesCredentialValuesWithoutLeakingDiagnostics(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"mcpServers": entries})
 	put(t, home, ".cursor/mcp.json", string(raw))
 	plan, err := Discover(home)
-	if err != nil || len(plan.Servers) != 10 {
-		t.Fatalf("expected all 10 representable entries to be imported: %v", err)
+	if err != nil || len(plan.Servers) != 11 {
+		t.Fatalf("expected all 11 representable entries, including the disabled definition, to be imported: %v", err)
 	}
 	visible, _ := json.Marshal(plan.Warnings)
 	if strings.Contains(string(visible), secret) {

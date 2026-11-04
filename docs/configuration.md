@@ -51,14 +51,36 @@ broker proxies in selected harnesses, and physical skill copies. `init --yes`
 explicitly approves the same migration without prompts; `init --plain` remains
 read-only. There is no successful canonical-only init mode.
 
-All imported MCPs are available to the globally selected harnesses; their former
-native location is provenance, not an availability filter. All portable native
-skills are centralized, including skills from unselected harnesses, and copied
+Identical definitions with the same MCP name are imported once, across harnesses
+and across multiple files of the same harness. Different definitions sharing a
+name are preserved separately, with a harness suffix and a definition hash when
+needed; a warning reports the names. Initialization synchronizes all existing
+OpenCode user JSON/JSONC locations, including legacy locations, and subsequent
+syncs track each file. Restore recovers each original file byte for byte.
+
+Imported MCPs are available to the globally selected harnesses by default;
+their former location is provenance, not an availability filter. Native disable
+flags become canonical availability filters: a fully disabled MCP stays disabled,
+and a copy disabled only in one harness is not enabled there. If a harness has
+both active and inactive copies of the same definition, its active copy wins.
+Disable-only overrides, including disabled-server lists without an MCP section,
+are retired when a complete definition was also imported.
+Only imported names are removed from native disabled-server lists; unrelated
+policies remain unchanged.
+
+All portable native skills are centralized, including skills from unselected harnesses, and copied
 according to their explicit `metadata.harness` filters. Their original locations
 are backed up and retired. JSON/JSONC and Codex TOML adoption preserve unrelated
 native settings. Incomplete imports and concurrent edits block initialization;
 a failed migration attempts to restore the native baseline and archives its
 canonical imports for review. `agentcfg restore` reverses a completed init.
+Subsequent managed synchronizations update the expected generated state while
+keeping the original restore baseline. This includes adding or removing MCPs,
+changing skills and enabling another harness. Failed writes roll back their
+restore checkpoint and newly created empty native directories. Unrelated manual
+native edits remain protected: synchronization preserves them, and restore
+refuses to overwrite a native file that diverged from its recorded state.
+
 
 The Windows Codex desktop `node_repl` runtime is preserved in its native config
 when its bundled executable and private session-pipe configuration identify it.

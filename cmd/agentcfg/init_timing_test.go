@@ -57,7 +57,11 @@ http_headers={X-Mode='demo'}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(proposal.Servers) != 2 || len(proposal.Advisories) != 2 {
+			count := 2
+			if tc.harness == "opencode" {
+				count = 3
+			}
+			if len(proposal.Servers) != count || len(proposal.Advisories) != count {
 				t.Fatal("native timing options blocked import or were not reported")
 			}
 			var output bytes.Buffer
@@ -83,7 +87,7 @@ http_headers={X-Mode='demo'}
 				}
 			}
 			cfg, err := config.Load(home)
-			if err != nil || len(cfg.Warnings) != 0 || len(cfg.Servers) != 2 {
+			if err != nil || len(cfg.Warnings) != 0 || len(cfg.Servers) != count {
 				t.Fatalf("invalid canonical import: %v", err)
 			}
 			local, remote := cfg.Servers["local"], cfg.Servers["remote"]
@@ -94,8 +98,8 @@ http_headers={X-Mode='demo'}
 			if !bytes.Contains(migrated, []byte("connect")) {
 				t.Fatal("imported entries were not replaced with broker proxies")
 			}
-			if tc.harness == "opencode" && (!bytes.Contains(migrated, []byte("fixture-provider-value")) || !bytes.Contains(migrated, []byte("180000")) || !bytes.Contains(migrated, []byte("inactive"))) {
-				t.Fatal("unrelated provider settings or inactive native entries were changed")
+			if tc.harness == "opencode" && (!bytes.Contains(migrated, []byte("fixture-provider-value")) || !bytes.Contains(migrated, []byte("180000")) || bytes.Contains(migrated, []byte("inactive")) || config.Allows(cfg.Servers["inactive"].Harnesses, "opencode")) {
+				t.Fatal("provider settings changed or the disabled native upstream was not centralized while staying disabled")
 			}
 			plan, err := syncer.BuildPlan(cfg, syncer.Options{Root: home, Home: home, Scope: "user", Binary: binary, SkillMode: "copy"})
 			if err != nil || len(plan.Changes) != 0 {

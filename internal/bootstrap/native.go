@@ -56,7 +56,7 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 	}
 	raw, present := document[target.key]
 	if !present {
-		return
+		raw = json.RawMessage(`{}`)
 	}
 	entries, err := object(raw)
 	if err != nil {
@@ -65,8 +65,8 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 	}
 	// These global policies cannot be represented by a canonical server entry.
 	// Do not broaden their effect when importing to another harness.
-	if target.name == "opencode" && document["tools"] != nil ||
-		target.name == "gemini" && document["mcp"] != nil {
+	if len(entries) != 0 && (target.name == "opencode" && document["tools"] != nil ||
+		target.name == "gemini" && document["mcp"] != nil) {
 		plan.warn(target.name, source, "native MCP/tool policy requires manual import")
 		return
 	}
@@ -78,7 +78,22 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 			return
 		}
 		for _, name := range names {
+			if disabled[name] {
+				continue
+			}
 			disabled[name] = true
+			if _, exists := entries[name]; !exists {
+				if plan.budget.servers == 0 {
+					plan.warn(target.name, source, "discovery server limit reached; remaining disable policies require a separate review")
+					break
+				}
+				plan.budget.servers--
+				if plan.inactiveOrigins == nil {
+					plan.inactiveOrigins = map[string][]Origin{}
+				}
+				plan.inactiveOrigins[name] = append(plan.inactiveOrigins[name], Origin{Harness: target.name, Source: source, Target: physical, Inactive: true, PolicyOnly: true})
+				plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Kind: WarningInactive, Message: "native disable policy retained"})
+			}
 		}
 	}
 	for _, name := range keys(entries) {
@@ -87,17 +102,32 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 			break
 		}
 		plan.budget.servers--
-		if disabled[name] {
-			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: errInactiveServer.Error(), Kind: WarningInactive})
-			continue
-		}
 		imported, err := convertServer(root, target.name, name, entries[name])
+		inactive := disabled[name] || errors.Is(err, errInactiveServer)
+		if inactive && (err == nil || errors.Is(err, errInactiveServer)) {
+			// Validate the complete upstream even when disabled. Canonical
+			// availability retains that state instead of leaving a colliding
+			// unmanaged entry behind in a selected harness.
+			fields, parseErr := object(entries[name])
+			if parseErr == nil {
+				delete(fields, "enabled")
+				delete(fields, "disabled")
+				sanitized, _ := json.Marshal(fields)
+				imported, err = convertServer(root, target.name, name, sanitized)
+			}
+		}
 		if err != nil {
 			// Errors are intentionally constant descriptions, never parser errors
 			// or native values that could contain credentials.
 			var kind WarningKind
-			if errors.Is(err, errInactiveServer) {
+			if inactive {
 				kind = WarningInactive
+				if inactivePlaceholder(target.name, entries[name]) {
+					if plan.inactiveOrigins == nil {
+						plan.inactiveOrigins = map[string][]Origin{}
+					}
+					plan.inactiveOrigins[name] = append(plan.inactiveOrigins[name], Origin{Harness: target.name, Source: source, Target: physical, Inactive: true})
+				}
 			}
 			if errors.Is(err, errNativeRuntime) {
 				kind = WarningNativeRuntime
@@ -111,12 +141,41 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: message, Kind: WarningAdvisory})
 		}
 		plan.Servers = append(plan.Servers, ServerCandidate{
-			Name: name, Source: source, Sources: []string{source},
+			Name: name, NativeName: name, Source: source, Sources: []string{source},
 			Harnesses: []string{target.name}, Server: server,
-			Origins:  []Origin{{Harness: target.name, Source: source, Target: physical}},
+			Origins:  []Origin{{Harness: target.name, Source: source, Target: physical, Inactive: inactive}},
 			Selected: true, Warnings: imported.warnings,
 		})
 	}
+}
+
+// A disable-only entry may override a definition supplied by another file.
+// Retire it only when that complete upstream was also discovered and imported.
+func inactivePlaceholder(harness string, raw json.RawMessage) bool {
+	fields, err := object(raw)
+	if err != nil {
+		return false
+	}
+	for key := range fields {
+		if key != "enabled" && key != "disabled" && key != "type" && !ignorableNativeSetting(harness, key) {
+			return false
+		}
+		if key == "enabled" || key == "disabled" {
+			var flag bool
+			if string(fields[key]) == "null" || json.Unmarshal(fields[key], &flag) != nil {
+				return false
+			}
+		}
+		if key == "type" {
+			if _, err := stringValue(fields[key]); err != nil {
+				return false
+			}
+		}
+	}
+	if fields["enabled"] != nil && fields["disabled"] != nil {
+		return false
+	}
+	return true
 }
 
 func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (nativeServerImport, error) {
@@ -130,6 +189,9 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (na
 	if err != nil {
 		return fail("a native server is not an object or has duplicate fields")
 	}
+	if fields["enabled"] != nil && fields["disabled"] != nil {
+		return fail("a native server has ambiguous enable/disable flags")
+	}
 	for _, key := range []string{"enabled", "disabled"} {
 		if value, exists := fields[key]; exists {
 			var flag bool
@@ -140,9 +202,6 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (na
 				return nativeServerImport{}, errInactiveServer
 			}
 		}
-	}
-	if fields["enabled"] != nil && fields["disabled"] != nil {
-		return fail("a native server has ambiguous enable/disable flags")
 	}
 	if codexDesktopRuntime(harness, name, fields) {
 		return nativeServerImport{}, errNativeRuntime

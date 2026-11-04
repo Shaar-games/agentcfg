@@ -195,7 +195,7 @@ func TestFailedInitArchivesCanonicalAndKeepsNativeConfiguration(t *testing.T) {
 }
 
 func TestInitRejectsIncompleteImportBeforeWriting(t *testing.T) {
-	for _, invalid := range []string{"mcp", "skill", "conflict"} {
+	for _, invalid := range []string{"mcp", "skill"} {
 		t.Run(invalid, func(t *testing.T) {
 			home := t.TempDir()
 			switch invalid {
@@ -203,9 +203,6 @@ func TestInitRejectsIncompleteImportBeforeWriting(t *testing.T) {
 				writeScopeFixture(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"custom":{"command":"inert","unsupportedOption":true}}}`)
 			case "skill":
 				writeScopeFixture(t, filepath.Join(home, ".claude", "skills", "review", "SKILL.md"), "Not a portable skill.")
-			case "conflict":
-				writeScopeFixture(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers":{"same":{"command":"one"}}}`)
-				writeScopeFixture(t, filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.same]\ncommand='two'\n")
 			}
 			before := projectSnapshot(t, home)
 			inventory, err := bootstrap.Discover(home)

@@ -21,6 +21,7 @@ type Plan struct {
 	ambiguousSourceHashes map[string]bool
 	homeIdentity          os.FileInfo
 	budget                *scanBudget
+	inactiveOrigins       map[string][]Origin
 }
 
 type Harness struct {
@@ -33,19 +34,22 @@ type Harness struct {
 // Origin preserves the pairing between a native path and its harness. Sources
 // and Harnesses are unions after deduplication and must not be cross-joined.
 type Origin struct {
-	Harness string
-	Source  string
-	Target  string `json:",omitempty"` // resolved skill source captured before prompting
-	Layout  string `json:",omitempty"` // nested link bindings captured independently of content
+	Harness    string
+	Source     string
+	Target     string `json:",omitempty"` // resolved skill source captured before prompting
+	Layout     string `json:",omitempty"` // nested link bindings captured independently of content
+	Inactive   bool   `json:",omitempty"`
+	PolicyOnly bool   `json:",omitempty"`
 }
 
 // Server contains only definitions that can be represented canonically.
 // Unsupported native entries are omitted and reported in Warnings. Credentials
 // and variable expressions are retained, with informational advisories only.
-// Conflicting names remain separate, unselected candidates with unique IDs.
+// Different definitions sharing a native name retain separate canonical names.
 type ServerCandidate struct {
 	ID              string
 	Name            string
+	NativeName      string
 	Source          string
 	Sources         []string
 	Harnesses       []string
