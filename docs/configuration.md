@@ -35,6 +35,13 @@ choices, previews the proposal, and requests confirmation **before creating
 canonical sources**. It does not execute discovered MCPs or skills.
 `agentcfg init --plain` produces only a read-only discovery preview.
 
+Credentials in environment variables, arguments, URLs and headers are copied
+unchanged into `~/.agentcfg/mcp.json`. Yellow warnings are informational and do
+not block initialization or add a confirmation. Variable expressions are also
+copied literally; agentcfg does not evaluate harness-specific substitutions.
+Invalid definitions and unsupported options still require correction rather
+than silently losing configuration.
+
 A single confirmation approves the complete initialization: canonical import,
 broker proxies in selected harnesses, and physical skill copies. `init --yes`
 explicitly approves the same migration without prompts; `init --plain` remains
@@ -207,7 +214,7 @@ Containment protects package paths read during this load. It does not sandbox a 
 
 ## Remote URLs and headers
 
-URLs must be absolute HTTP(S), have a valid host/port, and contain no user information or fragment. HTTP is permitted only for exactly `localhost` or a loopback IP literal; other endpoints require HTTPS. IPv6 literals use brackets. Empty/invalid ports, malformed authorities and unsupported URL schemes invalidate only their entry.
+URLs must be absolute HTTP(S), have a valid host/port, and contain no fragment. Literal URL credentials and HTTP endpoints are accepted; native import warns without blocking. IPv6 literals use brackets. Empty/invalid ports, malformed authorities and unsupported URL schemes invalidate only their entry. OAuth issuer, metadata and callback URLs retain their separate validation requirements.
 
 Headers are literal string maps with valid HTTP names and values. Duplicate names ignoring case and control-character injection are rejected. Portable headers are visible package data and should not contain credentials. Agent Plugins 1.0.0 defines no portable OAuth or credential-reference fields; the loader does not perform authentication. See the [MCP component specification](https://agent-plugins.org/plugin-authors/mcp-servers).
 

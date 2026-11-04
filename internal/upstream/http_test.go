@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -93,6 +94,29 @@ func initializeHTTP(t *testing.T, transport *httpTransport) {
 	case <-transport.ready:
 	case <-time.After(5 * time.Second):
 		t.Fatal("initialized was not accepted")
+	}
+}
+
+func TestHTTPLiteralURLCredentialsReachEndpoint(t *testing.T) {
+	handler := normalHTTPHandler(t, func(w http.ResponseWriter, r *http.Request, message wire.Message) {
+		writeHTTPJSON(w, wire.Result(message.ID(), map[string]any{}))
+	})
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, password, ok := r.BasicAuth()
+		if !ok || user != "fixture-user" || password != "fixture-password" || r.URL.Query().Get("token") != "fixture-token" {
+			t.Error("configured URL credentials or query were lost")
+		}
+		requests.Add(1)
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	endpoint, _ := url.Parse(server.URL + "/mcp?token=fixture-token")
+	endpoint.User = url.UserPassword("fixture-user", "fixture-password")
+	transport := startTestTransport(t, context.Background(), config.Server{Type: "streamable-http", URL: endpoint.String()}).(*httpTransport)
+	initializeHTTP(t, transport)
+	if requests.Load() < 2 {
+		t.Fatal("MCP handshake did not reach endpoint")
 	}
 }
 
@@ -513,7 +537,7 @@ func TestHTTPContextTimeoutAndConcurrentClose(t *testing.T) {
 
 func TestHTTPRejectsUnsafeEndpointsAndHeaders(t *testing.T) {
 	for _, server := range []config.Server{
-		{Type: "http", URL: "file:///tmp/mcp"}, {Type: "http", URL: "https://user:secret@example.com/mcp"},
+		{Type: "http", URL: "file:///tmp/mcp"},
 		{Type: "http", URL: "https://example.com/mcp#fragment"},
 		{Type: "http", URL: "http://localhost", Headers: map[string]string{"Host": "elsewhere"}},
 		{Type: "http", URL: "http://localhost", Headers: map[string]string{"X-Test": "secret\r\nInjected:yes"}},

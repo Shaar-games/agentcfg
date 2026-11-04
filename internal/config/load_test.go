@@ -387,9 +387,8 @@ func TestSettingsInvalidValues(t *testing.T) {
 }
 
 func TestRemoteURLAndHeaderValidation(t *testing.T) {
-	valid := []string{"https://example.test/mcp", "http://localhost:8080/mcp", "http://127.23.4.5/mcp", "http://[::1]:8080/mcp", "https://example.test/${PLUGIN_DATA}"}
-	invalid := []string{"", "/mcp", "ftp://example.test/mcp", "http://example.test/mcp", "http://localhost.evil/mcp",
-		"http://127.0.0.1.evil/mcp", "http://0.0.0.0/mcp", "https://user:password@example.test/mcp",
+	valid := []string{"https://example.test/mcp", "http://localhost:8080/mcp", "http://127.23.4.5/mcp", "http://[::1]:8080/mcp", "https://example.test/${PLUGIN_DATA}", "http://example.test/mcp", "http://localhost.evil/mcp", "http://127.0.0.1.evil/mcp", "http://0.0.0.0/mcp", "https://user:password@example.test/mcp"}
+	invalid := []string{"", "/mcp", "ftp://example.test/mcp",
 		"https://example.test/mcp#fragment", "https://example.test/mcp#", "https://example.test:99999/mcp",
 		"https://example.test:/mcp", "https://[not-an-ip]/mcp", "https://example.test\\evil/mcp"}
 	for _, value := range valid {

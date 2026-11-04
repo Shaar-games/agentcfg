@@ -18,6 +18,10 @@ proxies du broker et copie les skills depuis les sources canoniques. Une seule
 confirmation autorise ce parcours complet. `init --yes` autorise la même
 migration sans formulaire ; `init --plain` reste une prévisualisation sans écriture.
 Après un init réussi, `~/.agentcfg/` est la seule source de vérité. Les imports
+conservent les credentials et les expressions de variables à l'identique dans
+`mcp.json` ; les avertissements jaunes ne bloquent pas la migration et ne
+demandent aucune confirmation supplémentaire. Les substitutions propres aux
+harnesses ne sont pas interprétées par agentcfg. Les imports
 incomplets ou ambigus bloquent l'initialisation ; un échec de migration tente de
 restaurer l'état natif et archive les sources importées pour permettre un nouvel essai.
 

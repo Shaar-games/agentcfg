@@ -25,6 +25,7 @@ type initProposal struct {
 	Skills            []skillImport
 	Warnings          []string
 	NativeServers     []string
+	Advisories        []string
 }
 
 type initOptions struct {
@@ -70,6 +71,11 @@ func runInitWizard(ctx context.Context, home string, proposal initProposal, opts
 	}
 	if !opts.Plain && (interactive || opts.Yes) {
 		if err := checkInitCoverage(proposal.Inventory, configured); err != nil {
+			return err
+		}
+	}
+	for _, advisory := range proposal.Advisories {
+		if err := tui.WriteWarning(output, advisory); err != nil {
 			return err
 		}
 	}

@@ -149,7 +149,7 @@ func TestRevalidateDetectsSourceChanges(t *testing.T) {
 	})
 }
 
-func TestDiscoverRejectsUnsafeEntriesWithoutLeakingValues(t *testing.T) {
+func TestDiscoverCopiesCredentialValuesWithoutLeakingDiagnostics(t *testing.T) {
 	const secret = "SENTINEL_DO_NOT_RETURN_THIS"
 	home := t.TempDir()
 	entries := map[string]any{
@@ -172,15 +172,24 @@ func TestDiscoverRejectsUnsafeEntriesWithoutLeakingValues(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"mcpServers": entries})
 	put(t, home, ".cursor/mcp.json", string(raw))
 	plan, err := Discover(home)
-	if err != nil || len(plan.Servers) != 1 || plan.Servers[0].Name != "safe" {
-		t.Fatalf("%+v %v", plan, err)
+	if err != nil || len(plan.Servers) != 10 {
+		t.Fatalf("expected all 10 representable entries to be imported: %v", err)
 	}
-	visible, _ := json.Marshal(plan)
+	visible, _ := json.Marshal(plan.Warnings)
 	if strings.Contains(string(visible), secret) {
-		t.Fatal("credential leaked into plan")
+		t.Fatal("credential leaked into diagnostics")
 	}
-	if len(plan.Warnings) != len(entries)-1 {
-		t.Fatalf("warnings: %+v", plan.Warnings)
+	imported := map[string]ServerCandidate{}
+	for _, candidate := range plan.Servers {
+		imported[candidate.Name] = candidate
+	}
+	if imported["env"].Server.Env["API_KEY"] != secret || imported["header"].Server.Headers["Authorization"] != secret || imported["arg"].Server.Args[1] != secret || imported["symbolic"].Server.Env["HOME_COPY"] != "${HOME}" {
+		t.Fatal("native strings were changed during import")
+	}
+	for _, warning := range plan.Warnings {
+		if imported[warning.Server].Name != "" && warning.BlocksInit([]string{"cursor"}) {
+			t.Fatal("advisory still blocks valid import")
+		}
 	}
 }
 

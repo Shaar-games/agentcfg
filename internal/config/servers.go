@@ -248,6 +248,19 @@ func validateProcessStrings(server Server, portable bool) error {
 	return nil
 }
 
+// ValidateStdioDefinition checks representable process data without reading
+// environment values, executing commands or imposing a credentials policy.
+func ValidateStdioDefinition(server Server) error {
+	return validateProcessStrings(server, false)
+}
+
+func ValidateRemoteDefinition(server Server) error {
+	if err := validateURL(server.URL); err != nil {
+		return err
+	}
+	return validateHeaders(server.Headers)
+}
+
 func bareCommand(command string) bool {
 	return command != "." && command != ".." && !strings.ContainsAny(command, "/\\:") &&
 		strings.IndexFunc(command, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) == -1
@@ -331,8 +344,8 @@ func validateURL(value string) error {
 	if (endpoint.Scheme != "https" && endpoint.Scheme != "http") || endpoint.Hostname() == "" || endpoint.Opaque != "" {
 		return fmt.Errorf("MCP URL must be an absolute http or https URL")
 	}
-	if endpoint.User != nil || strings.Contains(value, "#") {
-		return fmt.Errorf("MCP URL must not contain user information or a fragment")
+	if strings.Contains(value, "#") {
+		return fmt.Errorf("MCP URL must not contain a fragment")
 	}
 	if strings.ContainsAny(endpoint.Host, "\\ \t\r\n") {
 		return fmt.Errorf("invalid MCP URL host")
@@ -351,12 +364,6 @@ func validateURL(value string) error {
 		}
 	} else if strings.HasSuffix(endpoint.Host, ":") {
 		return fmt.Errorf("MCP URL port must not be empty")
-	}
-	if endpoint.Scheme == "http" {
-		host := endpoint.Hostname()
-		if host != "localhost" && (ipErr != nil || !ip.IsLoopback()) {
-			return fmt.Errorf("non-loopback MCP endpoints must use https")
-		}
 	}
 	return nil
 }

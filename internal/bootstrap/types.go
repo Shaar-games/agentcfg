@@ -38,7 +38,8 @@ type Origin struct {
 }
 
 // Server contains only definitions that can be represented canonically.
-// Sensitive or unsupported native entries are omitted and reported in Warnings.
+// Unsupported native entries are omitted and reported in Warnings. Credentials
+// and variable expressions are retained, with informational advisories only.
 // Conflicting names remain separate, unselected candidates with unique IDs.
 type ServerCandidate struct {
 	ID              string
@@ -83,10 +84,11 @@ const (
 	WarningSkill         WarningKind = "skill"
 	WarningInactive      WarningKind = "inactive"
 	WarningNativeRuntime WarningKind = "native-runtime"
+	WarningAdvisory      WarningKind = "advisory"
 )
 
 func (w Warning) BlocksInit(harnesses []string) bool {
-	if w.Kind == WarningInactive || w.Kind == WarningNativeRuntime {
+	if w.Kind == WarningInactive || w.Kind == WarningNativeRuntime || w.Kind == WarningAdvisory {
 		return false
 	}
 	return w.Kind == WarningSkill || slices.Contains(harnesses, w.Harness)

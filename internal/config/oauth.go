@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strings"
 	"unicode"
@@ -90,7 +91,7 @@ func (value OAuthConfig) Validate() error {
 		if value.ClientID == "" {
 			return fmt.Errorf("oauth.issuer requires a preregistered clientId")
 		}
-		if err := validateURL(value.Issuer); err != nil {
+		if err := validateOAuthURL(value.Issuer); err != nil {
 			return fmt.Errorf("invalid oauth issuer: %w", err)
 		}
 		parsed, _ := url.Parse(value.Issuer)
@@ -99,7 +100,7 @@ func (value OAuthConfig) Validate() error {
 		}
 	}
 	if value.ClientMetadataURL != "" {
-		if err := validateURL(value.ClientMetadataURL); err != nil {
+		if err := validateOAuthURL(value.ClientMetadataURL); err != nil {
 			return fmt.Errorf("invalid oauth client metadata URL: %w", err)
 		}
 		parsed, _ := url.Parse(value.ClientMetadataURL)
@@ -121,12 +122,29 @@ func (value OAuthConfig) Validate() error {
 }
 
 func validateRedirectURL(value string) error {
-	if err := validateURL(value); err != nil {
+	if err := validateOAuthURL(value); err != nil {
 		return fmt.Errorf("invalid oauth redirect URL: %w", err)
 	}
 	parsed, _ := url.Parse(value)
 	if parsed.RawQuery != "" || parsed.ForceQuery {
 		return fmt.Errorf("oauth redirect URL must not contain a query")
+	}
+	return nil
+}
+
+// OAuth trust and callback validation is independent of literal MCP endpoint
+// configuration. Allowing user-configured HTTP/auth values must not change it.
+func validateOAuthURL(value string) error {
+	if err := validateURL(value); err != nil {
+		return err
+	}
+	u, _ := url.Parse(value)
+	if u.User != nil {
+		return fmt.Errorf("OAuth URLs must not contain user information")
+	}
+	ip, err := netip.ParseAddr(u.Hostname())
+	if u.Scheme == "http" && u.Hostname() != "localhost" && (err != nil || !ip.IsLoopback()) {
+		return fmt.Errorf("non-loopback OAuth URLs must use https")
 	}
 	return nil
 }
@@ -140,6 +158,9 @@ func validateServerOAuth(server Server) error {
 	}
 	if err := server.OAuth.Validate(); err != nil {
 		return err
+	}
+	if u, err := url.Parse(server.URL); err == nil && u.User != nil {
+		return fmt.Errorf("OAuth cannot be combined with literal URL credentials")
 	}
 	for name := range server.Headers {
 		if strings.EqualFold(name, "Authorization") || strings.EqualFold(name, "Proxy-Authorization") {

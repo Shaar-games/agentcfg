@@ -87,8 +87,8 @@ type httpTransport struct {
 func startHTTP(parent context.Context, s config.Server) (Transport, error) {
 	u, err := url.Parse(s.URL)
 	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") ||
-		u.Host == "" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" {
-		return nil, errors.New("MCP HTTP URL must be an absolute http(s) endpoint without userinfo or fragment")
+		u.Host == "" || u.Hostname() == "" || u.Fragment != "" || u.Opaque != "" {
+		return nil, errors.New("MCP HTTP URL must be an absolute http(s) endpoint without a fragment")
 	}
 	headers := make(http.Header)
 	for name, value := range s.Headers {

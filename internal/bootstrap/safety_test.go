@@ -116,7 +116,7 @@ func TestMalformedAndUnsupportedNativeDefinitions(t *testing.T) {
 		{"null-arg", ".cursor/mcp.json", `{"mcpServers":{"x":{"command":"node","args":[null]}}}`, 0},
 		{"env-case", ".cursor/mcp.json", `{"mcpServers":{"x":{"command":"node","env":{"Mode":"a","MODE":"b"}}}}`, 0},
 		{"header-case", ".cursor/mcp.json", `{"mcpServers":{"x":{"url":"https://example.test","headers":{"X-Mode":"a","x-mode":"b"}}}}`, 0},
-		{"remote-http", ".cursor/mcp.json", `{"mcpServers":{"x":{"url":"http://example.test"}}}`, 0},
+		{"remote-http", ".cursor/mcp.json", `{"mcpServers":{"x":{"url":"http://example.test"}}}`, 1},
 		{"sse", ".gemini/settings.json", `{"mcpServers":{"x":{"url":"https://example.test/sse"}}}`, 0},
 		{"mixed", ".gemini/settings.json", `{"mcpServers":{"x":{"httpUrl":"https://example.test","command":"node"}}}`, 0},
 		{"codex-env-auth", ".codex/config.toml", "[mcp_servers.x]\nurl='https://example.test'\nbearer_token_env_var='NO_ENV_READ'\n", 0},

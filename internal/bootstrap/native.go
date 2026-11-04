@@ -105,6 +105,9 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 			continue
 		}
 		server.Source = source
+		for _, message := range importAdvisories(server) {
+			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: message, Kind: WarningAdvisory})
+		}
 		plan.Servers = append(plan.Servers, ServerCandidate{
 			Name: name, Source: source, Sources: []string{source},
 			Harnesses: []string{target.name}, Server: server,

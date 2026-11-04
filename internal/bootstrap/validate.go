@@ -2,12 +2,10 @@ package bootstrap
 
 import (
 	"errors"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -39,8 +37,15 @@ func secretValue(value string) bool {
 	if credentialAssignment.MatchString(value) {
 		return true
 	}
-	if endpoint, err := url.Parse(value); err == nil && endpoint.User != nil {
-		return true
+	if endpoint, err := url.Parse(value); err == nil {
+		if endpoint.User != nil {
+			return true
+		}
+		for key := range endpoint.Query() {
+			if sensitiveKey(key) {
+				return true
+			}
+		}
 	}
 	lower := strings.ToLower(value)
 	for _, marker := range []string{"authorization:", "authorization=", "bearer ", "basic ", "-----begin", "github_pat_", "ghp_", "sk-proj-", "sk-ant-"} {
@@ -61,63 +66,39 @@ func secretValue(value string) bool {
 }
 
 func validateProcess(root *os.Root, server *config.Server) error {
-	fail := func() error {
-		return errors.New("native process contains unsafe credentials, interpolation or ambiguous paths; manual import required")
-	}
-	if server.Command == "" || symbolic(server.Command) || secretValue(server.Command) || strings.ContainsRune(server.Command, 0) {
-		return fail()
+	if err := config.ValidateStdioDefinition(*server); err != nil {
+		return errors.New("native process has invalid command, argument or environment data")
 	}
 	if !bareCommand(server.Command) {
 		if !filepath.IsAbs(server.Command) {
-			return fail()
+			return errors.New("native command must name one executable; put arguments in args")
 		}
 		if within(root.Name(), server.Command) {
 			path, err := anchoredPath(root, server.Command)
 			if err != nil {
-				return fail()
+				return errors.New("native command path is unreadable or escapes its discovery location")
 			}
 			info, err := root.Stat(path)
 			if err != nil || !info.Mode().IsRegular() {
-				return fail()
+				return errors.New("native command path must refer to a regular file")
 			}
 			server.Command = filepath.Join(root.Name(), path)
 		}
 	}
-	for _, arg := range server.Args {
-		if symbolic(arg) || secretValue(arg) || strings.ContainsRune(arg, 0) {
-			return fail()
-		}
-		if strings.HasPrefix(arg, "-") {
-			flag := strings.SplitN(strings.TrimLeft(arg, "-"), "=", 2)[0]
-			if sensitiveKey(flag) {
-				return fail()
-			}
-		}
-	}
-	seen := map[string]bool{}
-	for key, value := range server.Env {
-		folded := strings.ToUpper(key)
-		if key == "" || strings.ContainsAny(key, "=\x00") || seen[folded] ||
-			strings.IndexFunc(key, unicode.IsControl) >= 0 ||
-			sensitiveKey(key) || symbolic(value) || secretValue(value) || strings.ContainsRune(value, 0) {
-			return fail()
-		}
-		seen[folded] = true
-	}
 	if server.Cwd == "" {
-		return nil // Unspecified cwd is inherited at connection time.
+		return nil
 	}
-	if !filepath.IsAbs(server.Cwd) || symbolic(server.Cwd) || strings.ContainsRune(server.Cwd, 0) {
-		return fail()
+	if !filepath.IsAbs(server.Cwd) {
+		return errors.New("explicit native cwd must be an absolute directory")
 	}
 	if within(root.Name(), server.Cwd) {
 		path, err := anchoredPath(root, server.Cwd)
 		if err != nil {
-			return fail()
+			return errors.New("native cwd is unreadable or escapes its discovery location")
 		}
 		info, err := root.Stat(path)
 		if err != nil || !info.IsDir() {
-			return fail()
+			return errors.New("native cwd must refer to a directory")
 		}
 		server.Cwd = filepath.Join(root.Name(), path)
 	}
@@ -130,54 +111,42 @@ func bareCommand(command string) bool {
 }
 
 func validateRemote(server config.Server) error {
-	fail := func() error {
-		return errors.New("native HTTP endpoint or headers contain unsafe credentials, interpolation or unsupported values; manual import required")
-	}
-	if symbolic(server.URL) || secretValue(server.URL) {
-		return fail()
-	}
-	endpoint, err := url.Parse(server.URL)
-	if err != nil || endpoint.Opaque != "" || endpoint.Hostname() == "" ||
-		(endpoint.Scheme != "http" && endpoint.Scheme != "https") ||
-		endpoint.User != nil || strings.ContainsAny(server.URL, "?#\x00") ||
-		strings.ContainsAny(endpoint.Host, "\\ \t\r\n") {
-		return fail()
-	}
-	ip, ipErr := netip.ParseAddr(endpoint.Hostname())
-	if strings.Contains(endpoint.Hostname(), ":") && !strings.HasPrefix(endpoint.Host, "[") {
-		return fail()
-	}
-	if strings.HasPrefix(endpoint.Host, "[") && (ipErr != nil || !ip.Is6()) {
-		return fail()
-	}
-	if port := endpoint.Port(); port != "" {
-		n, err := strconv.Atoi(port)
-		if err != nil || n < 1 || n > 65535 {
-			return fail()
-		}
-	} else if strings.HasSuffix(endpoint.Host, ":") {
-		return fail()
-	}
-	if endpoint.Scheme == "http" && endpoint.Hostname() != "localhost" && (ipErr != nil || !ip.IsLoopback()) {
-		return fail()
-	}
-	seen := map[string]bool{}
-	for name, value := range server.Headers {
-		key := strings.ToLower(name)
-		if name == "" || seen[key] || sensitiveKey(name) || symbolic(value) || secretValue(value) {
-			return fail()
-		}
-		for _, c := range name {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("!#$%&'*+-.^_"+string(rune(96))+"|~", c)) {
-				return fail()
-			}
-		}
-		for _, c := range value {
-			if c == 127 || c < 32 && c != '\t' {
-				return fail()
-			}
-		}
-		seen[key] = true
+	if err := config.ValidateRemoteDefinition(server); err != nil {
+		return errors.New("native HTTP endpoint or headers are invalid")
 	}
 	return nil
+}
+
+// Heuristics explain what is copied; they never decide what the user may
+// import. Values stay byte-for-byte intact and never appear in these messages.
+func importAdvisories(server config.Server) []string {
+	sensitive, variables := secretValue(server.Command), symbolic(server.Command) || symbolic(server.Cwd)
+	for _, arg := range server.Args {
+		sensitive = sensitive || secretValue(arg)
+		variables = variables || symbolic(arg)
+		if strings.HasPrefix(arg, "-") {
+			sensitive = sensitive || sensitiveKey(strings.SplitN(strings.TrimLeft(arg, "-"), "=", 2)[0])
+		}
+	}
+	for key, value := range server.Env {
+		sensitive = sensitive || sensitiveKey(key) || secretValue(value)
+		variables = variables || symbolic(value)
+	}
+	sensitive = sensitive || secretValue(server.URL)
+	variables = variables || symbolic(server.URL)
+	for key, value := range server.Headers {
+		sensitive = sensitive || sensitiveKey(key) || secretValue(value)
+		variables = variables || symbolic(value)
+	}
+	var warnings []string
+	if sensitive {
+		warnings = append(warnings, "credentials are copied as configured into ~/.agentcfg/mcp.json")
+	}
+	if variables {
+		warnings = append(warnings, "variable expressions are copied unchanged; harness-specific substitutions are not evaluated")
+	}
+	if strings.HasPrefix(server.URL, "http://") {
+		warnings = append(warnings, "HTTP endpoint is copied as configured without TLS")
+	}
+	return warnings
 }

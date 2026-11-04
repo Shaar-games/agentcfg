@@ -97,6 +97,11 @@ func TestMCPFixture(t *testing.T) {
 				cwd, _ := os.Getwd()
 				result["cwd"] = cwd
 			}
+			if params.Name == "configured-values" {
+				result["token"] = os.Getenv("AGENTCFG_TEST_API_TOKEN")
+				result["expression"] = os.Getenv("AGENTCFG_TEST_EXPRESSION")
+				result["args"] = os.Args[1:]
+			}
 			_ = writer.Write(wire.Result(message.ID(), map[string]any{"content": []any{map[string]string{"type": "text", "text": strconv.Itoa(os.Getpid())}}, "structuredContent": result}))
 		case "ping":
 			_ = writer.Write(wire.Result(message.ID(), map[string]any{}))
