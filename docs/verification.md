@@ -98,9 +98,9 @@ vérifier d'abord le flux `agentcfg init` :
 
 Lancer ensuite `agentcfg config`, puis vérifier que :
 
-1. Le menu présente les sections harnesses, MCP, skills, plugins, diagnostics et synchronisation via Huh Select : Entrée ouvre la section choisie.
+1. Configuration et Inventory présentent les quatre catégories avec compteurs numériques alignés, puis `Refresh` et `Exit`, via Huh Select. Le compteur Harnesses correspond aux harnesses activés, pas au nombre d'adaptateurs supportés ; Refresh recharge sans écrire.
 2. Les cases cochées apparaissent seulement dans les listes de disponibilités multiples ; annuler une édition ne modifie rien.
-3. La prévisualisation de synchronisation reste en lecture seule avant confirmation et application.
+3. Les entrées Diagnostics et Synchronize sont absentes du menu principal ; `agentcfg status`, `agentcfg validate` et `agentcfg sync` restent disponibles. La prévisualisation de synchronisation reste en lecture seule avant confirmation et application.
 4. Les détails, avertissements et conflits sont lisibles sur le terminal cible.
 
 Rejouer ces parcours avec des inventaires vides, un seul élément et plus de

@@ -58,21 +58,25 @@ func TestHelpHasSpacedSectionsWithoutObsoleteBoilerplate(t *testing.T) {
 	}
 }
 
-func TestConfigOpensFullHuhMenu(t *testing.T) {
+func TestConfigOpensCompactHuhMenu(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	for _, args := range [][]string{{"config"}} {
 		var rendered, diagnostics bytes.Buffer
-		if err := run(context.Background(), args, oneByteReader{strings.NewReader("8\n")}, &rendered, &diagnostics); err != nil {
+		if err := run(context.Background(), args, strings.NewReader("6\n"), &rendered, &diagnostics); err != nil {
 			t.Fatalf("agentcfg %v: %v (%s)", args, err, diagnostics.String())
 		}
 		if !strings.Contains(rendered.String(), "MCP servers") ||
 			!strings.Contains(rendered.String(), "Agent Plugins") ||
-			!strings.Contains(rendered.String(), "Diagnostics") ||
-			!strings.Contains(rendered.String(), "Enter a number") {
-			t.Fatalf("agentcfg %v did not show full config menu: %s", args, rendered.String())
+			!strings.Contains(rendered.String(), "5. Refresh") ||
+			!strings.Contains(rendered.String(), "6. Exit") ||
+			!strings.Contains(rendered.String(), "Enter a number between 1 and 6") {
+			t.Fatalf("agentcfg %v did not show compact config menu: %s", args, rendered.String())
+		}
+		if strings.Contains(rendered.String(), "Diagnostics") || strings.Contains(rendered.String(), "Synchronize") {
+			t.Fatalf("removed actions remain in configuration overview: %s", rendered.String())
 		}
 	}
 }

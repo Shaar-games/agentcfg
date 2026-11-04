@@ -42,7 +42,7 @@ Down 2
 Enter
 Wait+Screen /Configuration/
 Sleep 1800 ms
-Down 7
+Down 5
 Enter
 Sleep 1800 ms
 # Show the same simulated MCP configuration in the CLI's read-only mode.

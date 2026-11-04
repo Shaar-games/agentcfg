@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"agentcfg/internal/config"
@@ -21,11 +21,10 @@ var (
 	navExitColor   = lipgloss.AdaptiveColor{Light: "#AF272E", Dark: "#FF828A"}
 	navBackColor   = lipgloss.AdaptiveColor{Light: "#895D14", Dark: "#FFD182"}
 	navFreshColor  = lipgloss.AdaptiveColor{Light: "#096883", Dark: "#7CDFFF"}
-	navSyncColor   = lipgloss.AdaptiveColor{Light: "#64469B", Dark: "#D0B3FF"}
 	navWarnColor   = lipgloss.AdaptiveColor{Light: "#925B17", Dark: "#F3C274"}
 )
 
-// The CONFIG status column is padded by terminal cell width, not bytes or
+// Status columns are padded by terminal cell width, not bytes or
 // runes. This also works if a label later contains wide or combining glyphs.
 type navigationStatus struct {
 	title, detail, id string
@@ -55,28 +54,18 @@ func statusNavigationOptions(rows []navigationStatus) []huh.Option[string] {
 	return options
 }
 
-func configNavigationOptions(cfg *config.Config, plugins int) []huh.Option[string] {
+// Configuration and the read-only inventory share the same compact overview.
+// Counts reflect the loaded configuration, not the number of supported adapters.
+func overviewNavigationOptions(cfg *config.Config, plugins int) []huh.Option[string] {
 	options := statusNavigationOptions([]navigationStatus{
-		{title: "Harnesses", detail: "enable / disable", id: "harnesses"},
-		{title: "MCP servers", detail: fmt.Sprintf("%d configured", len(cfg.Servers)), id: "mcp"},
-		{title: "Skills", detail: fmt.Sprintf("%d available", len(cfg.Skills)), id: "skills"},
-		{title: "Agent Plugins", detail: fmt.Sprintf("%d folders", plugins), id: "plugins"},
-		{title: "Diagnostics and broker status", detail: fmt.Sprintf("%d warning(s)", len(cfg.Warnings)), id: "diagnostics"},
+		{title: "Harnesses", detail: strconv.Itoa(len(cfg.Settings.Harnesses)), id: "harnesses"},
+		{title: "MCP servers", detail: strconv.Itoa(len(cfg.Servers)), id: "mcp"},
+		{title: "Skills", detail: strconv.Itoa(len(cfg.Skills)), id: "skills"},
+		{title: "Agent Plugins", detail: strconv.Itoa(plugins), id: "plugins"},
 	})
 	return append(options,
-		huh.NewOption("Synchronize native harnesses", "sync"),
-		huh.NewOption("Refresh configuration and status", "refresh"),
+		huh.NewOption("Refresh", "refresh"),
 		huh.NewOption("Exit", "exit"))
-}
-
-func inventoryNavigationOptions(cfg *config.Config, plugins int) []huh.Option[string] {
-	options := statusNavigationOptions([]navigationStatus{
-		{title: "Harnesses", detail: fmt.Sprintf("%d active", len(cfg.Settings.Harnesses)), id: "harnesses"},
-		{title: "MCP servers", detail: fmt.Sprintf("%d configured", len(cfg.Servers)), id: "mcp"},
-		{title: "Skills", detail: fmt.Sprintf("%d available", len(cfg.Skills)), id: "skills"},
-		{title: "Agent Plugins", detail: fmt.Sprintf("%d folders", plugins), id: "plugins"},
-	})
-	return append(options, huh.NewOption("Exit", "exit"))
 }
 
 // A coloured Select must retain plain Option.Key values. Huh's built-in
@@ -90,9 +79,7 @@ func navigationColor(id, label string) lipgloss.AdaptiveColor {
 		return navBackColor
 	case "refresh":
 		return navFreshColor
-	case "sync":
-		return navSyncColor
-	case "diagnostics", "details":
+	case "details":
 		return navInfoColor
 	case "isolated":
 		return navWarnColor

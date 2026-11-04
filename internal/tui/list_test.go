@@ -13,10 +13,10 @@ func TestRunListAccessibleExitWithoutWriting(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	root := t.TempDir()
 	var output bytes.Buffer
-	if err := RunList(context.Background(), root, terminalByteReader{strings.NewReader("5\n")}, &output); err != nil {
+	if err := RunList(context.Background(), root, strings.NewReader("6\n"), &output); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"agentcfg", "Inventory", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Exit", "Enter a number"} {
+	for _, expected := range []string{"agentcfg", "Inventory", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Refresh", "Exit", "Enter a number between 1 and 6"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("missing %q in list menu: %s", expected, output.String())
 		}
@@ -48,7 +48,7 @@ func TestRunListMCPAndSkillsDetailsWithoutWriting(t *testing.T) {
 	}
 	// Inventory -> MCP -> alpha -> Back -> Skills -> review -> Back -> Exit.
 	var output bytes.Buffer
-	seq := "2\n1\n2\n3\n1\n2\n5\n"
+	seq := "2\n1\n2\n3\n1\n2\n6\n"
 	if err := RunList(context.Background(), root, terminalByteReader{strings.NewReader(seq)}, &output); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestRunListHarnessesReadOnlyWithoutExtraSpacingAfterReturn(t *testing.T) {
 	root := t.TempDir()
 	var output bytes.Buffer
 	// Inventory -> Harnesses -> Claude Code -> Back -> Exit.
-	if err := RunList(context.Background(), root, terminalByteReader{strings.NewReader("1\n1\n8\n5\n")}, &output); err != nil {
+	if err := RunList(context.Background(), root, strings.NewReader("1\n1\n8\n6\n"), &output); err != nil {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{"Harness: Claude Code", "MCP config", "Skills", "Back to inventory"} {

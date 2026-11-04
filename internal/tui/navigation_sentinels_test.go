@@ -36,7 +36,7 @@ func TestInventorySelectsResourcesNamedBackWithoutConfusingBackAction(t *testing
 	var output bytes.Buffer
 	// Inventory MCP -> item 'back' -> Back -> Inventory Skills -> item
 	// 'back' -> Back -> Exit. No terminalByteReader prefetch workaround.
-	if err := RunList(context.Background(), root, strings.NewReader("2\n1\n2\n3\n1\n2\n5\n"), &output); err != nil {
+	if err := RunList(context.Background(), root, strings.NewReader("2\n1\n2\n3\n1\n2\n6\n"), &output); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"MCP: back", "Skill: back"} {

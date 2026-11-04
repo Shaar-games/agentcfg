@@ -14,7 +14,17 @@ same Huh interface:
 | `agentcfg harness`, `agentcfg harnesses` | Choose enabled user-level harnesses | `agentcfg harness --plain` |
 | `agentcfg skill`, `agentcfg skills` | Choose which configured harnesses receive each skill | `agentcfg skills --plain` |
 | `agentcfg mcp`, `agentcfg mcps` | Choose per-harness MCP availability and shared/isolated operation | `agentcfg mcps --plain` |
-| `agentcfg config` | Open the complete Huh navigation menu | Use the relevant category's `--plain` form |
+| `agentcfg config` | Open the compact configuration menu | Use the relevant category's `--plain` form |
+
+Configuration and `agentcfg list` share the same six overview entries:
+**Harnesses**, **MCP servers**, **Skills**, **Agent Plugins**, **Refresh** and
+**Exit**. The four categories show aligned numeric counts only; Harnesses counts
+the currently enabled harnesses. Refresh reloads the inventory without writing
+configuration. Skill rows show enabled-harness counts; plugin rows show
+MCP / skill counts, with warnings retained for invalid plugins.
+
+Diagnostics and synchronization are not overview menu entries. Use
+`agentcfg status`, `agentcfg validate` and `agentcfg sync` for those operations.
 
 **All Huh navigation and action menus are Select fields.** Move with ↑/↓ and
 press **Enter** to open the highlighted section, select an MCP or skill, or

@@ -156,7 +156,7 @@ func TestHuhAccessibleRunListConsumesOrdinaryReaderAcrossScreens(t *testing.T) {
 	var rendered bytes.Buffer
 	// This is deliberately a plain strings.Reader, not terminalByteReader.
 	// Without guarded reads, Huh's first scanner consumes all four answers.
-	if err := RunList(context.Background(), root, strings.NewReader("1\n1\n8\n5\n"), &rendered); err != nil {
+	if err := RunList(context.Background(), root, strings.NewReader("1\n1\n8\n6\n"), &rendered); err != nil {
 		t.Fatal(err)
 	}
 	for _, label := range []string{"agentcfg", "Inventory", "Harness: Claude Code", "Back to inventory"} {
@@ -265,7 +265,7 @@ func TestNonTerminalStreamsUsePlainAccessibleHuhRegardlessOfTERM(t *testing.T) {
 	t.Setenv("AGENTCFG_ACCESSIBLE", "")
 	root := t.TempDir()
 	var output bytes.Buffer
-	if err := RunList(context.Background(), root, strings.NewReader("1\n1\n8\n5\n"), &output); err != nil {
+	if err := RunList(context.Background(), root, strings.NewReader("1\n1\n8\n6\n"), &output); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Harness: Claude Code") || !strings.Contains(output.String(), "Enter a number") {

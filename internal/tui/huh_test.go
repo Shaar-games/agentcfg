@@ -27,19 +27,24 @@ func (r terminalByteReader) Read(p []byte) (int, error) {
 	return r.Reader.Read(p[:1])
 }
 
-func TestHuhAccessibleAdvancedMenuExitIsReadOnly(t *testing.T) {
+func TestHuhAccessibleCompactMenuExitIsReadOnly(t *testing.T) {
 	t.Setenv("TERM", "dumb")
 	root := t.TempDir()
 	var rendered bytes.Buffer
-	if err := RunMenu(context.Background(), root, terminalByteReader{strings.NewReader("8\n")}, &rendered); err != nil {
+	if err := RunMenu(context.Background(), root, strings.NewReader("6\n"), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"agentcfg", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Diagnostics", "Synchronize", "Refresh", "Exit"} {
+	for _, text := range []string{"agentcfg", "Harnesses", "MCP servers", "Skills", "Agent Plugins", "Refresh", "Exit"} {
 		if !strings.Contains(rendered.String(), text) {
 			t.Fatalf("Huh main menu missing %q: %s", text, rendered.String())
 		}
 	}
-	if !strings.Contains(rendered.String(), "Enter a number between 1 and 8") || strings.Contains(rendered.String(), "Confirm selection") {
+	for _, obsolete := range []string{"Diagnostics", "Synchronize", "enable / disable", " configured", " available", " folders", "warning(s)"} {
+		if strings.Contains(rendered.String(), obsolete) {
+			t.Errorf("compact menu still contains %q: %s", obsolete, rendered.String())
+		}
+	}
+	if !strings.Contains(rendered.String(), "Enter a number between 1 and 6") || strings.Contains(rendered.String(), "Confirm selection") {
 		t.Fatalf("configuration navigation must be a single-choice Huh Select: %s", rendered.String())
 	}
 	entries, err := os.ReadDir(root)
@@ -58,7 +63,7 @@ func TestHuhConfigMenuOpensNativeHarnessCheckboxes(t *testing.T) {
 	}
 	var output bytes.Buffer
 	// Enter Harnesses directly, accept prechecked values, then select Exit.
-	in := terminalByteReader{strings.NewReader("1\n0\n8\n")}
+	in := strings.NewReader("1\n0\n6\n")
 	if err := RunMenu(context.Background(), root, in, &output); err != nil {
 		t.Fatal(err)
 	}

@@ -9,16 +9,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"agentcfg/internal/broker"
 	"agentcfg/internal/config"
-	"agentcfg/internal/syncer"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
@@ -478,7 +477,7 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 			state = fmt.Sprintf("broker PID %d", status.PID)
 		}
 		choice, err := s.selectAction("agentcfg  ·  Configuration", "↑↓ navigate, Enter opens, Ctrl+C exits  ·  "+state,
-			configNavigationOptions(cfg, len(discoverPlugins(root, cfg)))...)
+			overviewNavigationOptions(cfg, len(discoverPlugins(root, cfg)))...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -497,10 +496,8 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 			err = s.configureSkills()
 		case "plugins":
 			err = s.showPlugins()
-		case "diagnostics":
-			err = s.showDiagnostics()
-		case "sync":
-			err = s.configureSync()
+		case "refresh":
+			continue
 		case "exit":
 			return nil
 		}
@@ -739,11 +736,11 @@ func (s interfaceSession) configureSkills() error {
 					count++
 				}
 			}
-			rows = append(rows, navigationStatus{title: safeHuhText(skill.Name), detail: fmt.Sprintf("%d harness(es)", count), id: navigationItemValue(skill.Name)})
+			rows = append(rows, navigationStatus{title: safeHuhText(skill.Name), detail: strconv.Itoa(count), id: navigationItemValue(skill.Name)})
 		}
 		choices := statusNavigationOptions(rows)
 		choices = append(choices, huh.NewOption("Back to main menu", "back"))
-		name, err := s.selectAction("Agent Skills", "↑↓ navigate, Enter opens a skill's harness checkboxes. Source edits only.", choices...)
+		name, err := s.selectAction("Agent Skills", "Counts: enabled harnesses. Enter opens availability; source edits only.", choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -831,16 +828,16 @@ func (s interfaceSession) showPlugins() error {
 	items := discoverPlugins(s.root, cfg)
 	rows := make([]navigationStatus, 0, len(items))
 	for _, p := range items {
-		state := "available"
+		detail := fmt.Sprintf("%d / %d", p.MCP, p.Skills)
 		if !p.Valid {
-			state = "warning"
+			detail += "  ·  warning"
 		}
-		rows = append(rows, navigationStatus{title: safeHuhText(p.Name), detail: fmt.Sprintf("%d MCP / %d skill(s)  ·  %s", p.MCP, p.Skills, state), id: p.Path})
+		rows = append(rows, navigationStatus{title: safeHuhText(p.Name), detail: detail, id: p.Path})
 	}
 	choices := statusNavigationOptions(rows)
 	choices = append(choices, huh.NewOption("Back", "back"))
 	for {
-		choice, err := s.selectAction("Portable Agent Plugins", "↑↓ navigate, Enter shows details. Package files stay untouched.", choices...)
+		choice, err := s.selectAction("Portable Agent Plugins", "Counts: MCP / skills. Enter shows details; package files stay untouched.", choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -859,108 +856,4 @@ func (s interfaceSession) showPlugins() error {
 			}
 		}
 	}
-}
-
-func (s interfaceSession) showDiagnostics() error {
-	cfg, err := config.Load(s.root)
-	if err != nil {
-		return err
-	}
-	status, statusErr := broker.GetStatus(s.ctx, cfg.Root)
-	var message strings.Builder
-	fmt.Fprintf(&message, "Canonical root: %s\nMCP servers: %d  ·  Skills: %d  ·  Plugins: %d\n", filepath.Join(cfg.Root, ".agentcfg"), len(cfg.Servers), len(cfg.Skills), len(discoverPlugins(s.root, cfg)))
-	if statusErr != nil {
-		fmt.Fprintf(&message, "Broker status error: %v\n", statusErr)
-	} else if !status.Running {
-		message.WriteString("Broker stopped (status does not launch it).\n")
-	} else {
-		fmt.Fprintf(&message, "Broker PID: %d\n", status.PID)
-		for _, p := range status.Backends {
-			fmt.Fprintf(&message, "  %s: PID %d, %d clients, %d pending, isolated=%t\n", p.Name, p.PID, p.Clients, p.Pending, p.Isolated)
-		}
-	}
-	if len(cfg.Warnings) == 0 {
-		message.WriteString("No validation warnings.")
-	}
-	for _, warning := range cfg.Warnings {
-		fmt.Fprintf(&message, "Warning: %s\n", warning)
-	}
-	return s.note("Diagnostics and broker status", message.String())
-}
-
-func (s interfaceSession) configureSync() error {
-	cfg, err := config.Load(s.root)
-	if err != nil {
-		return err
-	}
-	if err := s.ctx.Err(); err != nil {
-		return err
-	}
-	binary, err := stableExecutable()
-	if err != nil {
-		return err
-	}
-	plan, err := syncer.BuildPlan(cfg, syncer.Options{
-		Root: cfg.Root, Home: cfg.Root, Scope: "user", Binary: binary, SkillMode: "auto",
-	})
-	if err != nil {
-		return err
-	}
-	var preview strings.Builder
-	fmt.Fprintf(&preview, "%d planned change(s). Nothing written before confirmation.\n\n", len(plan.Changes))
-	for _, change := range plan.Changes {
-		path := change.Path
-		if relative, err := filepath.Rel(cfg.Root, path); err == nil && !strings.HasPrefix(relative, "..") {
-			path = filepath.Join("~", relative)
-		}
-		fmt.Fprintf(&preview, "• %s: %s\n", change.Action, path)
-	}
-	for _, warning := range plan.Warnings {
-		fmt.Fprintf(&preview, "Warning: %s\n", warning)
-	}
-	preview.WriteString("Source SKILL.md content stays unchanged during distribution.")
-	if err := s.note("User-scope synchronization preview", preview.String()); err != nil {
-		return err
-	}
-	if len(plan.Changes) == 0 {
-		return nil
-	}
-	yes, err := s.confirmChange()
-	if err != nil {
-		return err
-	}
-	if !yes {
-		return nil
-	}
-	if err := plan.Apply(); err != nil {
-		return err
-	}
-	return s.note("Sync completed", fmt.Sprintf("Synchronized %d change(s). All changes were limited to the user home; skills were symlinked or copied without rewriting their content.", len(plan.Changes)))
-}
-
-func stableExecutable() (string, error) {
-	binary, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	binary, err = filepath.EvalSymlinks(binary)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(binary)
-	if err != nil || !info.Mode().IsRegular() {
-		return "", fmt.Errorf("agentcfg binary must exist as a regular installed file: %w", err)
-	}
-	temporary, err := filepath.Abs(os.TempDir())
-	if err != nil {
-		return "", err
-	}
-	if rel, err := filepath.Rel(temporary, binary); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		for _, part := range strings.Split(rel, string(filepath.Separator)) {
-			if strings.HasPrefix(part, "go-build") {
-				return "", fmt.Errorf("cannot install a temporary go run binary in harness settings")
-			}
-		}
-	}
-	return binary, nil
 }

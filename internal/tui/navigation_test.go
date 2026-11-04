@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -36,35 +37,49 @@ func assertAlignedStatusColumn(t *testing.T, options []huh.Option[string], count
 	}
 }
 
-func TestConfigurationAndInventoryStatusesAlignByVisibleWidth(t *testing.T) {
-	cfg := &config.Config{
-		Servers:  map[string]config.Server{"alpha": {}, "beta": {}},
-		Skills:   []config.Skill{{Name: "review"}},
-		Settings: config.Settings{Harnesses: []string{"codex", "cursor"}},
-		Warnings: []string{"warning"},
-	}
-	configOptions := configNavigationOptions(cfg, 3)
-	if len(configOptions) != 8 {
-		t.Fatalf("expected eight CONFIG actions, got %d", len(configOptions))
-	}
-	assertAlignedStatusColumn(t, configOptions, 5)
-	for i, expected := range []string{"enable / disable", "2 configured", "1 available", "3 folders", "1 warning(s)"} {
-		if !strings.HasSuffix(configOptions[i].Key, expected) {
-			t.Errorf("CONFIG option %d missing %q: %q", i, expected, configOptions[i].Key)
-		}
-	}
-	if configOptions[7].Value != "exit" {
-		t.Fatalf("Exit action moved unexpectedly: %+v", configOptions[7])
-	}
-	inventoryOptions := inventoryNavigationOptions(cfg, 3)
-	if len(inventoryOptions) != 5 {
-		t.Fatalf("expected five list actions, got %d", len(inventoryOptions))
-	}
-	assertAlignedStatusColumn(t, inventoryOptions, 4)
-	for i, expected := range []string{"2 active", "2 configured", "1 available", "3 folders"} {
-		if !strings.HasSuffix(inventoryOptions[i].Key, expected) {
-			t.Errorf("LIST option %d missing %q: %q", i, expected, inventoryOptions[i].Key)
-		}
+func TestOverviewCountsAreCompactAlignedAndReflectConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cfg     config.Config
+		plugins int
+		counts  []string
+	}{
+		{name: "empty", counts: []string{"0", "0", "0", "0"}},
+		{name: "one", cfg: config.Config{
+			Settings: config.Settings{Harnesses: []string{"cursor"}},
+			Servers:  map[string]config.Server{"alpha": {}},
+			Skills:   []config.Skill{{Name: "review"}},
+		}, plugins: 1, counts: []string{"1", "1", "1", "1"}},
+		{name: "multiple", cfg: config.Config{
+			Settings: config.Settings{Harnesses: []string{"claude-code", "codex", "cursor"}},
+			Servers:  map[string]config.Server{"alpha": {}, "beta": {}},
+			Skills:   make([]config.Skill, 12),
+			Warnings: []string{"warning must not add a diagnostic menu entry"},
+		}, plugins: 10, counts: []string{"3", "2", "12", "10"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := overviewNavigationOptions(&tc.cfg, tc.plugins)
+			if len(options) != 6 {
+				t.Fatalf("expected exactly six overview actions, got %d", len(options))
+			}
+			assertAlignedStatusColumn(t, options, 4)
+			for i, label := range []string{"Harnesses", "MCP servers", "Skills", "Agent Plugins"} {
+				title, count, found := strings.Cut(options[i].Key, "  ·  ")
+				if !found || strings.TrimSpace(title) != label || count != tc.counts[i] {
+					t.Errorf("row %d = %q; want %q with only counter %s", i, options[i].Key, label, tc.counts[i])
+				}
+			}
+			var ids []string
+			for _, option := range options {
+				ids = append(ids, option.Value)
+			}
+			if !slices.Equal(ids, []string{"harnesses", "mcp", "skills", "plugins", "refresh", "exit"}) {
+				t.Fatalf("overview order or actions changed: %v", ids)
+			}
+			if options[4].Key != "Refresh" || options[5].Key != "Exit" {
+				t.Fatalf("actions must use short labels: %+v", options[4:])
+			}
+		})
 	}
 	wide := statusNavigationOptions([]navigationStatus{{title: "界", detail: "one", id: "a"}, {title: "e\u0301", detail: "two", id: "b"}, {title: "plain", detail: "three", id: "c"}})
 	assertAlignedStatusColumn(t, wide, 3)
@@ -77,10 +92,8 @@ func TestNavigationColorsHaveReadableLightDarkAndDistinctRoles(t *testing.T) {
 	}{
 		{"exit", "Exit", navExitColor},
 		{"refresh", "Refresh", navFreshColor},
-		{"diagnostics", "Status", navInfoColor},
 		{"details", "Details", navInfoColor},
 		{"back", "Back", navBackColor},
-		{"sync", "Synchronize", navSyncColor},
 		{"sharing", "Sharing", navActionColor},
 		{"shared", "Shared", navActionColor},
 		{"isolated", "Isolated", navWarnColor},
@@ -99,8 +112,8 @@ func TestNavigationColorsHaveReadableLightDarkAndDistinctRoles(t *testing.T) {
 
 func TestNavigationColoredSelectKeepsPlainSearchableKeysAndWidths(t *testing.T) {
 	options := []huh.Option[string]{
-		huh.NewOption("MCP servers  ·  0 configured", "mcp"),
-		huh.NewOption("Refresh configuration", "refresh"),
+		huh.NewOption("MCP servers  ·  0", "mcp"),
+		huh.NewOption("Refresh", "refresh"),
 		huh.NewOption("Exit", "exit"),
 	}
 	var selected string
@@ -133,7 +146,7 @@ func TestNavigationColoredSelectKeepsPlainSearchableKeysAndWidths(t *testing.T) 
 	_, _ = colored.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
 	_, _ = colored.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("0")})
 	filtered := colored.View()
-	if !strings.Contains(filtered, "0 configured") || strings.Contains(filtered, "Refresh configuration") || strings.Contains(filtered, "Exit") {
+	if !strings.Contains(filtered, "MCP servers  ·  0") || strings.Contains(filtered, "Refresh") || strings.Contains(filtered, "Exit") {
 		t.Fatalf("filtering by 0 included unrelated ANSI-colored choices: %q", filtered)
 	}
 }
@@ -143,7 +156,7 @@ func TestAccessibleNavigationDoesNotEmitANSICodesOrExtraBlankLines(t *testing.T)
 	t.Setenv("AGENTCFG_ACCESSIBLE", "1")
 	root := t.TempDir()
 	var output bytes.Buffer
-	if err := RunList(context.Background(), root, terminalByteReader{strings.NewReader("5\n")}, &output); err != nil {
+	if err := RunList(context.Background(), root, strings.NewReader("6\n"), &output); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(output.String(), "\x1b[") {
