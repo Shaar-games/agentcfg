@@ -54,6 +54,8 @@ agentcfg sync           # Preview changes to native harness configuration
 
 `init` asks before creating canonical files, then offers a separate preview and confirmation before native sync. `init --plain` is read-only; `init --yes` creates **canonical files only**.
 
+Opening `agentcfg config` before setup offers to run `init`. Use `agentcfg restore --plain` to preview recovery to the pre-init state, then `agentcfg restore` to confirm. Native files are checked before restoration; canonical sources and backups are archived. [Recovery details](docs/cli.md#agentcfg-restore-return-to-the-pre-init-state).
+
 Use `agentcfg mcp`, `agentcfg skill` or `agentcfg harness` to jump directly to a section; plural aliases work too. `--plain` gives noninteractive output where supported.
 
 ## Browse the configuration

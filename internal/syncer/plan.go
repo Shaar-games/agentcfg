@@ -46,6 +46,7 @@ type manifest struct {
 }
 
 type Plan struct {
+	extraPreflight        func() error
 	Changes               []Change `json:"changes"`
 	Warnings              []string `json:"warnings"`
 	root, base, statePath string

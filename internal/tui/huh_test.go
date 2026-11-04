@@ -146,12 +146,12 @@ func TestHuhDefaultOpensCheckboxListWithoutMenu(t *testing.T) {
 	if err := Run(context.Background(), root, terminalByteReader{strings.NewReader("0\n")}, &rendered); err != nil {
 		t.Fatal(err)
 	}
-	for _, label := range []string{"Harness availability", "Claude Code", "Codex", "Cursor", "Confirm selection"} {
+	for _, label := range []string{"Harness availability", "Claude Code", "Codex", "Cursor", "Confirm selection", "Back"} {
 		if !strings.Contains(rendered.String(), label) {
 			t.Fatalf("missing checkbox content %q: %s", label, rendered.String())
 		}
 	}
-	for _, unexpected := range []string{"MCP servers", "Exit", "Back"} {
+	for _, unexpected := range []string{"MCP servers", "Exit"} {
 		if strings.Contains(rendered.String(), unexpected) {
 			t.Fatalf("unexpected intermediate menu %q: %s", unexpected, rendered.String())
 		}

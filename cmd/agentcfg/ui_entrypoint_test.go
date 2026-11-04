@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agentcfg/internal/config"
 	"bytes"
 	"context"
 	"os"
@@ -63,6 +64,9 @@ func TestConfigOpensCompactHuhMenu(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	if err := writeInitialSources(home, config.Settings{Harnesses: []string{}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{{"config"}} {
 		var rendered, diagnostics bytes.Buffer
 		if err := run(context.Background(), args, strings.NewReader("6\n"), &rendered, &diagnostics); err != nil {

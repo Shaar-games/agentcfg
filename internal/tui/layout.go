@@ -16,7 +16,7 @@ const visibleMenuOptions = 10
 // from the last item to Back, and accessible numbering never contains spacers.
 func padNavigationBack(field *huh.Select[string], options []huh.Option[string], rows int) string {
 	view := field.View()
-	if len(options) == 0 || len(options) > visibleMenuOptions || options[len(options)-1].Value != "back" || field.GetFiltering() {
+	if len(options) == 0 || len(options) > visibleMenuOptions || !isTerminalAction(options[len(options)-1].Value) || field.GetFiltering() {
 		return view
 	}
 	lines := strings.Split(view, "\n")
@@ -28,6 +28,15 @@ func padNavigationBack(field *huh.Select[string], options []huh.Option[string], 
 	probe := *field
 	probe.Height(1)
 	header := lipgloss.Height(probe.View()) - 1
+	return padBottomAction(view, header, rows)
+}
+
+func isTerminalAction(id string) bool { return id == "back" || id == "exit" }
+
+// All bottom actions use the same row budget and visual-only spacing.
+func padBottomAction(view string, header, rows int) string {
+	lines := strings.Split(view, "\n")
+	back := len(lines) - 1
 	if rows <= 0 {
 		rows = visibleMenuOptions
 	}
@@ -50,27 +59,51 @@ func padNavigationBack(field *huh.Select[string], options []huh.Option[string], 
 // Measure its native one-row view to reserve that header space without copying
 // Huh's wrapping logic. Short lists keep their natural height. All string
 // selectors, including the color wrapper and wizard multiselects, share this.
-func sizeMenuField(field huh.Field) {
-	var probe huh.Field
+func probeMenuField(field huh.Field) huh.Field {
+
 	switch f := field.(type) {
 	case *huh.Select[string]:
 		copy := *f
-		probe = &copy
+		return &copy
 	case *navigationField:
 		copy := *f.Select
-		probe = &copy
+		return &copy
+	case *backMultiSelect:
+		copy := *f.MultiSelect
+		return &copy
 	case *huh.MultiSelect[string]:
 		copy := *f
-		probe = &copy
+		return &copy
 	default:
+		return nil
+	}
+}
+
+func menuHeaderHeight(field huh.Field) int {
+	probe := probeMenuField(field)
+	if probe == nil {
+		return 0
+	}
+	probe.WithHeight(1)
+	return lipgloss.Height(probe.View()) - 1
+}
+
+func sizeMenuField(field huh.Field, rows int) {
+	if note, ok := field.(*scrollableNote); ok {
+		note.WithHeight(rows)
 		return
 	}
+	probe := probeMenuField(field)
+	if probe == nil {
+		return
+	}
+
 	probe.WithHeight(0)
 	_, _ = probe.Update(nil)
 	natural := lipgloss.Height(probe.View())
 	probe.WithHeight(1)
 	headerAndRow := lipgloss.Height(probe.View())
-	limit := headerAndRow + visibleMenuOptions - 1
+	limit := headerAndRow + rows - 1
 	if natural <= limit {
 		// A positive Huh Select height resets its viewport offset to the
 		// cursor on every update, even when every option fits. Natural height
@@ -97,14 +130,12 @@ func sizeMenuField(field huh.Field) {
 
 // Reserve the wrapped header, Huh footer and renderer's final newline before
 // filling the remaining option area. Blank space must never trigger overflow.
-func sizeNavigationRows(nav *navigationField, group *huh.Group, terminalHeight int) {
-	nav.optionRows = visibleMenuOptions
+func sizeNavigationRows(nav bottomActionLayout, group *huh.Group, terminalHeight int) {
+	nav.setOptionRows(visibleMenuOptions)
 	if terminalHeight <= 0 {
 		return
 	}
-	probe := *nav.Select
-	probe.Height(1)
-	header := lipgloss.Height(probe.View()) - 1
+	header := nav.headerHeight()
 	chrome := header + 2
 	if text := group.Header(); text != "" {
 		chrome += lipgloss.Height(text)
@@ -112,5 +143,18 @@ func sizeNavigationRows(nav *navigationField, group *huh.Group, terminalHeight i
 	if text := group.Footer(); text != "" {
 		chrome += lipgloss.Height(text) + 1
 	}
-	nav.optionRows = max(1, min(visibleMenuOptions, terminalHeight-chrome))
+	nav.setOptionRows(max(1, min(visibleMenuOptions, terminalHeight-chrome)))
 }
+
+// Both single-choice actions and checkbox menus reserve the same bottom area.
+type bottomActionLayout interface {
+	headerHeight() int
+	setOptionRows(int)
+}
+
+func (s *navigationField) headerHeight() int {
+	probe := *s.Select
+	probe.Height(1)
+	return lipgloss.Height(probe.View()) - 1
+}
+func (s *navigationField) setOptionRows(rows int) { s.optionRows = rows }

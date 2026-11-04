@@ -6,7 +6,22 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 )
+
+// SameInventory compares discoveries, not scanner counters or volatile stat
+// metadata (directory times, Windows stat caches). Identity and raw source
+// fingerprints remain part of the comparison; callers also Revalidate before
+// importing so an actual source edit or home replacement is still refused.
+func (p *Plan) SameInventory(other *Plan) bool {
+	if p == nil || other == nil || p.homeIdentity == nil || other.homeIdentity == nil || !os.SameFile(p.homeIdentity, other.homeIdentity) {
+		return false
+	}
+	return p.Home == other.Home && reflect.DeepEqual(p.Harnesses, other.Harnesses) &&
+		reflect.DeepEqual(p.Servers, other.Servers) && reflect.DeepEqual(p.Skills, other.Skills) &&
+		reflect.DeepEqual(p.Warnings, other.Warnings) && reflect.DeepEqual(p.sourceHashes, other.sourceHashes) &&
+		reflect.DeepEqual(p.ambiguousSourceHashes, other.ambiguousSourceHashes)
+}
 
 // SourceSHA256 returns the raw MCP file hash captured during Discover. Both the
 // native spelling and its root-resolved/target-resolved spellings are captured.

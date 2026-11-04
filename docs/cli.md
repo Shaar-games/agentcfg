@@ -2,7 +2,11 @@
 
 `agentcfg` without arguments (or `agentcfg help`) prints command help without
 editing configuration. All canonical sources live under `~/.agentcfg/`.
-The interactive configuration entry point is `agentcfg config`.
+The interactive configuration entry point is `agentcfg config`. If the canonical
+settings and MCP files are missing, it offers to run initialization first.
+Declining or cancelling that prompt writes nothing. If an older setup is only
+partial and has never synchronized native files, the prompt offers to archive
+its existing sources before initialization; it never merges or overwrites them.
 
 ## Direct configuration commands
 
@@ -38,12 +42,18 @@ sync confirmation.
 Menus show up to **ten option rows** before native Huh scrolling. Short lists
 stay fully visible, and checkbox menus open at the first option while retaining
 all prechecked values. Titles and wrapped descriptions have their own space.
-In short navigation menus, **Back** occupies the tenth option row, separated
-from the preceding items by visual space. Arrow keys skip that space directly;
+In short navigation menus, **Back** (or **Exit** in the main menu) occupies the
+tenth option row, separated from the preceding items by visual space. Arrow keys skip that space directly;
 it adds no selectable entries or numbered accessible choices.
 The empty space shrinks on smaller terminals so it does not cause scrolling.
-If the terminal is too small for this layout, Huh shows its complete numbered
-accessible list. Set `AGENTCFG_ACCESSIBLE=1` to request that mode explicitly.
+The Harnesses checkbox screen also has a separate **Back** action: move below
+the last checkbox or press Esc/Tab to focus it, then Enter to discard pending
+changes and return. Enter on a checkbox still reviews the selection. Accessible
+numbered mode accepts `b` followed by Enter to return without saving.
+Import lists and long review notes in `init` also use a viewport of at most
+ten rows. Smaller terminals reduce that viewport while preserving native
+scrolling and every selection. Only a terminal too small for even one content
+row plus its help falls back to Huh's complete accessible list. Set `AGENTCFG_ACCESSIBLE=1` to request that mode explicitly.
 
 Status columns align by terminal cell width, including wide Unicode labels.
 Colors distinguish actions, information and warnings; `NO_COLOR` or
@@ -154,3 +164,32 @@ executable, while `agentcfg version` prints the current version.
 See the [canonical configuration](configuration.md) and
 [synchronization safety](synchronization.md) references for data formats,
 ownership tracking and conflict handling.
+
+## `agentcfg restore`: return to the pre-init state
+
+```sh
+agentcfg restore --plain  # Read-only recovery preview
+agentcfg restore          # Review and confirm in an interactive terminal
+agentcfg restore --yes    # Explicitly approve recovery without prompts
+```
+
+New initialization writes a recovery marker alongside the canonical files.
+The first native synchronization captures the files and skill trees it is
+about to replace, before changing any native destination. Restoration reuses
+sync's preimage checks, backups and rollback. It restores existing native MCP
+configuration byte-for-byte, restores original skill directories, and removes
+native destinations created by that initial synchronization.
+
+The entire `~/.agentcfg/` directory, including later canonical edits, original
+backups and recovery data, moves to `~/.agentcfg-restored-<timestamp>/`.
+No canonical content is deleted. After recovery, `agentcfg init` can run again.
+Native files must still match their recorded initialization output (or already
+be back at their original state). A manual native edit or a later sync that
+changed that output blocks recovery before any native write; it is never
+silently overwritten.
+
+A partial or canonical-only setup made by an older version can also be
+archived if there is no native sync manifest or backup history. Older setups
+that have already synchronized native files but have no recovery marker are
+refused: the command cannot prove their pre-init state. Their existing backups
+remain in `~/.agentcfg/backups/` for deliberate manual recovery.

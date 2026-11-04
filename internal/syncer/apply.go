@@ -113,6 +113,11 @@ func (p *Plan) checkScopeIdentity() error {
 }
 
 func (p *Plan) preflight() error {
+	if p.extraPreflight != nil {
+		if err := p.extraPreflight(); err != nil {
+			return err
+		}
+	}
 	if err := p.checkScopeIdentity(); err != nil {
 		return err
 	}
@@ -140,6 +145,11 @@ func (p *Plan) preflight() error {
 }
 
 func (p *Plan) checkChange(change Change) error {
+	if p.extraPreflight != nil {
+		if err := p.extraPreflight(); err != nil {
+			return err
+		}
+	}
 	if err := p.checkScopeIdentity(); err != nil {
 		return err
 	}
@@ -253,6 +263,9 @@ func (p *Plan) Apply() error {
 		return errors.New("another sync is already applying changes to this scope")
 	}
 	if err := p.preflight(); err != nil {
+		return err
+	}
+	if err := p.captureInitRestore(); err != nil {
 		return err
 	}
 	backupRoot := filepath.Join(lockDir, "backups", time.Now().UTC().Format("20060102T150405.000000000"))

@@ -79,6 +79,9 @@ func writeInitialSourcesContext(ctx context.Context, home string, settings confi
 	if err := writeNewJSON(filepath.Join(staged, "mcp.json"), map[string]any{"mcpServers": servers}); err != nil {
 		return err
 	}
+	if err := syncer.CreateInitRestorePoint(stagingHome); err != nil {
+		return err
+	}
 	for _, skill := range skills {
 		if err := ctx.Err(); err != nil {
 			return err

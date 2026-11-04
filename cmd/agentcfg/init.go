@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"agentcfg/internal/bootstrap"
@@ -40,6 +42,13 @@ func initialize(ctx context.Context, flags *flag.FlagSet, root *string, args []s
 		}
 		if _, err := config.ValidateUserHarnesses(opts.Harnesses); err != nil {
 			return fmt.Errorf("init harnesses: %w", err)
+		}
+	}
+	if !opts.Plain {
+		if _, err := os.Lstat(filepath.Join(*root, ".agentcfg")); err == nil {
+			return errors.New("canonical configuration already exists; use agentcfg config, or agentcfg restore before initializing again")
+		} else if !os.IsNotExist(err) {
+			return err
 		}
 	}
 	plan, err := bootstrap.Discover(*root)

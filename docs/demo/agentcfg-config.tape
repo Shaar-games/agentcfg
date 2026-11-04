@@ -22,6 +22,15 @@ Type "agentcfg config"
 Enter
 Wait+Screen /Configuration/
 Sleep 2880 ms
+# Open Harnesses and use its separate bottom Back action without changing checks.
+Enter
+Wait+Screen /Antigravity/
+Sleep 3500 ms
+Tab
+Sleep 1000 ms
+Enter
+Wait+Screen /Configuration/
+Sleep 2800 ms
 # Open MCP servers from the main Select menu.
 Down
 Enter

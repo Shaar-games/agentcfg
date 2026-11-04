@@ -52,6 +52,7 @@ Configuration:
 
 Setup and inspection:
   init                  Discover existing harnesses, then confirm setup and sync
+  restore               Restore pre-init native settings and archive agentcfg sources
   list                  Browse configured MCP servers, skills and harnesses
   validate              Validate the configuration
   sync                  Preview changes; --apply synchronizes native settings
@@ -119,7 +120,9 @@ Use agentcfg <command> --help for options.`)
 		if err := parse(flags, args[1:]); err != nil {
 			return helpResult(err)
 		}
-		return tui.RunMenu(ctx, home, input, output)
+		return configure(ctx, home, input, output)
+	case "restore":
+		return restore(ctx, flags, home, args[1:], input, output)
 	case "init":
 		return initialize(ctx, flags, root, args[1:], input, output)
 	case "sync":

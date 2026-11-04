@@ -101,3 +101,35 @@ func TestBackSpacingShrinksToFitSmallTerminals(t *testing.T) {
 		}
 	}
 }
+
+func TestInitImportMultiSelectScrollsNativelyAfterTenRows(t *testing.T) {
+	options := longNavigationOptions(25)
+	for i := range options {
+		options[i] = options[i].Selected(true)
+	}
+	var selected []string
+	field := huh.NewMultiSelect[string]().Title("Import existing MCP servers").Description("Choose definitions to import.").Options(options...).Value(&selected)
+	form, group := newNaturalForm(strings.NewReader(""), io.Discard, field)
+	_ = form.Init()
+	for _, height := range []int{24, 12, 24} {
+		_, _ = form.Update(tea.KeyMsg{Type: tea.KeyHome})
+		var fallback bool
+		msg := updateNaturalWindowSize(form, group, []huh.Field{field}, tea.WindowSizeMsg{Width: 90, Height: height}, &fallback)
+		if _, ok := msg.(tea.WindowSizeMsg); !ok || fallback {
+			t.Fatalf("long init list fell back instead of scrolling at height %d", height)
+		}
+		_, _ = form.Update(msg)
+		if lipgloss.Height(form.View()) >= height || !strings.Contains(form.View(), "CHOICE_00") || strings.Contains(form.View(), "CHOICE_10") {
+			t.Fatalf("init viewport does not fit its terminal:\n%s", form.View())
+		}
+		if height == 24 && !strings.Contains(form.View(), "CHOICE_09") {
+			t.Fatal("fewer than ten rows in a large terminal")
+		}
+		for range 24 {
+			_, _ = form.Update(tea.KeyMsg{Type: tea.KeyDown})
+		}
+		if !strings.Contains(form.View(), "CHOICE_24") || len(selected) != 25 {
+			t.Fatal("scrolling lost selections or made the last import unreachable")
+		}
+	}
+}

@@ -172,7 +172,7 @@ func TestNativeResizeIntoOverflowFallsBackToCompleteHuhAccessibleList(t *testing
 	if selected != "id-23" {
 		t.Fatalf("failed to highlight the last option before resize: %q", selected)
 	}
-	msg := updateNaturalWindowSize(form, group, []huh.Field{field}, tea.WindowSizeMsg{Width: 33, Height: 5}, &fallback)
+	msg := updateNaturalWindowSize(form, group, []huh.Field{field}, tea.WindowSizeMsg{Width: 33, Height: 2}, &fallback)
 	if _, ok := msg.(tea.QuitMsg); !ok || !fallback {
 		t.Fatalf("tiny terminal must quit native rendering before it clips or scrolls: %T, flag=%t", msg, fallback)
 	}

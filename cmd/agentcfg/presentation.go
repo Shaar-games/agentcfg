@@ -38,6 +38,13 @@ func terminalNote(ctx context.Context, input io.Reader, output io.Writer, title,
 
 func terminalConfirm(ctx context.Context, input io.Reader, output io.Writer, title, description string) (bool, error) {
 	confirmed := false
+	// Huh's accessible Confirm prints only its title, not Description. Keep
+	// the operation visible even though the shared title is "Are you sure?".
+	if !terminalPresentation(input, output, false) || os.Getenv("AGENTCFG_ACCESSIBLE") == "1" {
+		if _, err := fmt.Fprintln(output, strings.TrimSpace(title+"\n"+description)); err != nil {
+			return false, err
+		}
+	}
 	err := terminalForm(ctx, input, output, terminalConfirmation(title, description, &confirmed))
 	if errors.Is(err, huh.ErrUserAborted) {
 		return false, nil

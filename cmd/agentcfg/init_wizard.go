@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -159,7 +158,7 @@ func runInitWizard(ctx context.Context, home string, proposal initProposal, opts
 		if err != nil {
 			return fmt.Errorf("recheck native discovery before initialization: %w", err)
 		}
-		if !reflect.DeepEqual(proposal.Inventory, current) {
+		if !proposal.Inventory.SameInventory(current) {
 			return errors.New("native harness configuration changed after the init preview; rerun agentcfg init before applying")
 		}
 	}

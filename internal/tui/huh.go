@@ -64,6 +64,7 @@ func RunForm(ctx context.Context, input io.Reader, output io.Writer, fields ...h
 	if output == nil {
 		output = io.Discard // A nil writer must not use the process stdout.
 	}
+	fields = scrollNotes(fields)
 	reader, readState := formInput(input)
 	writer, writeState := formOutput(output)
 	var resizedTooSmall bool
@@ -123,6 +124,14 @@ func RunForm(ctx context.Context, input io.Reader, output io.Writer, fields ...h
 	if writeState != nil && writeState.err != nil {
 		return writeState.err
 	}
+	// Huh's accessible form runner discards individual field errors. Honor an
+	// explicit Back separately so it cannot turn cancellation into a save.
+	for _, field := range fields {
+		if multi, ok := field.(*backMultiSelect); ok && multi.backRequested {
+			return huh.ErrUserAborted
+		}
+	}
+
 	return err
 }
 
@@ -302,8 +311,12 @@ func newNaturalFormWithOverflow(input io.Reader, output io.Writer, overflow *boo
 	form := huh.NewForm(group).WithTheme(Theme())
 	// Checked values are state, not a request to open halfway down a list.
 	for _, field := range fields {
-		if multi, ok := field.(*huh.MultiSelect[string]); ok {
+		switch multi := field.(type) {
+		case *huh.MultiSelect[string]:
 			_, _ = multi.Update(tea.KeyMsg{Type: tea.KeyHome})
+		case *backMultiSelect:
+			multi.form = form
+			_, _ = multi.MultiSelect.Update(tea.KeyMsg{Type: tea.KeyHome})
 		}
 	}
 
@@ -351,12 +364,27 @@ func resizeNaturalForm(form *huh.Form, group *huh.Group, fields []huh.Field, wid
 		form.WithWidth(width)
 	}
 	for _, field := range fields {
-		sizeMenuField(field)
-		if nav, ok := field.(*navigationField); ok {
-			available := 0
-			if len(terminalHeight) > 0 {
-				available = terminalHeight[0]
+		available := 0
+		if len(terminalHeight) > 0 {
+			available = terminalHeight[0]
+		}
+		rows := visibleMenuOptions
+		if available > 0 {
+			chrome := menuHeaderHeight(field) + 2
+			if text := group.Header(); text != "" {
+				chrome += lipgloss.Height(text)
 			}
+			if text := group.Footer(); text != "" {
+				chrome += lipgloss.Height(text) + 1
+			}
+			rows = max(1, min(visibleMenuOptions, available-chrome))
+		}
+		bodyRows := rows
+		if _, ok := field.(*backMultiSelect); ok {
+			bodyRows = max(1, rows-1)
+		}
+		sizeMenuField(field, bodyRows)
+		if nav, ok := field.(bottomActionLayout); ok {
 			sizeNavigationRows(nav, group, available)
 		}
 	}
@@ -532,11 +560,11 @@ func (s interfaceSession) configureHarnesses() error {
 			Selected(slices.Contains(cfg.Settings.Harnesses, h.ID)))
 	}
 	var selected []string
-	err = s.form(huh.NewMultiSelect[string]().
+	err = s.form(s.multiSelectWithBack(huh.NewMultiSelect[string]().
 		Title("Harness availability").
 		Description("Choose the harnesses to enable. Changes are reviewed before saving.").
 		Options(choices...).
-		Value(&selected))
+		Value(&selected), choices))
 	if isCancelled(err) {
 		return nil
 	}

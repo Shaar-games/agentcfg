@@ -11,12 +11,13 @@ import (
 var Shells = []string{"bash", "zsh", "fish", "powershell", "pwsh"}
 
 var Commands = []string{
-	"help", "version", "config", "init", "harness", "harnesses",
+	"help", "version", "config", "init", "restore", "harness", "harnesses",
 	"skill", "skills", "mcp", "mcps", "completion", "list", "validate",
 	"sync", "connect", "auth", "update", "status", "stop", "daemon",
 }
 
 var options = map[string][]string{
+	"restore":    {"--yes", "--plain", "--help"},
 	"init":       {"--harnesses", "--yes", "--plain", "--help"},
 	"harness":    {"--plain", "--help"},
 	"harnesses":  {"--plain", "--help"},
@@ -35,6 +36,9 @@ var options = map[string][]string{
 	"update":     {"--help"},
 	"config":     {"--help"},
 }
+
+// Shared argument groups keep every shell in step when commands are added.
+var parameterGroups = []string{"init", "restore", "harness|harnesses", "skill|skills", "mcp|mcps", "status", "list", "validate", "sync", "stop", "connect", "auth", "completion", "update", "config"}
 
 func Generate(shell string, out io.Writer) error {
 	var body string
@@ -63,7 +67,7 @@ func bash() string {
 	b.WriteString("    if (( COMP_CWORD == 1 )); then\n        COMPREPLY=( $(compgen -W '")
 	b.WriteString(strings.Join(Commands, " "))
 	b.WriteString("' -- \"$cur\") )\n        return\n    fi\n    case \"$command\" in\n")
-	for _, label := range []string{"init", "harness|harnesses", "skill|skills", "mcp|mcps", "status", "list", "validate", "sync", "stop", "connect", "auth", "completion", "update", "config"} {
+	for _, label := range parameterGroups {
 		key := strings.Split(label, "|")[0]
 		fmt.Fprintf(&b, "        %s) COMPREPLY=( $(compgen -W '%s' -- \"$cur\") ) ;;\n", label, strings.Join(options[key], " "))
 	}
@@ -77,7 +81,7 @@ func zsh() string {
 	b.WriteString(strings.Join(Commands, " "))
 	b.WriteString(")\n    else\n        case \"$")
 	b.WriteString("{words[2]}\" in\n")
-	for _, label := range []string{"init", "harness|harnesses", "skill|skills", "mcp|mcps", "status", "list", "validate", "sync", "stop", "connect", "auth", "completion", "update", "config"} {
+	for _, label := range parameterGroups {
 		key := strings.Split(label, "|")[0]
 		fmt.Fprintf(&b, "            %s) suggestions=(%s) ;;\n", label, strings.Join(options[key], " "))
 	}
@@ -90,7 +94,8 @@ func fish() string {
 	var b strings.Builder
 	b.WriteString("# Fish completion for agentcfg.\ncomplete -c agentcfg -f\n")
 	fmt.Fprintf(&b, "complete -c agentcfg -n 'test (count (commandline -opc)) -eq 1' -a '%s'\n", strings.Join(Commands, " "))
-	for _, label := range []string{"init", "harness harnesses", "skill skills", "mcp mcps", "status", "list", "validate", "sync", "stop", "connect", "auth", "completion", "update", "config"} {
+	for _, group := range parameterGroups {
+		label := strings.ReplaceAll(group, "|", " ")
 		key := strings.Fields(label)[0]
 		fmt.Fprintf(&b, "complete -c agentcfg -n '__fish_seen_subcommand_from %s' -a '%s'\n", label, strings.Join(options[key], " "))
 	}
@@ -102,7 +107,10 @@ func powershell() string {
 	b.WriteString("# PowerShell 5.1+ / pwsh completion for agentcfg.\nRegister-ArgumentCompleter -Native -CommandName agentcfg -ScriptBlock {\n")
 	b.WriteString("    param($wordToComplete, $commandAst, $cursorPosition)\n")
 	fmt.Fprintf(&b, "    $commands = @('%s')\n    $parameters = @{\n", strings.Join(Commands, "','"))
-	for _, key := range []string{"init", "harness", "harnesses", "skill", "skills", "mcp", "mcps", "status", "list", "validate", "sync", "stop", "connect", "auth", "completion", "update", "config"} {
+	for _, key := range Commands {
+		if _, ok := options[key]; !ok {
+			continue
+		}
 		fmt.Fprintf(&b, "        '%s' = @('%s')\n", key, strings.Join(options[key], "','"))
 	}
 	b.WriteString("    }\n    $tokens = @($commandAst.CommandElements)\n    $candidates = $commands\n")
