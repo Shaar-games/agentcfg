@@ -29,6 +29,9 @@ jobs:
           cache: true
       - name: Static checks
         run: go vet ./...
+      - name: Release CI gate checks
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/test-release-ci.sh
       - name: Go formatting
         if: runner.os == 'Linux'
         shell: bash

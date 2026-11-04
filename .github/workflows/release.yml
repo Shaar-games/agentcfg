@@ -19,27 +19,26 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify before publishing (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Match CI's supported macOS 15 pool while macOS 26 runners have
-        # acquisition failures; no verification steps are skipped.
-        os: [ubuntu-latest, windows-latest, macos-15-intel]
+    name: Verify successful CI for the exact release commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
+      # The dispatched workflow may contain a recovery fix absent from an
+      # existing release tag. Keep its verifier separate from tagged sources.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-      - run: go vet ./...
-      - run: go test -shuffle=on -count=1 -timeout=180s ./...
-      - name: Race detector
-        if: runner.os == 'Linux'
-        run: go test -race -count=1 -timeout=180s ./...
+          path: release-source
+      - name: Require the complete successful CI matrix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: bash .github/scripts/verify-release-ci.sh "$(git -C release-source rev-parse HEAD)"
 
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}

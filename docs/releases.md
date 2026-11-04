@@ -62,7 +62,8 @@ replace both. Signed provenance/attestations are potential future enhancements.
 
 1. Confirm the CI matrix is green on the intended commit.
 2. Create and push an annotated semantic version tag such as `v0.2.0`.
-3. `.github/workflows/release.yml` verifies, builds all six targets, generates
+3. `.github/workflows/release.yml` verifies the successful complete CI matrix
+   for that exact commit, builds all six targets, generates
    `SHA256SUMS`, and attaches the assets to a GitHub Release.
 4. The release workflow runs a post-publication installer smoke matrix on
    Linux, macOS and Windows, downloading real release artifacts and checking
@@ -73,6 +74,11 @@ The release workflow also accepts a manual trigger with an existing tag.
 To retry a release after a workflow-only fix, dispatch the current `main`
 workflow with that existing tag. Every build and installer still checks out
 the immutable tag; published assets are never overwritten.
+The release gate requires a completed successful trusted CI run for the exact
+tagged commit, including Linux race/format checks and all Linux, Windows and
+macOS tests, builds and help checks. It rejects missing, skipped or failed
+checks, unrelated commits and pull-request runs. Reusing this completed matrix
+avoids acquiring a second macOS runner before building the same verified code.
 Publishing requires GitHub Actions `contents: write` permission only for
 the publish job. Never publish artifacts built from uncommitted local changes.
 
