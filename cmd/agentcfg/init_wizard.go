@@ -24,6 +24,7 @@ type initProposal struct {
 	ServerSources     map[string]string
 	Skills            []skillImport
 	Warnings          []string
+	NativeServers     []string
 }
 
 type initOptions struct {
@@ -86,6 +87,9 @@ func runInitWizard(ctx context.Context, home string, proposal initProposal, opts
 	fmt.Fprintln(&preview, "Canonical target: ~/.agentcfg/ (single source of truth)")
 	fmt.Fprintln(&preview, "MCPs use the agentcfg broker; skills are moved here and copied to selected harnesses.")
 	if opts.Plain {
+		for _, name := range proposal.NativeServers {
+			fmt.Fprintf(&preview, "Kept native: %s (Codex desktop session runtime)\n", name)
+		}
 		for _, name := range names {
 			fmt.Fprintf(&preview, "MCP: %s (%s)\n", name, proposal.ServerSources[name])
 		}
@@ -108,7 +112,7 @@ func runInitWizard(ctx context.Context, home string, proposal initProposal, opts
 			return err
 		}
 	} else {
-		confirmed, err := terminalConfirm(ctx, input, output, "Initialize agentcfg?", initReview(configured, len(servers), len(skills), len(proposal.Warnings)))
+		confirmed, err := terminalConfirm(ctx, input, output, "Initialize agentcfg?", initReview(configured, len(servers), len(skills), len(proposal.Warnings), len(proposal.NativeServers)))
 		if err != nil {
 			return err
 		}
@@ -159,10 +163,13 @@ func asList(values []string) string {
 	return strings.Join(values, ", ")
 }
 
-func initReview(harnesses []string, servers, skills, skipped int) string {
+func initReview(harnesses []string, servers, skills, skipped int, native ...int) string {
 	var summary strings.Builder
 	fmt.Fprintf(&summary, "%-10s%s\n", "Harnesses", asList(tui.HarnessNames(harnesses)))
 	fmt.Fprintf(&summary, "%-10s%d\n%-10s%d", "MCPs", servers, "Skills", skills)
+	if len(native) > 0 && native[0] > 0 {
+		fmt.Fprintf(&summary, "\n%-10s%d", "Native", native[0])
+	}
 	if skipped > 0 {
 		fmt.Fprintf(&summary, "\n%-10s%d\nDetails: agentcfg init --plain", "Skipped", skipped)
 	}

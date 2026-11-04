@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +16,9 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tailscale/hujson"
 )
+
+var errInactiveServer = errors.New("a disabled native server was skipped")
+var errNativeRuntime = errors.New("Codex desktop session runtime is kept in its native configuration")
 
 func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 	path, err := anchoredPath(root, source)
@@ -83,14 +87,21 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 		}
 		plan.budget.servers--
 		if disabled[name] {
-			plan.warn(target.name, source, "a disabled native server was skipped")
+			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: errInactiveServer.Error(), Kind: WarningInactive})
 			continue
 		}
 		server, warnings, err := convertServer(root, target.name, name, entries[name])
 		if err != nil {
 			// Errors are intentionally constant descriptions, never parser errors
 			// or native values that could contain credentials.
-			plan.warn(target.name, source, err.Error())
+			var kind WarningKind
+			if errors.Is(err, errInactiveServer) {
+				kind = WarningInactive
+			}
+			if errors.Is(err, errNativeRuntime) {
+				kind = WarningNativeRuntime
+			}
+			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: err.Error(), Kind: kind})
 			continue
 		}
 		server.Source = source
@@ -121,12 +132,15 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (co
 				return fail("a native enable/disable flag is invalid")
 			}
 			if key == "enabled" && !flag || key == "disabled" && flag {
-				return fail("a disabled native server was skipped")
+				return config.Server{}, nil, errInactiveServer
 			}
 		}
 	}
 	if fields["enabled"] != nil && fields["disabled"] != nil {
 		return fail("a native server has ambiguous enable/disable flags")
+	}
+	if codexDesktopRuntime(harness, name, fields) {
+		return config.Server{}, nil, errNativeRuntime
 	}
 	allowed := map[string]bool{"type": true, "command": true, "cwd": true, "enabled": true, "disabled": true}
 	envKey, headerKey, urlKey := "env", "headers", "url"
@@ -148,10 +162,14 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (co
 	default:
 		allowed["args"], allowed["env"], allowed["url"], allowed["headers"] = true, true, true, true
 	}
-	for key := range fields {
+	var unsupported []string
+	for _, key := range keys(fields) {
 		if !allowed[key] {
-			return fail("a native server has credentials or unsupported options; manual import required")
+			unsupported = append(unsupported, fmt.Sprintf("%q", key))
 		}
+	}
+	if len(unsupported) > 0 {
+		return fail("unsupported native option(s): " + strings.Join(unsupported, ", ") + "; manual import required")
 	}
 	kind, err := stringValue(fields["type"])
 	if err != nil {
@@ -213,10 +231,7 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (co
 		if err = validateProcess(root, &server); err != nil {
 			return fail(err.Error())
 		}
-		if fields["cwd"] == nil {
-			warnings = append(warnings, "working directory defaults to the supplied home; review any relative command arguments")
-		}
-		if !within(root.Name(), server.Cwd) || filepath.IsAbs(server.Command) && !within(root.Name(), server.Command) {
+		if server.Cwd != "" && !within(root.Name(), server.Cwd) || filepath.IsAbs(server.Command) && !within(root.Name(), server.Command) {
 			warnings = append(warnings, "external executable/cwd paths are retained as references; existence is checked by canonical loading, not discovery")
 		}
 	} else {

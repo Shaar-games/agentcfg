@@ -21,6 +21,17 @@ Après un init réussi, `~/.agentcfg/` est la seule source de vérité. Les impo
 incomplets ou ambigus bloquent l'initialisation ; un échec de migration tente de
 restaurer l'état natif et archive les sources importées pour permettre un nouvel essai.
 
+Le runtime Windows `node_repl` fourni par l'application Codex reste géré par
+Codex : son exécutable intégré et ses paramètres de pipe privé l'identifient.
+Il ne bloque pas l'import des MCP utilisateur et n'est pas distribué aux autres
+harnesses. `init --plain` le signale séparément ; un MCP utilisateur portant
+simplement le même nom n'est pas exclu.
+
+Un `cwd` absent reste absent des sources canoniques. Le processus MCP hérite du
+dossier du client lors de la connexion ; aucun home n'est ajouté par init. Les
+clients d'un même dossier peuvent partager le processus ; des dossiers différents
+restent des contextes séparés, sauf `cwd` explicite commun.
+
 Les menus d'action et de navigation sont des **Huh Select** : les flèches
 choisissent et **Entrée valide directement**. Les cases à cocher (MultiSelect)
 servent uniquement à choisir plusieurs disponibilités de harnesses, skills

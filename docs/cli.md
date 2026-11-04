@@ -106,6 +106,19 @@ optional synchronization step after successful initialization. JSON/JSONC and
 Codex TOML MCP entries are adopted only with revalidated scanner proofs.
 Original files and skill directories are backed up for `agentcfg restore`.
 
+The app-owned Codex desktop `node_repl` service keeps its native configuration
+and private session pipes. It is listed under `Kept native` in `init --plain`,
+rather than being treated as a failed user MCP import. Ordinary user MCPs named
+`node_repl` are not excluded. Unsupported options are reported by MCP name and
+option name, without printing their values.
+
+Init preserves an explicitly configured `cwd` and does not add the home directory
+when it is absent. Without an explicit `cwd`, a stdio MCP uses the connecting
+harness's working directory. Sharing applies to clients with the same effective
+working directory. After upgrading from an older broker protocol, run
+`agentcfg stop` before reconnecting; status and stop remain compatible with the
+older broker.
+
 Unsupported active MCP definitions, unreadable/nonportable skills and ambiguous
 names block initialization before canonical publication; `init --plain` shows
 the source details. Init must not report success with a partial inventory.

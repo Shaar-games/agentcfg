@@ -22,17 +22,17 @@ import (
 func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
 	path, err := anchoredPath(root, source)
 	if err != nil {
-		plan.warn(harness, source, "skills path changed or escapes the discovery home")
+		plan.warnSkill(harness, source, "skills path changed or escapes the discovery home")
 		return
 	}
 	entries, err := readDir(root, path)
 	if err != nil {
-		plan.warn(harness, source, "skills directory is unreadable or exceeds the entry limit")
+		plan.warnSkill(harness, source, "skills directory is unreadable or exceeds the entry limit")
 		return
 	}
 	for _, entry := range entries {
 		if plan.budget.skills <= 0 || plan.budget.entries <= 0 || plan.budget.bytes <= 0 {
-			plan.warn(harness, source, "discovery skill budget reached; remaining entries require a separate review")
+			plan.warnSkill(harness, source, "discovery skill budget reached; remaining entries require a separate review")
 			break
 		}
 		plan.budget.skills--
@@ -41,7 +41,7 @@ func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
 		native := filepath.Join(source, entry.Name())
 		relative, err := anchoredPath(root, native)
 		if err != nil {
-			plan.warn(harness, native, "skill source is unreadable or escapes the discovery home")
+			plan.warnSkill(harness, native, "skill source is unreadable or escapes the discovery home")
 			continue
 		}
 		resolved := filepath.Join(root.Name(), relative)
@@ -55,7 +55,7 @@ func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
 		if _, err := root.Lstat(filepath.Join(relative, ".agentcfg-origin.json")); err == nil {
 			continue
 		} else if !os.IsNotExist(err) {
-			plan.warn(harness, native, "skill origin marker cannot be inspected")
+			plan.warnSkill(harness, native, "skill origin marker cannot be inspected")
 			continue
 		}
 		if _, err := root.Lstat(filepath.Join(relative, "SKILL.md")); os.IsNotExist(err) {
@@ -63,7 +63,7 @@ func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
 		}
 		fingerprint, treeSHA256, disabled, err := inspectSkill(root, relative, entry.Name(), plan.budget)
 		if err != nil {
-			plan.warn(harness, native, "skill is invalid, nonportable, unreadable, redirected or exceeds discovery limits")
+			plan.warnSkill(harness, native, "skill is invalid, nonportable, unreadable, redirected or exceeds discovery limits")
 			continue
 		}
 		warnings := []string{}

@@ -48,13 +48,14 @@ func checkInitCoverage(inventory *bootstrap.Plan, harnesses []string) error {
 		return nil
 	}
 	for _, warning := range inventory.Warnings {
-		if !slices.Contains(harnesses, warning.Harness) && !strings.Contains(warning.Message, "skill") {
+		if !warning.BlocksInit(harnesses) {
 			continue
 		}
-		if warning.Message == "a disabled native server was skipped" {
-			continue
+		location := warning.Source
+		if warning.Server != "" {
+			location += fmt.Sprintf(" (MCP %q)", warning.Server)
 		}
-		return fmt.Errorf("initialization needs a complete import: %s: %s; inspect agentcfg init --plain", warning.Source, warning.Message)
+		return fmt.Errorf("initialization needs a complete import: %s: %s; inspect agentcfg init --plain", location, warning.Message)
 	}
 	for _, server := range inventory.Servers {
 		if server.Selected {

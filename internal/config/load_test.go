@@ -136,8 +136,8 @@ func TestCanonicalServersSettingsAndOverrides(t *testing.T) {
 	if local.Type != "stdio" || local.Sharing != "isolated" || !reflect.DeepEqual(local.Harnesses, []string{"codex"}) {
 		t.Fatalf("bad server override: %#v", local)
 	}
-	if local.Cwd != config.Root {
-		t.Errorf("canonical cwd = %s, root = %s", local.Cwd, config.Root)
+	if local.Cwd != "" {
+		t.Errorf("absent canonical cwd must remain inherited, got %s", local.Cwd)
 	}
 	remote := config.Servers["remote"]
 	if remote.Type != "streamable-http" || remote.Sharing != "shared" || remote.Headers["X-Literal"] != "${PLUGIN_ROOT}" {

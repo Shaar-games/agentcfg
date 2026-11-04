@@ -1,0 +1,25 @@
+model = "keep-model"
+service_tier = "priority"
+notify = ["keep-notification-command", "turn-ended"]
+
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[mcp_servers.node_repl]
+command = 'C:\Users\fixture\AppData\Local\OpenAI\Codex\runtimes\cua_node\test-runtime\bin\node_repl.exe'
+args = []
+env_vars = ["BROWSER_USE_ACCESS_EXECUTOR_ID", "BROWSER_USE_ACCESS_PIPE_PATH", "BROWSER_USE_ACCESS_VERIFYING_IDENTITY", "CODEX_WINDOWS_REGISTERED_CORE"]
+startup_timeout_sec = 120
+
+[mcp_servers.node_repl.env]
+NODE_REPL_NODE_PATH = 'C:\Users\fixture\AppData\Local\OpenAI\Codex\runtimes\cua_node\test-runtime\bin\node.exe'
+CODEX_CLI_PATH = 'C:\Users\fixture\AppData\Local\OpenAI\Codex\bin\test-build\codex.exe'
+SKY_CUA_NATIVE_PIPE = "1"
+SKY_CUA_NATIVE_PIPE_DIRECTORY = '\\.\pipe\codex-computer-use-private-fixture'
+NODE_REPL_TRUSTED_SERVICES = '{"browser":"private-fixture-service.mjs","sky":"@oai/sky/service"}'
+
+[mcp_servers.portable]
+command = "inert-mcp-fixture"
+
+[projects.'C:\Users\fixture\project']
+trust_level = "trusted"

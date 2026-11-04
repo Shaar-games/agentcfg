@@ -20,7 +20,11 @@ import (
 )
 
 func hello(operation string) wire.Message {
-	return wire.Message{"version": wire.Raw(IPCVersion), "operation": wire.Raw(operation)}
+	version := IPCVersion
+	if operation == "status" || operation == "stop" {
+		version = controlIPCVersion
+	}
+	return wire.Message{"version": wire.Raw(version), "operation": wire.Raw(operation)}
 }
 
 func open(ctx context.Context, root string) (net.Conn, error) {
@@ -226,6 +230,13 @@ func Connect(ctx context.Context, root, name, harness string, input io.Reader, o
 	defer connection.Close()
 	request := hello("connect")
 	request["server"], request["harness"] = wire.Raw(name), wire.Raw(harness)
+	if entry.Type == "stdio" && entry.Cwd == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("read client working directory: %w", err)
+		}
+		request["cwd"] = wire.Raw(cwd)
+	}
 	reader, _, err := exchange(ctx, connection, request)
 	if err != nil {
 		return err

@@ -92,7 +92,12 @@ func TestMCPFixture(t *testing.T) {
 			if params.Name == "exit-fixture" {
 				os.Exit(7)
 			}
-			_ = writer.Write(wire.Result(message.ID(), map[string]any{"content": []any{map[string]string{"type": "text", "text": strconv.Itoa(os.Getpid())}}, "structuredContent": map[string]any{"pid": os.Getpid(), "echo": params.Name}}))
+			result := map[string]any{"pid": os.Getpid(), "echo": params.Name}
+			if params.Name == "working-directory" {
+				cwd, _ := os.Getwd()
+				result["cwd"] = cwd
+			}
+			_ = writer.Write(wire.Result(message.ID(), map[string]any{"content": []any{map[string]string{"type": "text", "text": strconv.Itoa(os.Getpid())}}, "structuredContent": result}))
 		case "ping":
 			_ = writer.Write(wire.Result(message.ID(), map[string]any{}))
 		}
@@ -171,10 +176,13 @@ func startCLIPeer(t *testing.T, binary, root, harness string) *cliPeer {
 	return startCLIPeerCommand(t, binary, root, []string{"connect", "--server", "fixture", "--harness", harness})
 }
 
-func startCLIPeerCommand(t *testing.T, binary, root string, args []string) *cliPeer {
+func startCLIPeerCommand(t *testing.T, binary, root string, args []string, directory ...string) *cliPeer {
 	t.Helper()
 	p := &cliPeer{root: root, done: make(chan error, 1)}
 	p.command = exec.Command(binary, args...)
+	if len(directory) > 0 {
+		p.command.Dir = directory[0]
+	}
 	p.command.Env = append(os.Environ(), "USERPROFILE="+root, "HOME="+root)
 	input, err := p.command.StdinPipe()
 	if err != nil {

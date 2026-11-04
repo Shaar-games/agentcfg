@@ -291,7 +291,7 @@ func resolveCanonicalProcess(server *Server, root string) error {
 		server.Command = resolved
 	}
 	if server.Cwd == "" {
-		server.Cwd = root
+		return nil // Preserve the caller's working directory when unspecified.
 	}
 	if !filepath.IsAbs(server.Cwd) {
 		server.Cwd = filepath.Join(root, server.Cwd)

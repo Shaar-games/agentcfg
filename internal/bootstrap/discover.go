@@ -102,12 +102,12 @@ func Discover(home string) (*Plan, error) {
 				continue
 			}
 			if err != nil {
-				plan.warn(target.name, source, "native skills path is unreadable or escapes the discovery home")
+				plan.warnSkill(target.name, source, "native skills path is unreadable or escapes the discovery home")
 				continue
 			}
 			info, err := root.Stat(path)
 			if err != nil || !info.IsDir() {
-				plan.warn(target.name, source, "native skills path must be a directory")
+				plan.warnSkill(target.name, source, "native skills path must be a directory")
 				continue
 			}
 			harness.Evidence = append(harness.Evidence, source)
@@ -158,4 +158,8 @@ func relativeWithin(root, path string) (string, error) {
 
 func (p *Plan) warn(harness, source, message string) {
 	p.Warnings = append(p.Warnings, Warning{Harness: harness, Source: source, Message: message})
+}
+
+func (p *Plan) warnSkill(harness, source, message string) {
+	p.Warnings = append(p.Warnings, Warning{Harness: harness, Source: source, Message: message, Kind: WarningSkill})
 }

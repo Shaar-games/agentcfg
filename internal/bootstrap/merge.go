@@ -67,7 +67,7 @@ func mergeCandidates(plan *Plan) {
 			skills[index].Selected = false
 			skills[index].Warnings = union(skills[index].Warnings, []string{"different skill trees share this name; select at most one"})
 		}
-		plan.warn("", skills[names[name][0]].Source, "conflicting skill trees were left unselected")
+		plan.warnSkill("", skills[names[name][0]].Source, "conflicting skill trees were left unselected")
 	}
 	sort.Slice(skills, func(i, j int) bool { return skills[i].ID < skills[j].ID })
 	plan.Skills = skills

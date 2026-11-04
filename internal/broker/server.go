@@ -24,7 +24,10 @@ import (
 	"github.com/gofrs/flock"
 )
 
-const IPCVersion = 1
+const IPCVersion = 2
+
+// Keep status/stop usable against an older broker so an upgrade can restart it.
+const controlIPCVersion = 1
 
 type BackendStatus struct {
 	Name     string `json:"name"`
@@ -146,12 +149,13 @@ func (s *server) handleConnection(connection net.Conn) {
 	}
 	var version int
 	_ = json.Unmarshal(hello["version"], &version)
-	if version != IPCVersion {
+	var operation string
+	_ = json.Unmarshal(hello["operation"], &operation)
+	legacyControl := version == controlIPCVersion && (operation == "status" || operation == "stop")
+	if version != IPCVersion && !legacyControl {
 		_ = writer.Write(wire.Message{"error": wire.Raw("unsupported agentcfg IPC version; restart the broker after upgrading")})
 		return
 	}
-	var operation string
-	_ = json.Unmarshal(hello["operation"], &operation)
 	switch operation {
 	case "status":
 		_ = writer.Write(wire.Message{"ok": wire.Raw(true), "status": wire.Raw(s.status())})
@@ -181,6 +185,11 @@ func (s *server) connect(connection net.Conn, reader *wire.Reader, writer *wire.
 		return
 	}
 	entry.Name = name
+	entry, err = withClientWorkingDirectory(entry, hello["cwd"])
+	if err != nil {
+		_ = writer.Write(wire.Message{"error": wire.Raw(err.Error())})
+		return
+	}
 	p := newPeer(connection)
 	defer p.close()
 	b, err := s.acquire(entry, p)

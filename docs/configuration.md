@@ -49,6 +49,12 @@ native settings. Incomplete imports and concurrent edits block initialization;
 a failed migration attempts to restore the native baseline and archives its
 canonical imports for review. `agentcfg restore` reverses a completed init.
 
+The Windows Codex desktop `node_repl` runtime is preserved in its native config
+when its bundled executable and private session-pipe configuration identify it.
+It remains managed by Codex, does not block user MCP imports, and is not copied
+to other harnesses. A custom MCP merely named `node_repl` is still imported.
+`init --plain` lists preserved runtimes separately from import failures.
+
 The configuration loader itself remains read-only. Initialization is an
 explicit CLI operation that reads supported installed harness locations and
 asks before writing; it does not change the semantics of `config.Load`.
@@ -84,7 +90,7 @@ The root object accepts `mcpServers` and an optional `$schema`. If present, the 
 
 An omitted canonical `type` is inferred from `command` or, if no command is supplied, `url`. A plugin must declare its type explicitly. Fields belonging to another transport and other unknown fields invalidate that entry. Legacy `sse` entries produce a warning and are skipped; this does not prohibit SSE responses belonging to Streamable HTTP.
 
-`command` is an executable token and `args` is an array of separate strings. The loader does not construct a shell command. Bare executables are left for the launcher to resolve. Canonical path commands may be absolute or relative to the source root and must resolve to regular files. Canonical `cwd` defaults to the source root; an explicit relative value resolves from that root and must already be a directory. Machine-specific absolute paths are allowed in canonical configuration.
+`command` is an executable token and `args` is an array of separate strings. The loader does not construct a shell command. Bare executables are left for the launcher to resolve. Canonical path commands may be absolute or relative to the source root and must resolve to regular files. An omitted canonical `cwd` remains unset: the MCP inherits the connecting client's working directory. An explicit relative value resolves from the source root and must already be a directory. Shared stdio processes are grouped by their effective working directory; clients in different projects do not reuse the same process unless they configure a common explicit `cwd`. Machine-specific absolute paths are allowed in canonical configuration.
 
 Environment names must be nonempty, contain neither NUL nor `=`, and be unique ignoring case. Argument and environment values cannot contain NUL bytes. These checks do not interpret arguments as filesystem paths.
 

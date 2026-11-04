@@ -84,6 +84,10 @@ func proposalFromNative(plan *bootstrap.Plan) (initProposal, error) {
 		return initProposal{}, fmt.Errorf("invalid discovered harnesses: %w", err)
 	}
 	for _, warning := range plan.Warnings {
+		if warning.Kind == bootstrap.WarningNativeRuntime {
+			proposal.NativeServers = append(proposal.NativeServers, warning.Harness+"/"+warning.Server)
+			continue
+		}
 		proposal.Warnings = append(proposal.Warnings, fmt.Sprintf("%s: %s (%s)", warning.Harness, warning.Message, warning.Source))
 	}
 	for _, candidate := range plan.Servers {

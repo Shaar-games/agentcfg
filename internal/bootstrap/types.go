@@ -4,6 +4,7 @@ package bootstrap
 
 import (
 	"os"
+	"slices"
 
 	"agentcfg/internal/config"
 )
@@ -72,4 +73,21 @@ type Warning struct {
 	Harness string
 	Source  string
 	Message string
+	Kind    WarningKind `json:",omitempty"`
+	Server  string      `json:",omitempty"`
+}
+
+type WarningKind string
+
+const (
+	WarningSkill         WarningKind = "skill"
+	WarningInactive      WarningKind = "inactive"
+	WarningNativeRuntime WarningKind = "native-runtime"
+)
+
+func (w Warning) BlocksInit(harnesses []string) bool {
+	if w.Kind == WarningInactive || w.Kind == WarningNativeRuntime {
+		return false
+	}
+	return w.Kind == WarningSkill || slices.Contains(harnesses, w.Harness)
 }

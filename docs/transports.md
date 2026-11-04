@@ -31,6 +31,14 @@ case-insensitively; if override spellings collide, the lexically last spelling
 wins. No implicit current-directory executable search is added: name lookup uses
 the configured `PATH` and Windows `PATHEXT`. Paths containing spaces are supported.
 
+If a canonical stdio server omits `cwd`, the connection supplies its caller's
+working directory over private IPC. The broker resolves that directory before
+selecting an upstream process, so its own launch directory cannot leak into a
+later client's context. An explicit server `cwd` takes precedence. Clients with
+the same resolved configuration and directory can share; different directories
+produce different backend identities. No project-local canonical files are read
+or written to establish this runtime context.
+
 When the **server configuration** supplies a nonempty `PLUGIN_DATA`, execution
 creates that directory and, if needed, a selected working directory beneath it.
 Configuration discovery does not create directories. Merely inheriting

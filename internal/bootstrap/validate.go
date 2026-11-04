@@ -105,7 +105,7 @@ func validateProcess(root *os.Root, server *config.Server) error {
 		seen[folded] = true
 	}
 	if server.Cwd == "" {
-		server.Cwd = root.Name()
+		return nil // Unspecified cwd is inherited at connection time.
 	}
 	if !filepath.IsAbs(server.Cwd) || symbolic(server.Cwd) || strings.ContainsRune(server.Cwd, 0) {
 		return fail()
