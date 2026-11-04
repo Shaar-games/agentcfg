@@ -41,6 +41,10 @@ not block initialization or add a confirmation. Variable expressions are also
 copied literally; agentcfg does not evaluate harness-specific substitutions.
 Invalid definitions and unsupported options still require correction rather
 than silently losing configuration.
+Client-side timing settings (`timeout` in OpenCode/Gemini and
+`startup_timeout_sec`, `startup_timeout_ms`, `tool_timeout_sec` in Codex) are
+omitted with a nonblocking warning. Agentcfg's runtime deadlines apply after
+import; the original native values remain in the initialization restore point.
 
 A single confirmation approves the complete initialization: canonical import,
 broker proxies in selected harnesses, and physical skill copies. `init --yes`

@@ -90,7 +90,7 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: errInactiveServer.Error(), Kind: WarningInactive})
 			continue
 		}
-		server, warnings, err := convertServer(root, target.name, name, entries[name])
+		imported, err := convertServer(root, target.name, name, entries[name])
 		if err != nil {
 			// Errors are intentionally constant descriptions, never parser errors
 			// or native values that could contain credentials.
@@ -104,22 +104,23 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: err.Error(), Kind: kind})
 			continue
 		}
+		server := imported.server
 		server.Source = source
-		for _, message := range importAdvisories(server) {
+		for _, message := range append(imported.advisories, importAdvisories(server)...) {
 			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: message, Kind: WarningAdvisory})
 		}
 		plan.Servers = append(plan.Servers, ServerCandidate{
 			Name: name, Source: source, Sources: []string{source},
 			Harnesses: []string{target.name}, Server: server,
 			Origins:  []Origin{{Harness: target.name, Source: source}},
-			Selected: true, Warnings: warnings,
+			Selected: true, Warnings: imported.warnings,
 		})
 	}
 }
 
-func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (config.Server, []string, error) {
-	fail := func(message string) (config.Server, []string, error) {
-		return config.Server{}, nil, errors.New(message)
+func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (nativeServerImport, error) {
+	fail := func(message string) (nativeServerImport, error) {
+		return nativeServerImport{}, errors.New(message)
 	}
 	if !validName(name) {
 		return fail("a native server has an invalid name")
@@ -135,7 +136,7 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (co
 				return fail("a native enable/disable flag is invalid")
 			}
 			if key == "enabled" && !flag || key == "disabled" && flag {
-				return config.Server{}, nil, errInactiveServer
+				return nativeServerImport{}, errInactiveServer
 			}
 		}
 	}
@@ -143,7 +144,7 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (co
 		return fail("a native server has ambiguous enable/disable flags")
 	}
 	if codexDesktopRuntime(harness, name, fields) {
-		return config.Server{}, nil, errNativeRuntime
+		return nativeServerImport{}, errNativeRuntime
 	}
 	allowed := map[string]bool{"type": true, "command": true, "cwd": true, "enabled": true, "disabled": true}
 	envKey, headerKey, urlKey := "env", "headers", "url"
@@ -165,14 +166,22 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (co
 	default:
 		allowed["args"], allowed["env"], allowed["url"], allowed["headers"] = true, true, true, true
 	}
-	var unsupported []string
+	var ignored, unsupported []string
 	for _, key := range keys(fields) {
 		if !allowed[key] {
-			unsupported = append(unsupported, fmt.Sprintf("%q", key))
+			if ignorableNativeSetting(harness, key) {
+				ignored = append(ignored, fmt.Sprintf("%q", key))
+			} else {
+				unsupported = append(unsupported, fmt.Sprintf("%q", key))
+			}
 		}
 	}
 	if len(unsupported) > 0 {
 		return fail("unsupported native option(s): " + strings.Join(unsupported, ", ") + "; manual import required")
+	}
+	var advisories []string
+	if len(ignored) > 0 {
+		advisories = append(advisories, "native timing settings "+strings.Join(ignored, ", ")+" are not imported; agentcfg timeouts apply")
 	}
 	kind, err := stringValue(fields["type"])
 	if err != nil {
@@ -261,7 +270,7 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (co
 		}
 		warnings = append(warnings, "stored native OAuth credentials are not imported; authenticate separately if required")
 	}
-	return server, warnings, nil
+	return nativeServerImport{server: server, warnings: warnings, advisories: advisories}, nil
 }
 
 func object(data []byte) (map[string]json.RawMessage, error) {

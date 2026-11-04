@@ -86,7 +86,7 @@ func TestUnsupportedOptionsNameTheOptionWithoutLeakingItsValue(t *testing.T) {
 		t.Fatalf("missing scoped diagnostic: %+v", plan.Warnings)
 	}
 	message := plan.Warnings[0].Message
-	if !strings.Contains(message, `"env_vars"`) || !strings.Contains(message, `"startup_timeout_sec"`) || strings.Contains(message, "SECRET_VALUE_NOT_FOR_OUTPUT") || strings.Contains(message, "credentials") {
+	if !strings.Contains(message, `"env_vars"`) || strings.Contains(message, `"startup_timeout_sec"`) || strings.Contains(message, "SECRET_VALUE_NOT_FOR_OUTPUT") || strings.Contains(message, "credentials") {
 		t.Fatalf("incorrect option diagnostic: %s", message)
 	}
 }
