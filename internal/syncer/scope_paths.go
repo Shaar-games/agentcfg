@@ -10,8 +10,8 @@ import (
 	"agentcfg/internal/pathutil"
 )
 
-// normalizeScopeRoot resolves aliases above an approved root, such as macOS
-// /var or an NTFS short name. The root entry itself must be a real directory.
+// normalizeScopeRoot binds an explicitly selected root to its physical identity,
+// including a linked user profile, macOS /var or an NTFS short name.
 // Descendants are deliberately not resolved here: doing so could erase a
 // symlink or junction that the write-path checks need to reject.
 func normalizeScopeRoot(path string) (string, error) {
@@ -19,20 +19,20 @@ func normalizeScopeRoot(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	before, err := os.Lstat(absolute)
+	before, err := os.Stat(absolute)
 	if err != nil {
 		return "", err
 	}
-	if redirected(before) || !before.IsDir() || !os.SameFile(before, before) {
-		return "", fmt.Errorf("scope root must be a real directory (linked roots are refused): %s", path)
+	if !before.IsDir() || !os.SameFile(before, before) {
+		return "", fmt.Errorf("scope root must resolve to a directory: %s", path)
 	}
 	physical, err := pathutil.Resolve(absolute)
 	if err != nil {
 		return "", err
 	}
 	for _, candidate := range []string{absolute, physical} {
-		after, err := os.Lstat(candidate)
-		if err != nil || redirected(after) || !after.IsDir() || !os.SameFile(before, after) {
+		after, err := os.Stat(candidate)
+		if err != nil || !after.IsDir() || !os.SameFile(before, after) {
 			return "", fmt.Errorf("scope root changed while resolving aliases: %s", path)
 		}
 	}

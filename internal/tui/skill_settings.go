@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/fsstate"
 	"agentcfg/internal/pathutil"
 
 	"github.com/gofrs/flock"
@@ -104,7 +104,11 @@ func applySkillHarnessSelectionChecked(root string, selected config.Skill, desir
 	if err != nil {
 		return fmt.Errorf("load current skill configuration: %w", err)
 	}
-	agents := filepath.Join(current.Root, ".agentcfg")
+	logicalAgents := filepath.Join(current.Root, ".agentcfg")
+	agents, err := pathutil.Resolve(logicalAgents)
+	if err != nil {
+		return err
+	}
 	if err := requireRealDirectory(agents); err != nil {
 		return fmt.Errorf("source directory: %w", err)
 	}
@@ -201,6 +205,14 @@ func applySkillHarnessSelectionChecked(root string, selected config.Skill, desir
 	if err := skillFileUnchanged(path, original); err != nil {
 		return err
 	}
+	currentSource, err := checkedSkillSource(current.Root, *found)
+	if err != nil || currentSource != path {
+		return errors.New("skill source link changed during editing")
+	}
+	currentAgents, err := pathutil.Resolve(logicalAgents)
+	if err != nil || currentAgents != agents {
+		return errors.New("canonical settings directory link changed during editing")
+	}
 	if err := os.Rename(temporary.Name(), path); err != nil {
 		return fmt.Errorf("atomically replace SKILL.md: %w", err)
 	}
@@ -218,7 +230,7 @@ func checkSkillSelection(current *config.Config, selected config.Skill, desired 
 			break
 		}
 	}
-	if found == nil || filepath.Clean(found.Path) != filepath.Clean(selected.Path) || !slices.Equal(found.Harnesses, selected.Harnesses) {
+	if found == nil || filepath.Clean(found.Path) != filepath.Clean(selected.Path) || selected.File != "" && found.File != selected.File || !slices.Equal(found.Harnesses, selected.Harnesses) {
 		return nil, fmt.Errorf("skill %q changed since it was loaded; refresh before editing", selected.Name)
 	}
 	for harness, enabled := range desired {
@@ -245,14 +257,13 @@ func checkedSkillSource(root string, skill config.Skill) (string, error) {
 			return "", fmt.Errorf("invalid skill source path %q", skill.Path)
 		}
 	}
-	current := root
-	for _, component := range components {
-		current = filepath.Join(current, component)
-		if err := requireRealDirectory(current); err != nil {
-			return "", fmt.Errorf("linked or invalid skill directory %s: %w", current, err)
-		}
+	path, err := pathutil.Resolve(filepath.Join(skill.Path, "SKILL.md"))
+	if err != nil {
+		return "", err
 	}
-	path := filepath.Join(current, "SKILL.md")
+	if skill.File != "" && skill.File != path {
+		return "", errors.New("skill source file link changed since it was loaded")
+	}
 	if _, err := readBoundedSkill(path); err != nil {
 		return "", err
 	}
@@ -302,24 +313,12 @@ func createRealSubdirectories(base string, parts ...string) error {
 }
 
 func readBoundedSkill(path string) ([]byte, error) {
-	info, err := os.Lstat(path)
+	data, err := fsstate.ReadFile(path, "", maxSkillFileBytes)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Size() > maxSkillFileBytes {
-		return nil, fmt.Errorf("%s: skill source must be a regular file smaller than 1 MiB", path)
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, maxSkillFileBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxSkillFileBytes || !utf8.Valid(data) {
-		return nil, fmt.Errorf("%s: skill source must be UTF-8 and smaller than 1 MiB", path)
+	if !utf8.Valid(data) {
+		return nil, errors.New("skill source must be UTF-8")
 	}
 	return data, nil
 }

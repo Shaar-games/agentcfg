@@ -32,27 +32,7 @@ func within(root, path string) bool {
 // resolvePotential resolves every existing ancestor, including symlinks and
 // Windows junctions. Missing tails are allowed without creating directories.
 // An existing dangling link is an error, not a missing lexical directory.
-func resolvePotential(path string) (string, error) {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	if _, err = os.Lstat(absolute); err == nil {
-		return resolveExisting(absolute)
-	}
-	if !os.IsNotExist(err) {
-		return "", err
-	}
-	parent := filepath.Dir(absolute)
-	if parent == absolute {
-		return "", err
-	}
-	resolved, err := resolvePotential(parent)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(resolved, filepath.Base(absolute)), nil
-}
+func resolvePotential(path string) (string, error) { return pathutil.ResolvePotential(path) }
 
 func containedPath(root, path string, missing bool) (string, error) {
 	resolvedRoot, err := resolvePotential(root)
@@ -74,6 +54,27 @@ func containedPath(root, path string, missing bool) (string, error) {
 	return resolved, nil
 }
 
+// User-installed links may refer to files outside the package. Keep portable
+// paths lexically inside their declared root, while following explicit links
+// for reads only. Dedicated writable plugin data retains containedPath checks.
+func linkedReadPath(root, path string, missing bool) (string, error) {
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if !within(absoluteRoot, absolute) {
+		return "", fmt.Errorf("path escapes declared source root %s", absoluteRoot)
+	}
+	if missing {
+		return resolvePotential(absolute)
+	}
+	return resolveExisting(absolute)
+}
+
 func pluginRelative(root, value string, missing bool) (string, error) {
 	if !strings.HasPrefix(value, "./") {
 		return "", fmt.Errorf("plugin-relative path must begin with ./")
@@ -81,13 +82,21 @@ func pluginRelative(root, value string, missing bool) (string, error) {
 	if strings.ContainsAny(value, "\\:\x00") {
 		return "", fmt.Errorf("plugin-relative path must use portable forward-slash components")
 	}
-	return containedPath(root, filepath.Join(root, filepath.FromSlash(value)), missing)
+	return linkedReadPath(root, filepath.Join(root, filepath.FromSlash(value)), missing)
 }
 
 func pluginDataRoot(sourceRoot, name string) (string, error) {
 	base := filepath.Join(sourceRoot, ".agentcfg", "data", "plugins")
 	candidate := filepath.Join(base, name)
-	resolved, err := containedPath(sourceRoot, candidate, true)
+	canonical, err := resolvePotential(filepath.Join(sourceRoot, ".agentcfg"))
+	if err != nil {
+		return "", err
+	}
+	physicalCandidate, err := resolvePotential(candidate)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := containedPath(canonical, physicalCandidate, true)
 	if err != nil {
 		return "", fmt.Errorf("PLUGIN_DATA: %w", err)
 	}
@@ -121,7 +130,7 @@ func pluginWorkingDirectory(value, root, data string) (string, error) {
 			return "", fmt.Errorf("cwd must use portable forward-slash components")
 		}
 		expanded := expandPlugin(value, root, data)
-		return containedPath(root, filepath.Join(root, filepath.FromSlash(expanded)), false)
+		return linkedReadPath(root, filepath.Join(root, filepath.FromSlash(expanded)), false)
 	}
 	for _, candidate := range []struct{ token, base string }{
 		{"${PLUGIN_ROOT}", root}, {"${PLUGIN_DATA}", data},
@@ -133,7 +142,10 @@ func pluginWorkingDirectory(value, root, data string) (string, error) {
 		if strings.ContainsAny(tail, "\\:\x00") {
 			return "", fmt.Errorf("cwd must use portable forward-slash components")
 		}
-		return containedPath(candidate.base, expandPlugin(value, root, data), candidate.token == "${PLUGIN_DATA}")
+		if candidate.token == "${PLUGIN_DATA}" {
+			return containedPath(candidate.base, expandPlugin(value, root, data), true)
+		}
+		return linkedReadPath(candidate.base, expandPlugin(value, root, data), false)
 	}
 	return "", fmt.Errorf("cwd must start with ./, ${PLUGIN_ROOT}, or ${PLUGIN_DATA}")
 }

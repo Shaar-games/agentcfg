@@ -41,13 +41,24 @@ func TestWindowsTargetJunctionIsRefused(t *testing.T) {
 	}
 }
 
-func TestWindowsNestedSkillJunctionIsRefused(t *testing.T) {
+func TestWindowsNestedSkillJunctionIsCopiedWithoutChangingTarget(t *testing.T) {
 	cfg, opts := fixture(t)
 	cfg.Settings.Harnesses = []string{"cursor"}
 	outside := t.TempDir()
 	writeTestFile(t, filepath.Join(outside, "private.txt"), "not skill content")
 	junction(t, outside, filepath.Join(cfg.Skills[0].Path, "escape"))
-	if _, err := BuildPlan(cfg, opts); err == nil {
-		t.Fatal("sync copied through a nested junction")
+	plan, err := BuildPlan(cfg, opts)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if err := plan.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cfg.Root, ".cursor", "skills", filepath.Base(cfg.Skills[0].Path), "escape")
+	info, err := os.Lstat(path)
+	if err != nil || redirected(info) {
+		t.Fatalf("nested junction was not expanded to a physical copy: %v", err)
+	}
+	assertAdoptionBytes(t, filepath.Join(path, "private.txt"), []byte("not skill content"))
+	assertAdoptionBytes(t, filepath.Join(outside, "private.txt"), []byte("not skill content"))
 }

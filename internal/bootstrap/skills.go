@@ -3,11 +3,8 @@ package bootstrap
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"fmt"
-	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,17 +12,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"agentcfg/internal/fsstate"
 	"agentcfg/internal/pathutil"
 	"gopkg.in/yaml.v3"
 )
 
 func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
-	path, err := anchoredPath(root, source)
-	if err != nil {
-		plan.warnSkill(harness, source, "skills path changed or escapes the discovery home")
-		return
-	}
-	entries, err := readDir(root, path)
+	entries, err := fsstate.ReadDir(source, maxTreeEntries)
 	if err != nil {
 		plan.warnSkill(harness, source, "skills directory is unreadable or exceeds the entry limit")
 		return
@@ -37,33 +30,38 @@ func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
 		}
 		plan.budget.skills--
 		// The configured skills root may itself be an alias. Its native path is
-		// provenance; the anchored relative path is only for reading the target.
+		// provenance; the resolved path is used only for reading the target.
 		native := filepath.Join(source, entry.Name())
-		relative, err := anchoredPath(root, native)
+		resolved, err := pathutil.Resolve(native)
 		if err != nil {
-			plan.warnSkill(harness, native, "skill source is unreadable or escapes the discovery home")
+			plan.warnSkill(harness, native, "skill source is unreadable or has an invalid link")
 			continue
 		}
-		resolved := filepath.Join(root.Name(), relative)
+		physical := resolved
+		if physicalHome, err := pathutil.Resolve(root.Name()); err == nil {
+			if relative, err := relativeWithin(physicalHome, resolved); err == nil {
+				resolved = filepath.Join(root.Name(), relative)
+			}
+		}
 		if within(filepath.Join(root.Name(), ".agentcfg"), resolved) {
 			continue
 		}
-		info, err := root.Stat(relative)
+		info, err := os.Stat(resolved)
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		if _, err := root.Lstat(filepath.Join(relative, ".agentcfg-origin.json")); err == nil {
+		if _, err := os.Lstat(filepath.Join(resolved, ".agentcfg-origin.json")); err == nil {
 			continue
 		} else if !os.IsNotExist(err) {
 			plan.warnSkill(harness, native, "skill origin marker cannot be inspected")
 			continue
 		}
-		if _, err := root.Lstat(filepath.Join(relative, "SKILL.md")); os.IsNotExist(err) {
+		if _, err := os.Lstat(filepath.Join(resolved, "SKILL.md")); os.IsNotExist(err) {
 			continue
 		}
-		fingerprint, treeSHA256, disabled, err := inspectSkill(root, relative, entry.Name(), plan.budget)
+		fingerprint, treeSHA256, layout, disabled, err := inspectSkill(root, native, entry.Name(), plan.budget)
 		if err != nil {
-			plan.warnSkill(harness, native, "skill is invalid, nonportable, unreadable, redirected or exceeds discovery limits")
+			plan.warnSkill(harness, native, "skill is invalid, nonportable, unreadable or exceeds discovery limits")
 			continue
 		}
 		warnings := []string{}
@@ -73,14 +71,13 @@ func discoverSkills(root *os.Root, plan *Plan, harness, source string) {
 		plan.Skills = append(plan.Skills, SkillCandidate{
 			Name: entry.Name(), Source: resolved, Sources: []string{resolved},
 			Harnesses: []string{harness}, Selected: !disabled, Warnings: warnings, Fingerprint: fingerprint,
-			Origins: []Origin{{Harness: harness, Source: native, Target: resolved}}, TreeSHA256: treeSHA256,
+			Origins: []Origin{{Harness: harness, Source: native, Target: physical, Layout: layout}}, TreeSHA256: treeSHA256,
 		})
 	}
 }
 
-// VerifySkill reopens only a candidate under the supplied home and compares its
-// complete portable tree with Discover's fingerprint. Call immediately before
-// copying; the copying operation must also use anchored reads to close races.
+// VerifySkill reopens a discovered user skill and compares its complete portable
+// tree with Discover's fingerprint. The copy operation also verifies the source.
 func VerifySkill(home string, candidate SkillCandidate) error {
 	if !filepath.IsAbs(home) || candidate.Fingerprint == "" || !filepath.IsAbs(candidate.Source) {
 		return errors.New("invalid skill verification input")
@@ -98,114 +95,46 @@ func VerifySkill(home string, candidate SkillCandidate) error {
 }
 
 func verifySkill(root *os.Root, candidate SkillCandidate) error {
-	relative, err := anchoredPath(root, candidate.Source)
-	if err != nil {
-		return errors.New("selected skill source changed or escapes home")
-	}
-	actual, treeSHA256, _, err := inspectSkill(root, relative, candidate.Name, nil)
+	actual, treeSHA256, _, _, err := inspectSkill(root, candidate.Source, candidate.Name, nil)
 	if err != nil || actual != candidate.Fingerprint || candidate.TreeSHA256 != "" && treeSHA256 != candidate.TreeSHA256 {
 		return errors.New("selected skill changed since discovery")
 	}
 	return nil
 }
 
-func inspectSkill(home *os.Root, relative, name string, budget *scanBudget) (string, string, bool, error) {
-	root, err := home.OpenRoot(relative)
-	if err != nil {
-		return "", "", false, err
+func inspectSkill(home *os.Root, source, name string, budget *scanBudget) (string, string, string, bool, error) {
+	if !filepath.IsAbs(source) {
+		source = filepath.Join(home.Name(), source)
 	}
-	defer root.Close()
-	data, err := readFile(root, "SKILL.md", budget.limit(maxConfigBytes), true)
+	data, err := fsstate.ReadFile(filepath.Join(source, "SKILL.md"), "", budget.limit(maxConfigBytes))
 	budget.charge(len(data))
 	if err != nil {
-		return "", "", false, err
+		return "", "", "", false, err
 	}
 	disabled, err := validateSkill(data, name)
 	if err != nil {
-		return "", "", false, err
+		return "", "", "", false, err
 	}
-	h := sha256.New()
-	treeHash := sha256.New()
-	count, total := 0, int64(0)
-	if err = fingerprintTree(root, ".", h, treeHash, 0, &count, &total, data, budget); err != nil {
-		return "", "", false, err
-	}
-	return hex.EncodeToString(h.Sum(nil)), hex.EncodeToString(treeHash.Sum(nil)), disabled, nil
-}
-
-// Nested links (including Windows junctions) are deliberately not portable
-// import candidates. The top-level alias may resolve within home; the validated
-// tree itself contains only directories and regular files.
-func fingerprintTree(root *os.Root, path string, h, treeHash hash.Hash, depth int, count *int, total *int64, skillData []byte, budget *scanBudget) error {
-	*count++
-	if depth > 64 || *count > maxTreeEntries {
-		return errors.New("skill tree limit")
-	}
-	if budget != nil {
-		if budget.entries <= 0 {
-			return errors.New("discovery entry budget reached")
+	options := fsstate.Options{FollowLinks: true, MaxEntries: maxTreeEntries, MaxFile: maxAssetBytes, MaxBytes: budget.limit(maxTreeBytes)}
+	if budget != nil && budget.entries < options.MaxEntries {
+		options.MaxEntries = budget.entries
+		if options.MaxEntries == 0 {
+			options.MaxEntries = -1
 		}
-		budget.entries--
 	}
-	info, err := root.Lstat(path)
+	snapshot, err := fsstate.Capture(source, options)
+	if snapshot != nil && budget != nil {
+		budget.entries -= snapshot.Entries
+		budget.bytes -= snapshot.Bytes
+	}
 	if err != nil {
-		return err
+		return "", "", "", false, err
 	}
-	if pathutil.IsRedirected(info) {
-		return errors.New("skill contains a link")
+	hash := sha256.Sum256(data)
+	if snapshot.Files["SKILL.md"] != hex.EncodeToString(hash[:]) {
+		return "", "", "", false, errors.New("skill frontmatter changed during discovery")
 	}
-	if info.IsDir() {
-		treeRecord(treeHash, 'd', path)
-		fmt.Fprintf(h, "d%d:%s;", len(filepath.ToSlash(path)), filepath.ToSlash(path))
-		entries, err := readDir(root, path)
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if err := fingerprintTree(root, filepath.Join(path, entry.Name()), h, treeHash, depth+1, count, total, skillData, budget); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if !info.Mode().IsRegular() {
-		return errors.New("skill contains a special file")
-	}
-	data, err := readFile(root, path, budget.limit(maxAssetBytes), false)
-	budget.charge(len(data))
-	if err != nil {
-		return err
-	}
-	if path == "SKILL.md" && !bytes.Equal(data, skillData) {
-		return errors.New("skill frontmatter changed during discovery")
-	}
-	after, err := root.Lstat(path)
-	if err != nil || pathutil.IsRedirected(after) || !os.SameFile(info, after) ||
-		info.Mode() != after.Mode() || info.Size() != after.Size() || !info.ModTime().Equal(after.ModTime()) {
-		return errors.New("skill file changed during discovery")
-	}
-	*total += int64(len(data))
-	if *total > maxTreeBytes {
-		return errors.New("skill tree size limit")
-	}
-	fmt.Fprintf(h, "f%d:%s:%d:%d:", len(filepath.ToSlash(path)), filepath.ToSlash(path), info.Mode().Perm()&0111, len(data))
-	h.Write(data)
-	treeRecord(treeHash, 'f', path)
-	content := sha256.Sum256(data)
-	treeHash.Write(content[:])
-	return nil
-}
-
-// Match syncer.SkillTreeSHA256's adoption format at the same bounded, anchored
-// read as our stricter permission-sensitive fingerprint. The interop test keeps
-// this record format in sync without reopening a potentially swapped path.
-func treeRecord(h hash.Hash, kind byte, path string) {
-	name := []byte(filepath.ToSlash(path))
-	h.Write([]byte{kind})
-	var size [8]byte
-	binary.BigEndian.PutUint64(size[:], uint64(len(name)))
-	h.Write(size[:])
-	h.Write(name)
+	return snapshot.Fingerprint, snapshot.Content, snapshot.Layout, disabled, nil
 }
 
 func validateSkill(data []byte, dirname string) (bool, error) {

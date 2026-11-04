@@ -11,8 +11,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/fsstate"
+	"agentcfg/internal/pathutil"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tailscale/hujson"
 )
@@ -21,17 +24,15 @@ var errInactiveServer = errors.New("a disabled native server was skipped")
 var errNativeRuntime = errors.New("Codex desktop session runtime is kept in its native configuration")
 
 func discoverServers(root *os.Root, plan *Plan, target target, source string) {
-	path, err := anchoredPath(root, source)
-	if err != nil {
-		plan.warn(target.name, source, "native config changed or escapes the discovery home")
-		return
-	}
-	data, err := readFile(root, path, maxConfigBytes, true)
-	if err != nil {
+	data, err := fsstate.ReadFile(source, "", maxConfigBytes)
+	if err != nil || !utf8.Valid(data) {
 		plan.warn(target.name, source, "native config is unreadable, nonregular, invalid UTF-8 or larger than 1 MiB")
 		return
 	}
-	if err := captureSourceHash(root, plan, source, path, sha256.Sum256(data)); err != nil {
+	physical, resolveErr := pathutil.Resolve(source)
+	physicalRoot, rootErr := anchoredRootPath(root)
+	relative, relativeErr := relativeWithin(root.Name(), source)
+	if resolveErr != nil || rootErr != nil || relativeErr != nil || !plan.rememberSourceHash(source, filepath.Join(physicalRoot, relative), physical, sha256.Sum256(data)) {
 		plan.warn(target.name, source, "native source changed during discovery; refresh the import preview")
 		return
 	}
@@ -112,7 +113,7 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 		plan.Servers = append(plan.Servers, ServerCandidate{
 			Name: name, Source: source, Sources: []string{source},
 			Harnesses: []string{target.name}, Server: server,
-			Origins:  []Origin{{Harness: target.name, Source: source}},
+			Origins:  []Origin{{Harness: target.name, Source: source, Target: physical}},
 			Selected: true, Warnings: imported.warnings,
 		})
 	}

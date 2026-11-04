@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+
+	"agentcfg/internal/fsstate"
+	"agentcfg/internal/pathutil"
 )
 
 // SameInventory compares discoveries, not scanner counters or volatile stat
@@ -75,15 +78,17 @@ func (p *Plan) Revalidate() error {
 			if !ok {
 				return errors.New("selected server has no discovery fingerprint")
 			}
-			relative, err := anchoredPath(root, source)
-			if err != nil {
-				return errors.New("selected MCP source changed or escapes home")
-			}
-			data, err := readFile(root, relative, maxConfigBytes, true)
+			data, err := fsstate.ReadFile(source, "", maxConfigBytes)
 			if err != nil || sha256.Sum256(data) != expected {
 				return errors.New("selected MCP source changed since discovery")
 			}
 			checked[source] = true
+		}
+		for _, origin := range candidate.Origins {
+			resolved, err := pathutil.Resolve(origin.Source)
+			if err != nil || origin.Target != "" && resolved != origin.Target {
+				return errors.New("native MCP link target changed since discovery")
+			}
 		}
 	}
 	for _, candidate := range p.Skills {
@@ -96,9 +101,15 @@ func (p *Plan) Revalidate() error {
 		sources := append([]string(nil), candidate.Sources...)
 		for _, origin := range candidate.Origins {
 			if origin.Target != "" {
-				relative, err := anchoredPath(root, origin.Source)
-				if err != nil || filepath.Join(root.Name(), relative) != origin.Target {
+				resolved, err := pathutil.Resolve(origin.Source)
+				if err != nil || resolved != origin.Target {
 					return errors.New("native skill link target changed since discovery")
+				}
+			}
+			if origin.Layout != "" {
+				_, _, layout, _, err := inspectSkill(root, origin.Source, candidate.Name, nil)
+				if err != nil || layout != origin.Layout {
+					return errors.New("native skill link layout changed since discovery")
 				}
 			}
 			sources = union(sources, []string{origin.Source})

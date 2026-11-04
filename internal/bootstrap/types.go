@@ -36,6 +36,7 @@ type Origin struct {
 	Harness string
 	Source  string
 	Target  string `json:",omitempty"` // resolved skill source captured before prompting
+	Layout  string `json:",omitempty"` // nested link bindings captured independently of content
 }
 
 // Server contains only definitions that can be represented canonically.

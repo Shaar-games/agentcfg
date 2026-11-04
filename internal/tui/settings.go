@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/fsstate"
 	"agentcfg/internal/pathutil"
 
 	"github.com/gofrs/flock"
@@ -240,17 +240,30 @@ var errNoChange = errors.New("requested setting already has that value")
 // updateSettings performs a checked, backup-first atomic edit to the source
 // agentcfg.json. It never creates or updates project/harness configuration.
 func updateSettings(root string, mutate func(*config.Config, map[string]json.RawMessage) error) error {
-	absolute, err := filepath.Abs(root)
+	absolute, err := pathutil.Resolve(root)
 	if err != nil {
 		return err
 	}
-	agentDir := filepath.Join(absolute, ".agentcfg")
-	if info, err := os.Lstat(agentDir); err == nil {
-		if !info.IsDir() || pathutil.IsRedirected(info) {
-			return fmt.Errorf("settings directory must be a real directory within %s", absolute)
-		}
-	} else if !os.IsNotExist(err) {
+	logicalAgentDir := filepath.Join(absolute, ".agentcfg")
+	agentDir, err := pathutil.ResolvePotential(logicalAgentDir)
+	if err != nil {
 		return err
+	}
+	logicalPath := settingsFile(absolute)
+	physicalPath, err := pathutil.ResolvePotential(logicalPath)
+	if err != nil {
+		return err
+	}
+	binding := func() error {
+		directory, err := pathutil.ResolvePotential(logicalAgentDir)
+		if err != nil || directory != agentDir {
+			return errors.New("canonical settings directory link changed during edit")
+		}
+		file, err := pathutil.ResolvePotential(logicalPath)
+		if err != nil || file != physicalPath {
+			return errors.New("settings file link changed during edit")
+		}
+		return nil
 	}
 	// Reject stale/invalid requests and no-ops before creating even a lock file.
 	// The mutation is prepared again after locking, against a fresh snapshot.
@@ -260,12 +273,11 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 	if err := os.MkdirAll(agentDir, 0o700); err != nil {
 		return fmt.Errorf("prepare agentcfg settings directory: %w", err)
 	}
-	info, err := os.Lstat(agentDir)
-	if err != nil {
+	if err := requireRealDirectory(agentDir); err != nil {
 		return err
 	}
-	if !info.IsDir() || pathutil.IsRedirected(info) {
-		return fmt.Errorf("settings directory must be a real directory within %s", absolute)
+	if err := binding(); err != nil {
+		return err
 	}
 	// Serialize edits with syncer.Plan.Apply, which projects these canonical
 	// settings while holding the same lock. Separate TUI-only locks allowed
@@ -286,7 +298,7 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 	}
 	defer lock.Unlock()
 
-	path := settingsFile(absolute)
+	path := physicalPath
 	original, updated, existed, err := prepareSettingsEdit(absolute, mutate)
 	if err != nil {
 		return err
@@ -302,7 +314,7 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 		return errors.New("settings changed during edit; refresh before retrying")
 	}
 
-	temporary, err := os.CreateTemp(agentDir, ".agentcfg-settings-*.tmp")
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".agentcfg-settings-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temporary settings: %w", err)
 	}
@@ -336,6 +348,9 @@ func updateSettings(root string, mutate func(*config.Config, map[string]json.Raw
 	}
 	if stillExists != existed || !bytes.Equal(latest, original) {
 		return errors.New("settings changed before replacement; refresh before retrying")
+	}
+	if err := binding(); err != nil {
+		return err
 	}
 	if err := os.Rename(tempName, path); err != nil {
 		return fmt.Errorf("atomically replace settings: %w", err)
@@ -389,28 +404,18 @@ func prepareSettingsEdit(root string, mutate func(*config.Config, map[string]jso
 	return original, updated, existed, nil
 }
 
-func readSettings(path string) (data []byte, exists bool, err error) {
-	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
+func readSettings(path string) ([]byte, bool, error) {
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		return nil, false, nil
+	} else if err != nil {
+		return nil, false, err
 	}
+	data, err := fsstate.ReadFile(path, "", maxSettingsBytes)
 	if err != nil {
 		return nil, false, err
 	}
-	if !info.Mode().IsRegular() || info.Size() > maxSettingsBytes {
-		return nil, false, fmt.Errorf("settings must be a regular file of at most %d bytes", maxSettingsBytes)
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, false, err
-	}
-	defer file.Close()
-	data, err = io.ReadAll(io.LimitReader(file, maxSettingsBytes+1))
-	if err != nil {
-		return nil, false, err
-	}
-	if len(data) > maxSettingsBytes || !utf8.Valid(data) {
-		return nil, false, errors.New("settings must be UTF-8 and smaller than 1 MiB")
+	if !utf8.Valid(data) {
+		return nil, false, errors.New("settings must be UTF-8")
 	}
 	return data, true, nil
 }

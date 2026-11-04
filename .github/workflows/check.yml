@@ -42,7 +42,7 @@ jobs:
             exit 1
           fi
       - name: Unit and integration tests
-        run: go test -shuffle=on -count=1 -timeout=120s ./...
+        run: go test -shuffle=on -count=1 -timeout=300s ./...
       - name: CLI build
         run: go build -o ${{ runner.temp }}/agentcfg${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd/agentcfg
       - name: No-argument CLI help

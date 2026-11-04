@@ -1,7 +1,6 @@
 package syncer
 
 import (
-	"agentcfg/internal/config"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -9,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 
 	"github.com/gofrs/flock"
 )
@@ -100,6 +102,21 @@ func (p *Plan) checkAdoptionSources() error {
 // Preserve the directory identities captured by BuildPlan, including across
 // alias spellings, before accepting any later path-based check.
 func (p *Plan) checkScopeIdentity() error {
+	canonical := filepath.Join(p.root, ".agentcfg")
+	currentCanonical, canonicalErr := os.Stat(canonical)
+	if p.canonicalIdentity != nil {
+		if canonicalErr != nil || !os.SameFile(p.canonicalIdentity, currentCanonical) {
+			return fmt.Errorf("canonical directory changed since planning: %s", canonical)
+		}
+	} else if canonicalErr == nil {
+		entry, err := os.Lstat(canonical)
+		if err != nil || redirected(entry) {
+			return fmt.Errorf("canonical alias appeared after planning: %s", canonical)
+		}
+		p.canonicalIdentity = currentCanonical
+	} else if !os.IsNotExist(canonicalErr) {
+		return canonicalErr
+	}
 	for _, scope := range []struct {
 		path string
 		info os.FileInfo
@@ -145,6 +162,12 @@ func (p *Plan) preflight() error {
 }
 
 func (p *Plan) checkChange(change Change) error {
+	if change.skill != nil && change.skill.sourceAlias != "" {
+		resolved, err := pathutil.Resolve(change.skill.sourceAlias)
+		if err != nil || !sameAdoptionPath(resolved, change.skill.source) {
+			return fmt.Errorf("skill source link changed since planning: %s", change.skill.sourceAlias)
+		}
+	}
 	if p.extraPreflight != nil {
 		if err := p.extraPreflight(); err != nil {
 			return err
@@ -209,7 +232,11 @@ func (p *Plan) checkChange(change Change) error {
 				return err
 			}
 		}
-		sourceHash, err := fingerprint(change.skill.source)
+		sourceFingerprint := sourceTreeFingerprint
+		if change.skill.restoreLink {
+			sourceFingerprint = treeFingerprint
+		}
+		sourceHash, err := sourceFingerprint(change.skill.source)
 		if err != nil {
 			return err
 		}
@@ -454,10 +481,7 @@ func (p *Plan) applySkill(change Change, backup string) (func() error, error) {
 				return nil, err
 			}
 		}
-		sourceFingerprint := treeFingerprint
-		if change.adopted {
-			sourceFingerprint = adoptionTreeFingerprint
-		}
+		sourceFingerprint := sourceTreeFingerprint
 		currentSource, err := sourceFingerprint(change.skill.source)
 		if err != nil || currentSource != change.skill.sourceHash {
 			return nil, fmt.Errorf("source skill changed during staging: %s", change.skill.source)

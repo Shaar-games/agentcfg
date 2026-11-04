@@ -486,7 +486,7 @@ func directoryLink(t *testing.T, target, link string) {
 	}
 }
 
-func TestPluginDirectoryLinkEscapes(t *testing.T) {
+func TestPluginExplicitDirectoryLinksAndDedicatedData(t *testing.T) {
 	for _, component := range []string{"command", "cwd", "skills", "skill-assets", "data"} {
 		t.Run(component, func(t *testing.T) {
 			root := t.TempDir()
@@ -513,13 +513,24 @@ func TestPluginDirectoryLinkEscapes(t *testing.T) {
 			putJSON(t, filepath.Join(plugin, "mcp.json"), testObject{"$schema": mcpSchema, "mcpServers": servers})
 			config := loadOK(t, root)
 			expected := []string{"demo.ok"}
+			expectedSkills := 0
+			if component == "command" || component == "cwd" {
+				expected = []string{"demo.escape", "demo.ok"}
+			}
+			if component == "skills" || component == "skill-assets" {
+				expectedSkills = 1
+			}
 			if component == "data" {
 				expected = []string{}
 			}
-			if !reflect.DeepEqual(serverNames(config), expected) || len(config.Skills) != 0 {
+			if !reflect.DeepEqual(serverNames(config), expected) || len(config.Skills) != expectedSkills {
 				t.Fatal(config.Servers, config.Skills)
 			}
-			expectWarnings(t, config, "escapes permitted root")
+			if component == "data" {
+				expectWarnings(t, config, "escapes permitted root")
+			} else if len(config.Warnings) != 0 {
+				t.Fatal(config.Warnings)
+			}
 		})
 	}
 }
@@ -536,7 +547,7 @@ func TestContainedSkillLinkAndGeneratedLink(t *testing.T) {
 	}
 }
 
-func TestManifestAndSkillFileLinkEscapes(t *testing.T) {
+func TestInvalidManifestAndSkillFileLinkTargetsRemainInvalid(t *testing.T) {
 	for _, targetFile := range []string{"plugin.json", "skills/review/SKILL.md", "mcp.json"} {
 		t.Run(targetFile, func(t *testing.T) {
 			root := t.TempDir()
@@ -552,7 +563,9 @@ func TestManifestAndSkillFileLinkEscapes(t *testing.T) {
 				t.Skipf("file symlink unavailable: %v", err)
 			}
 			config := loadOK(t, root)
-			expectWarnings(t, config, "escapes permitted root")
+			if len(config.Warnings) == 0 {
+				t.Fatal("invalid linked file was accepted")
+			}
 			switch targetFile {
 			case "plugin.json":
 				if len(config.Servers) != 0 || len(config.Skills) != 0 {

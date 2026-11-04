@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 )
 
 type Options struct {
@@ -58,6 +59,7 @@ type Plan struct {
 	adoption              *adoptionState
 	rootIdentity          os.FileInfo
 	baseIdentity          os.FileInfo
+	canonicalIdentity     os.FileInfo
 }
 
 func freshManifest() manifest {
@@ -154,6 +156,10 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	}
 	p.baseIdentity, err = os.Lstat(p.base)
 	if err != nil {
+		return nil, err
+	}
+	p.canonicalIdentity, err = os.Stat(filepath.Join(p.root, ".agentcfg"))
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 	// Protect the plan against changes to canonical MCP/harness settings between
@@ -329,6 +335,14 @@ func ensureNoSymlinkParents(base, path string) error {
 			return err
 		}
 		if redirected(info) {
+			if sameAdoptionPath(current, filepath.Join(root, ".agentcfg")) {
+				resolved, err := pathutil.Resolve(current)
+				if err != nil {
+					return err
+				}
+				tail, _ := filepath.Rel(current, normalized)
+				return ensureNoSymlinkParents(resolved, filepath.Join(resolved, tail))
+			}
 			return fmt.Errorf("refusing to write through a symlink or junction: %s", current)
 		}
 	}

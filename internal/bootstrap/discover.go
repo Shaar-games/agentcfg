@@ -69,15 +69,15 @@ func Discover(home string) (*Plan, error) {
 		var configs []string
 		for _, relative := range target.configs {
 			source := filepath.Join(absolute, filepath.FromSlash(relative))
-			path, err := anchoredPath(root, source)
-			if os.IsNotExist(err) {
+			path, err := nativeSourcePath(source)
+			if path == "" && err == nil {
 				continue
 			}
 			if err != nil {
-				plan.warn(target.name, source, "native config is unreadable or escapes the discovery home")
+				plan.warn(target.name, source, "native config is unreadable or has an invalid link")
 				continue
 			}
-			info, err := root.Stat(path)
+			info, err := os.Stat(path)
 			if err != nil || !info.Mode().IsRegular() {
 				plan.warn(target.name, source, "native config must be a regular file")
 				continue
@@ -97,15 +97,15 @@ func Discover(home string) (*Plan, error) {
 		}
 		for _, relative := range target.skills {
 			source := filepath.Join(absolute, filepath.FromSlash(relative))
-			path, err := anchoredPath(root, source)
-			if os.IsNotExist(err) {
+			path, err := nativeSourcePath(source)
+			if path == "" && err == nil {
 				continue
 			}
 			if err != nil {
-				plan.warnSkill(target.name, source, "native skills path is unreadable or escapes the discovery home")
+				plan.warnSkill(target.name, source, "native skills path is unreadable or has an invalid link")
 				continue
 			}
-			info, err := root.Stat(path)
+			info, err := os.Stat(path)
 			if err != nil || !info.IsDir() {
 				plan.warnSkill(target.name, source, "native skills path must be a directory")
 				continue
@@ -123,6 +123,18 @@ func Discover(home string) (*Plan, error) {
 	}
 	mergeCandidates(plan)
 	return plan, nil
+}
+
+// Missing native locations are normal. A dangling link at the location or any
+// ancestor is existing user configuration and must be reported before writes.
+func nativeSourcePath(source string) (string, error) {
+	path, err := pathutil.Resolve(source)
+	if os.IsNotExist(err) {
+		if _, potentialErr := pathutil.ResolvePotential(source); potentialErr == nil {
+			return "", nil
+		}
+	}
+	return path, err
 }
 
 func contained(root, path string) (string, error) {

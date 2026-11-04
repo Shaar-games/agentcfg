@@ -46,12 +46,12 @@ func (l *loader) loadPlugins() {
 		names[name] = candidate
 		l.pluginRoots = append(l.pluginRoots, root)
 		l.loadPluginServers(root, name)
-		l.loadSkills(filepath.Join(root, "skills"), name, root, false)
+		l.loadSkills(filepath.Join(candidate, "skills"), name, candidate, false)
 	}
 }
 
 func (l *loader) loadManifest(root string) (string, error) {
-	path, err := containedPath(root, filepath.Join(root, "plugin.json"), false)
+	path, err := linkedReadPath(root, filepath.Join(root, "plugin.json"), false)
 	if err != nil {
 		return "", fmt.Errorf("plugin.json: %w", err)
 	}
@@ -145,7 +145,7 @@ func (l *loader) loadPluginServers(root, name string) {
 	if _, err := os.Lstat(location); os.IsNotExist(err) {
 		return
 	}
-	path, err := containedPath(root, location, false)
+	path, err := linkedReadPath(root, location, false)
 	if err != nil {
 		l.warn(location, err)
 		return

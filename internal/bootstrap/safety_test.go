@@ -199,12 +199,12 @@ func TestDiscoveryRejectsRetargetedSkillLinkWithIdenticalContent(t *testing.T) {
 }
 
 func TestDiscoveryContainmentAndPortableLinks(t *testing.T) {
-	t.Run("config-escape", func(t *testing.T) {
+	t.Run("external-config-link", func(t *testing.T) {
 		home, outside := t.TempDir(), t.TempDir()
 		put(t, outside, "mcp.json", `{"mcpServers":{"outside":{"command":"SENTINEL_EXTERNAL"}}}`)
 		dirLink(t, filepath.Join(home, ".cursor"), outside)
 		plan, err := Discover(home)
-		if err != nil || len(plan.Servers) != 0 || len(plan.Warnings) == 0 {
+		if err != nil || len(plan.Servers) != 1 || len(plan.Warnings) != 0 {
 			t.Fatalf("%+v %v", plan, err)
 		}
 	})
@@ -214,7 +214,7 @@ func TestDiscoveryContainmentAndPortableLinks(t *testing.T) {
 		put(t, outside, "asset.txt", "outside")
 		dirLink(t, filepath.Join(home, ".cursor", "skills", "review", "assets"), outside)
 		plan, err := Discover(home)
-		if err != nil || len(plan.Skills) != 0 || len(plan.Warnings) == 0 {
+		if err != nil || len(plan.Skills) != 1 || len(plan.Warnings) != 0 {
 			t.Fatalf("%+v %v", plan, err)
 		}
 	})

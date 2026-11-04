@@ -167,7 +167,7 @@ func TestSkillTreeCycleAndFrontmatterLimit(t *testing.T) {
 	}
 }
 
-func TestWindowsJunctionEscape(t *testing.T) {
+func TestWindowsExplicitPluginWorkingDirectoryJunction(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows junctions only")
 	}
@@ -182,10 +182,9 @@ func TestWindowsJunctionEscape(t *testing.T) {
 		t.Skipf("Windows junction unavailable: %v: %s", err, output)
 	}
 	config := loadOK(t, root)
-	if !reflect.DeepEqual(serverNames(config), []string{"demo.good"}) {
+	if !reflect.DeepEqual(serverNames(config), []string{"demo.bad", "demo.good"}) || len(config.Warnings) != 0 {
 		t.Fatal(config.Servers)
 	}
-	expectWarnings(t, config, "escapes permitted root")
 }
 
 func TestCheckedInExamplesAreInactiveAndValidWhenCopied(t *testing.T) {

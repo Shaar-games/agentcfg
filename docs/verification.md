@@ -11,8 +11,8 @@ Depuis la racine du projet, avec Go 1.26 via mise :
 
 ```sh
 mise exec -- go vet ./...
-mise exec -- go test -count=1 -timeout=180s ./...
-mise exec -- go test -shuffle=on -count=1 -timeout=180s ./...
+mise exec -- go test -count=1 -timeout=300s ./...
+mise exec -- go test -shuffle=on -count=1 -timeout=300s ./...
 mise exec -- go test -race -count=1 -timeout=180s ./...
 ```
 
@@ -21,6 +21,23 @@ adaptateurs des harnesses, les changements natifs conservateurs, le broker,
 les transports MCP et l'authentification. Les fixtures utilisent des répertoires
 temporaires : elles ne doivent pas écrire dans les configurations des harnesses
 de la machine de développement.
+
+Les régressions de liens utilisent huit emplacements natifs de skills et leurs
+56 paires orientées : liens absolus et relatifs sur Unix/Windows, plus jonctions
+sur Windows, soit 168 parcours init → sync sans changement → restore sur Windows.
+Des tests complémentaires couvrent les chaînes, les cibles hors du home, les
+assets et SKILL.md liés, les fichiers MCP partagés, le TOML Codex, les parents
+OpenCode/JSONC et le home lui-même lié. Les liens cassés et cycles sont refusés
+sans modifier les sources. Les tests Windows nécessitant des symlinks signalent
+un skip si le système ne permet pas leur création ; les jonctions sont testées
+séparément sans ce privilège.
+
+Les plugins combinent des liens sur le répertoire canonique, le catalogue,
+le package, les manifestes, les composants MCP, les commandes et les skills.
+Les tests d'édition vérifient que les liens sources restent présents et qu'une
+cible changée depuis l'aperçu est refusée. Les tests de récupération simulent
+une copie interrompue, un échec de synchronisation, des fichiers de staging
+étrangers et un échec tardif de restauration suivi d'une nouvelle tentative.
 
 Les tests de la CLI vérifient notamment que `agentcfg` sans argument affiche
 l'aide et que `agentcfg config` ouvre la configuration Huh. Sur un terminal

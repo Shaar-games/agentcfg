@@ -14,8 +14,9 @@ import (
 const initRestoreFile = "init-restore.json"
 
 type initRestorePoint struct {
-	Version int            `json:"version"`
-	Native  []restoreEntry `json:"native"`
+	Version int                 `json:"version"`
+	Native  []restoreEntry      `json:"native"`
+	Layout  []nativeLayoutEntry `json:"layout,omitempty"`
 }
 
 type restoreEntry struct {
@@ -239,11 +240,18 @@ func BuildRestorePlan(home string) (*RestorePlan, error) {
 	}
 	p := &Plan{root: base, base: base, rootIdentity: info, baseIdentity: info,
 		statePath: filepath.Join(canonical, "sync-user.json"), state: freshManifest()}
+	p.canonicalIdentity, err = os.Stat(canonical)
+	if err != nil {
+		return nil, err
+	}
 	p.stateBefore, p.stateExists, err = readOptional(p.statePath)
 	if err != nil {
 		return nil, err
 	}
 	known := map[string]bool{}
+	if err := validateNativeLayout(base, point); err != nil {
+		return nil, err
+	}
 	for _, entry := range point.Native {
 		path, err := restoreTarget(base, entry.Path, entry.Skill)
 		if err != nil {
@@ -253,6 +261,16 @@ func BuildRestorePlan(home string) (*RestorePlan, error) {
 			return nil, errors.New("duplicate initialization restore target")
 		}
 		known[path] = true
+		alreadyRestored := false
+		for _, layout := range point.Layout {
+			if pathUnder(filepath.Join(base, filepath.FromSlash(layout.Path)), path) && layoutAlreadyRestored(base, layout) {
+				alreadyRestored = true
+				break
+			}
+		}
+		if alreadyRestored {
+			continue
+		}
 		change, err := restoreChange(p, path, entry)
 		if err != nil {
 			return nil, err
@@ -267,12 +285,12 @@ func BuildRestorePlan(home string) (*RestorePlan, error) {
 			return nil, err
 		}
 		for path := range state.Configs {
-			if !known[path] {
+			if !known[path] && !layoutCovers(base, point.Layout, path) {
 				return nil, fmt.Errorf("native configuration was synchronized after init without an original restore snapshot: %s", path)
 			}
 		}
 		for path := range state.Skills {
-			if !known[path] {
+			if !known[path] && !layoutCovers(base, point.Layout, path) {
 				return nil, fmt.Errorf("native skill was synchronized after init without an original restore snapshot: %s", path)
 			}
 		}
@@ -407,7 +425,7 @@ func restoreChange(p *Plan, path string, entry restoreEntry) (*Change, error) {
 		if err != nil || hash != entry.BeforeHash {
 			return nil, errors.New("original skill backup changed or is missing")
 		}
-		skill.sourceHash, err = treeFingerprint(skill.source)
+		skill.sourceHash, err = sourceTreeFingerprint(skill.source)
 		if err != nil {
 			return nil, err
 		}
@@ -443,11 +461,23 @@ func (r *RestorePlan) Apply() error {
 	if err := check(); err != nil {
 		return err
 	}
+	var point initRestorePoint
+	if r.pointExists {
+		if err := json.Unmarshal(r.point, &point); err != nil {
+			return err
+		}
+	}
+	if err := validateNativeLayout(r.plan.root, point); err != nil {
+		return err
+	}
 	r.plan.extraPreflight = check
 	if err := r.plan.Apply(); err != nil {
 		return err
 	}
 	if err := check(); err != nil {
+		return err
+	}
+	if err := restoreNativeLayout(r.plan.root, point); err != nil {
 		return err
 	}
 	if _, err := os.Lstat(r.Archive); !os.IsNotExist(err) {

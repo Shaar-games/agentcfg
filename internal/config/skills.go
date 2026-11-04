@@ -10,6 +10,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"agentcfg/internal/fsstate"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,7 +21,7 @@ func (l *loader) loadSkills(location, plugin, boundary string, standalone bool) 
 	if _, err := os.Lstat(location); os.IsNotExist(err) {
 		return
 	}
-	path, err := containedPath(boundary, location, false)
+	path, err := linkedReadPath(boundary, location, false)
 	if err != nil {
 		l.warn(location, err)
 		return
@@ -30,7 +32,7 @@ func (l *loader) loadSkills(location, plugin, boundary string, standalone bool) 
 		return
 	}
 	for _, entry := range entries {
-		candidate := filepath.Join(path, entry.Name())
+		candidate := filepath.Join(location, entry.Name())
 		directory, err := resolveExisting(candidate)
 		if err != nil {
 			l.warn(candidate, err)
@@ -47,7 +49,7 @@ func (l *loader) loadSkills(location, plugin, boundary string, standalone bool) 
 		if standalone && l.generatedSkill(directory) {
 			continue
 		}
-		if _, err = containedPath(boundary, directory, false); err != nil {
+		if _, err = linkedReadPath(boundary, candidate, false); err != nil {
 			l.warn(candidate, err)
 			continue
 		}
@@ -78,7 +80,7 @@ func (l *loader) loadSkill(directory, dirname, plugin, boundary string) {
 	if _, err := os.Lstat(location); os.IsNotExist(err) {
 		return
 	}
-	path, err := containedPath(boundary, location, false)
+	path, err := linkedReadPath(boundary, location, false)
 	if err != nil {
 		l.warn(location, err)
 		return
@@ -111,7 +113,7 @@ func (l *loader) loadSkill(directory, dirname, plugin, boundary string) {
 			return
 		}
 	}
-	l.config.Skills = append(l.config.Skills, Skill{Name: name, Path: directory, Harnesses: harnesses})
+	l.config.Skills = append(l.config.Skills, Skill{Name: name, Path: directory, File: path, Harnesses: harnesses})
 }
 
 // skillHarnesses reads the optional Agent Skills string metadata.harness.
@@ -324,43 +326,9 @@ func validateYAMLNode(node *yaml.Node, depth int, count *int) error {
 }
 
 func validateSkillTree(root, boundary string) error {
-	active := map[string]bool{}
-	count := 0
-	var visit func(string) error
-	visit = func(path string) error {
-		count++
-		if count > 10000 {
-			return fmt.Errorf("skill tree exceeds 10000 entries")
-		}
-		resolved, err := containedPath(boundary, path, false)
-		if err != nil {
-			return err
-		}
-		info, err := os.Stat(resolved)
-		if err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			return nil
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("skill contains a non-regular file: %s", path)
-		}
-		if active[resolved] {
-			return fmt.Errorf("skill contains a directory link cycle: %s", path)
-		}
-		active[resolved] = true
-		defer delete(active, resolved)
-		entries, err := os.ReadDir(resolved)
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if err = visit(filepath.Join(resolved, entry.Name())); err != nil {
-				return err
-			}
-		}
-		return nil
+	if _, err := linkedReadPath(boundary, root, false); err != nil {
+		return err
 	}
-	return visit(root)
+	_, err := fsstate.Capture(root, fsstate.Options{FollowLinks: true, MetadataOnly: true})
+	return err
 }

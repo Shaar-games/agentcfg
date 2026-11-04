@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/fsstate"
 	"agentcfg/internal/pathutil"
 )
 
@@ -28,6 +29,7 @@ type skillChange struct {
 	adoptionHash                         string
 	adoptionSource, nativeLinkTarget     string
 	restoreLink                          bool
+	sourceAlias                          string
 }
 
 func canonicalSkill(c *config.Config, name string) *config.Skill {
@@ -207,7 +209,8 @@ func (p *Plan) planSkill(destination string, skill config.Skill, wanted bool, mo
 	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("refusing to copy a skill into itself: %s", destination)
 	}
-	sourceHash, err := fingerprint(source)
+	sourceFingerprint := sourceTreeFingerprint
+	sourceHash, err := sourceFingerprint(source)
 	if err != nil {
 		return err
 	}
@@ -249,48 +252,22 @@ func (p *Plan) planSkill(destination string, skill config.Skill, wanted bool, mo
 	}
 	p.Changes = append(p.Changes, Change{Path: destination, Action: action, exists: exists, adopted: adoption.CanonicalName != "",
 		skill: &skillChange{source: source, sourceHash: sourceHash, beforeHash: current, mode: mode, adoptionHash: adoption.TreeSHA256,
-			adoptionSource: nativeSource, nativeLinkTarget: linkTarget}})
+			adoptionSource: nativeSource, nativeLinkTarget: linkTarget, sourceAlias: skill.Path}})
 	return nil
 }
 
+func sourceTreeFingerprint(path string) (string, error) {
+	snapshot, err := fsstate.Capture(path, fsstate.Options{FollowLinks: true})
+	if err != nil {
+		return "", err
+	}
+	return snapshot.State, nil
+}
+
 func copySkill(source, destination string) error {
-	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if redirected(info) {
-			return fmt.Errorf("symlink appeared while copying skill: %s", path)
-		}
-		target := filepath.Join(destination, rel)
-		if entry.IsDir() {
-			return os.MkdirAll(target, info.Mode().Perm()|0o700)
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("special file in skill: %s", path)
-		}
-		input, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer input.Close()
-		output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(output, input)
-		closeErr := output.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
-	})
+	if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+		return err
+	}
+	_, err := fsstate.Copy(source, destination, fsstate.Options{FollowLinks: true})
 	return err
 }

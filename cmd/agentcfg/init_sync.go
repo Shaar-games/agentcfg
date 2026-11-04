@@ -93,6 +93,9 @@ func applyInitSync(ctx context.Context, home, binary string, inventory *bootstra
 	if err != nil {
 		return err
 	}
+	if err := syncer.MaterializeInitLinks(ctx, cfg.Root, harnesses, nativeSkills); err != nil {
+		return err
+	}
 	plan, err := syncer.BuildPlan(cfg, syncer.Options{
 		Root: cfg.Root, Home: cfg.Root, Scope: "user", Binary: binary, SkillMode: "copy",
 		AdoptExisting: true, AdoptMCP: mcp, AdoptSkills: nativeSkills,

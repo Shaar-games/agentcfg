@@ -50,7 +50,7 @@ func TestRejectedSkillReadConsumesBudget(t *testing.T) {
 	defer root.Close()
 	budget := newScanBudget()
 	budget.bytes = 3
-	_, _, _, err = inspectSkill(root, "invalid", "invalid", budget)
+	_, _, _, _, err = inspectSkill(root, "invalid", "invalid", budget)
 	if err == nil || budget.bytes != 0 {
 		t.Fatalf("err=%v remaining=%d", err, budget.bytes)
 	}

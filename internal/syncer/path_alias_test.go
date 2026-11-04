@@ -214,7 +214,7 @@ func TestPathAliasNativeConfigFileSymlinkRefused(t *testing.T) {
 	assertNoAdoptionManifest(t, f.home)
 }
 
-func TestPathAliasLinkedRootRefused(t *testing.T) {
+func TestPathAliasLinkedRootUsesPhysicalIdentity(t *testing.T) {
 	testPathAliasLinkedRoot(t, pathAliasSymlink)
 }
 
@@ -224,8 +224,8 @@ func testPathAliasLinkedRoot(t *testing.T, link pathAliasLink) {
 	pathAliasApply(t, f)
 	linkedRoot := filepath.Join(t.TempDir(), "linked-home")
 	link(t, f.home, linkedRoot)
-	if _, err := normalizeScopeRoot(linkedRoot); err == nil {
-		t.Fatal("normalization accepted a link at the selected root itself")
+	if normalized, err := normalizeScopeRoot(linkedRoot); err != nil || normalized != f.home {
+		t.Fatalf("linked root did not resolve to its physical identity: %s %v", normalized, err)
 	}
 	for _, adopt := range []bool{false, true} {
 		opts := f.opts
@@ -233,8 +233,13 @@ func testPathAliasLinkedRoot(t *testing.T, link pathAliasLink) {
 			opts = f.ordinaryOptions()
 		}
 		opts.Root, opts.Home = linkedRoot, linkedRoot
-		if _, err := BuildPlan(f.cfg, opts); err == nil || !strings.Contains(err.Error(), "root") {
-			t.Fatalf("linked root was not rejected before ownership checks (adopt=%t): %v", adopt, err)
+		plan, err := BuildPlan(f.cfg, opts)
+		if adopt {
+			if err == nil || !strings.Contains(err.Error(), "managed") {
+				t.Fatalf("alias bypassed existing ownership checks: %v", err)
+			}
+		} else if err != nil || len(plan.Changes) != 0 {
+			t.Fatalf("linked root lost managed ownership: %v", err)
 		}
 	}
 }

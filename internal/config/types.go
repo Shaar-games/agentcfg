@@ -29,6 +29,7 @@ type Server struct {
 type Skill struct {
 	Name      string
 	Path      string
+	File      string // resolved SKILL.md binding, including explicit source links
 	Harnesses []string
 }
 

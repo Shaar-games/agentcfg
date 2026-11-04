@@ -146,14 +146,21 @@ Server overrides replace only fields explicitly present. For example, `"harnesse
 
 Skills are distributed into each selected harness's own directory; Codex uses `~/.codex/skills/` (its [supported legacy user location](https://github.com/openai/codex/blob/main/codex-rs/ext/skills/src/host_roots.rs)), rather than the shared `~/.agents/skills/`. During initialization, imported skills from every native location are backed up and removed after their canonical copies have been verified; enabled destinations are replaced with physical copies. Existing agentcfg-managed shared skills migrate on the next sync. Unimported skills and manually modified managed entries are protected. `agentcfg restore` restores the original shared imports when an initialization restore point exists.
 
-Initialization also adopts top-level skill symlinks and Windows junctions whose
-resolved targets were discovered inside the user home. Their contents are
-centralized and distributed as physical copies; replacing a native link leaves
-its independent target untouched. Link chains are detached before their target
-imports are retired. Restore moves the original link entries back, preserving
-relative targets and junction types without creating replacement links. Nested
-links, linked destination parents, changed targets and outside-home targets
-remain unsupported.
+Initialization follows existing user-declared symlinks and Windows junctions,
+including shared skills roots, individual skills, nested assets, MCP files and
+linked harness directories. Targets may be elsewhere on disk; only the declared
+user harness locations are discovered, never project configurations. Sources are
+snapshotted before any shared alias is detached. Imported content becomes
+physical canonical copies, then physical copies or broker entries in the selected
+harnesses. Independent external targets remain unchanged.
+
+`agentcfg restore` restores the original entries, including relative links and
+junction types, by moving the saved entries back. Unrelated files in a linked
+harness directory are preserved. A changed source, changed backup or manual edit
+blocks replacement. Broken links, cycles, special files and trees exceeding the
+snapshot limits produce an error before their native entries are replaced.
+Native layout snapshots are bounded to 100,000 entries, 512 MiB total and 64 MiB
+per file; the smaller skill discovery limits still apply to imported skills.
 
 The canonical sources remain under `~/.agentcfg/skills/`. Harness-native discovery can still read additional locations independently of agentcfg; distribution filters are not an isolation or authorization boundary.
 
@@ -196,7 +203,7 @@ agentcfg recognizes Agent Plugins 1.0.0 locally. It never fetches a declared sch
 
 ## Plugin paths and variables
 
-The plugin root is resolved through the filesystem. Plugin root symlinks are allowed; all package locations are then bounded by that resolved root. Manifest, MCP, command, working-directory and skill paths are checked after resolving symlinks and Windows junctions/reparse paths.
+Canonical directories, plugin catalogs, packages and their read-only components may use explicit symlinks or Windows junctions, including external targets. Manifest, MCP, command, working-directory and skill paths must remain lexically inside their declared package; existing links are resolved for reading. Synchronization copies skill contents into physical destination trees. Writable plugin data retains its dedicated containment checks.
 
 On Windows, the shared path resolver obtains the final path through a metadata handle and [GetFinalPathNameByHandle](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew). This also resolves directory junctions that the standard Go path helper can leave at their apparent location.
 
@@ -211,7 +218,7 @@ For plugin stdio servers:
 | `cwd: "${PLUGIN_DATA}"` or a child | Dedicated data directory; may be absent during load |
 | `args` and environment values | Opaque strings with the two supported substitutions |
 
-Portable paths use forward slashes; explicit backslashes and drive/stream colons in package-relative fields are rejected. Traversal or a link resolving outside the permitted root invalidates that entry. A package command must resolve to a regular file.
+Portable paths use forward slashes; explicit backslashes and drive/stream colons in package-relative fields are rejected. Traversal outside the declared package invalidates that entry; an explicit existing link may refer to an external read target. A package command must resolve to a regular file.
 
 `${PLUGIN_ROOT}` and `${PLUGIN_DATA}` are replaced textually, in one non-recursive pass, in arguments, environment values and working directories. Unknown placeholders stay literal. Replacement never applies to commands, environment keys, URLs or headers, and does not expand arbitrary host environment variables.
 
@@ -223,7 +230,7 @@ The launcher receives reserved `PLUGIN_ROOT` and `PLUGIN_DATA` environment varia
 
 That location remains stable across updates using the same manifest name. Existing data paths must be directories, remain within the source root, and must not alias another plugin's data directory. The loader computes missing paths without creating them. The process launcher is responsible for creating the data directory and a selected data-rooted working directory immediately before launch.
 
-Containment protects package paths read during this load. It does not sandbox a subprocess or freeze a filesystem against later changes. Arguments and environment values remain opaque even when they look like paths.
+Lexical path checks reject package traversal during this load. They do not sandbox a subprocess or freeze a filesystem against later changes. Arguments and environment values remain opaque even when they look like paths.
 
 ## Remote URLs and headers
 
@@ -249,7 +256,7 @@ The name must match its discovered directory basename, use 1–64 lowercase Unic
 
 BOM and CRLF input are supported. Duplicate YAML keys, aliases, anchors, custom tags, malformed types and missing delimiters reject only the affected skill. No skill instructions or scripts are executed by loading.
 
-The full skill tree is checked for escaped links, cycles and special files because sync may copy that tree. In-root aliases retain the discovered basename for installation, even when the filesystem target has a different name. A sync implementation may impose additional restrictions on nested symlinks.
+The full skill tree is checked for broken links, cycles, size limits and special files because sync may copy that tree. Explicit links, including nested assets and a linked `SKILL.md`, are read and expanded into physical copies during sync. Aliases retain the discovered basename for installation, even when the filesystem target has a different name.
 
 These are explicit implementation limits: configuration/skill files are limited to 1 MiB, frontmatter to 64 KiB, YAML to 32 levels and 4,096 nodes, and one skill tree to 10,000 visited entries.
 
