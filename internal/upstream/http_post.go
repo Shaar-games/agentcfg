@@ -48,7 +48,7 @@ func (t *httpTransport) post(ctx context.Context, data []byte, id json.RawMessag
 					return err
 				}
 			}
-			if discover && message["error"] != nil && !modernProtocolError(message) {
+			if discover && !modernDiscoveryResult(message) && !modernProtocolError(message) {
 				t.resetFailedDiscovery()
 			} else if modern {
 				t.mu.Lock()
@@ -97,11 +97,11 @@ func (t *httpTransport) post(ctx context.Context, data []byte, id json.RawMessag
 		return nil
 	}
 	if discover {
-		var failed *sdkExchangeError
-		if ctx.Err() != nil || errors.As(err, &failed) &&
-			(failed.status == 400 || failed.status == 404 || failed.status == 405 || failed.status == 501) {
-			t.resetFailedDiscovery()
-		}
+		// An authentication or transport failure provides no evidence of the
+		// server's protocol version. Keep legacy initialization available after
+		// login or recovery, just as after an unsupported discovery method.
+		// Valid modern protocol errors have already been handled by receive.
+		t.resetFailedDiscovery()
 	}
 	if errors.Is(err, errSessionExpired) {
 		return errSessionExpired
@@ -117,6 +117,25 @@ func (t *httpTransport) post(ctx context.Context, data []byte, id json.RawMessag
 func modernProtocolError(message wire.Message) bool {
 	code := rpcErrorCode(message)
 	return code == -32020 || code == -32021 || code == -32022
+}
+
+// The broker permits legacy fallback when discovery does not advertise the
+// supported modern version. Keep the transport's mode consistent with that
+// decision, including malformed or incomplete result objects. The original
+// message is still delivered unchanged for the caller to validate.
+func modernDiscoveryResult(message wire.Message) bool {
+	var result struct {
+		SupportedVersions []string `json:"supportedVersions"`
+	}
+	if message["error"] != nil || json.Unmarshal(message["result"], &result) != nil {
+		return false
+	}
+	for _, version := range result.SupportedVersions {
+		if version == wire.ModernProtocolVersion {
+			return true
+		}
+	}
+	return false
 }
 
 func rpcErrorCode(message wire.Message) int {

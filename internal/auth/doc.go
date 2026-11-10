@@ -7,6 +7,7 @@
 // NewHandler is assigned to mcp.StreamableClientTransport.OAuthHandler.
 // The default handler is noninteractive: it restores/refreshes cached
 // credentials, or returns ErrLoginRequired before discovery/registration.
+// An existing handler also notices credentials saved by a later login command.
 // Login runs a real MCP initialization with an explicitly supplied SDK
 // AuthorizationCodeFetcher. The caller displays/opens args.URL and returns the
 // complete callback code, state and optional issuer. ParseAuthorizationResponse
@@ -29,8 +30,10 @@
 // client ID takes priority over client metadata URLs and DCR. Client secrets can only
 // be named through an environment variable and require a pinned issuer. Refresh
 // reads that variable again, after matching the cached client and pinned issuer.
-// Explicit scopes bound requested scopes; omitted scopes use discovery.
-// A matching unadvertised response issuer is accepted only for a pinned issuer.
+// Explicit scopes replace metadata defaults while retaining granted scopes and
+// scopes required by an explicit challenge; omitted scopes use discovery.
+// Response issuers are checked against the discovered authorization server,
+// including matching issuers whose metadata omitted the support flag.
 //
 // The account label partitions credentials and broker configurations; it does
 // not verify a provider's subject. Use a distinct label for each desired

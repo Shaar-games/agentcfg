@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -55,6 +56,15 @@ func startStdio(parent context.Context, s config.Server, stderr io.Writer) (Tran
 	cwd, err = workingDirectory(cwd)
 	if err != nil {
 		return nil, err
+	}
+	if _, overridden := s.Env["PWD"]; runtime.GOOS != "windows" && !overridden {
+		// An explicit Cmd.Env prevents os/exec from updating PWD for Cmd.Dir.
+		// Keep the inherited shell directory consistent with this client's cwd,
+		// while preserving a deliberate per-server PWD override.
+		env, err = mergeEnvironment(env, map[string]string{"PWD": cwd})
+		if err != nil {
+			return nil, err
+		}
 	}
 	command, err := resolveCommand(s.Command, cwd, env)
 	if err != nil {

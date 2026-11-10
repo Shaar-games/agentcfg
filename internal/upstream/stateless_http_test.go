@@ -138,3 +138,51 @@ func TestModernHTTPDirectRequestWithoutDiscovery(t *testing.T) {
 		t.Fatal("unexpected extra HTTP handshakes")
 	}
 }
+
+func TestModernHTTPDiscoveryFailureDoesNotChooseProtocol(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			transport := newHTTPFixture(t, normalHTTPHandler(t, func(w http.ResponseWriter, r *http.Request, message wire.Message) {
+				if message.Method() != "server/discover" {
+					t.Errorf("unexpected method: %s", message.Method())
+				}
+				w.WriteHeader(status)
+			}))
+			if err := transport.Write(modernHTTPMessage("probe", "server/discover", nil)); err != nil {
+				t.Fatal(err)
+			}
+			if answer := mustRead(t, transport); answer["error"] == nil {
+				t.Fatal("failed discovery has no correlated error")
+			}
+			initializeHTTP(t, transport)
+		})
+	}
+}
+
+func TestModernHTTPUnsupportedDiscoveryResultAllowsLegacyInitialize(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result any
+	}{
+		{"unsupported-version", map[string]any{"supportedVersions": []string{"2025-11-25"}}},
+		{"no-versions", map[string]any{"capabilities": map[string]any{}}},
+		{"invalid-result", "unexpected"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := newHTTPFixture(t, normalHTTPHandler(t, func(w http.ResponseWriter, r *http.Request, message wire.Message) {
+				if message.Method() != "server/discover" {
+					t.Errorf("unexpected method: %s", message.Method())
+				}
+				writeHTTPJSON(w, wire.Result(message.ID(), tc.result))
+			}))
+			if err := transport.Write(modernHTTPMessage("probe", "server/discover", nil)); err != nil {
+				t.Fatal(err)
+			}
+			answer := mustRead(t, transport)
+			if string(answer["result"]) != string(wire.Raw(tc.result)) {
+				t.Fatalf("discovery payload changed before client validation: %s", answer["result"])
+			}
+			initializeHTTP(t, transport)
+		})
+	}
+}

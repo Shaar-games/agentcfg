@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/fsstate"
 	"agentcfg/internal/pathutil"
 )
 
@@ -68,7 +69,10 @@ func freshManifest() manifest {
 }
 
 func readOptional(path string) ([]byte, bool, error) {
-	data, err := os.ReadFile(path)
+	// Preview, preflight and restore all read native files through this helper.
+	// Reject special files before opening them and bound regular-file reads,
+	// as adoption already does, so a FIFO cannot hang a normal synchronization.
+	data, err := fsstate.ReadFile(path, "", 16<<20)
 	if os.IsNotExist(err) {
 		return nil, false, nil
 	}

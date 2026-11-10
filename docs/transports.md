@@ -31,6 +31,12 @@ case-insensitively; if override spellings collide, the lexically last spelling
 wins. No implicit current-directory executable search is added: name lookup uses
 the configured `PATH` and Windows `PATHEXT`. Paths containing spaces are supported.
 
+On Windows, a command without an extension is resolved through `PATHEXT`, so
+the POSIX `npx` shim shipped beside `npx.cmd` is not selected. A name containing
+a dot also tries the configured suffixes after its exact spelling. Empty Windows
+`PATH` components are ignored; an explicit `.` still requests the working
+directory. Unix keeps the usual empty-component working-directory behavior.
+
 If a canonical stdio server omits `cwd`, the connection supplies its caller's
 working directory over private IPC. The broker resolves that directory before
 selecting an upstream process, so its own launch directory cannot leak into a
@@ -38,6 +44,9 @@ later client's context. An explicit server `cwd` takes precedence. Clients with
 the same resolved configuration and directory can share; different directories
 produce different backend identities. No project-local canonical files are read
 or written to establish this runtime context.
+
+On Unix, the child's `PWD` follows its effective working directory as well,
+unless the server explicitly overrides `PWD` in its environment.
 
 When the **server configuration** supplies a nonempty `PLUGIN_DATA`, execution
 creates that directory and, if needed, a selected working directory beneath it.
@@ -87,8 +96,9 @@ from breaking its own command invocation.
 ## Outbound Streamable HTTP
 
 `type: "streamable-http"` selects this transport. The URL
-must be one absolute HTTP(S) MCP endpoint without URL userinfo or fragments. All
-POST, GET and DELETE requests use that endpoint. Redirects are rejected, including
+must be one absolute HTTP(S) MCP endpoint without a fragment. Literal URL
+credentials and query parameters are preserved. All POST, GET and DELETE requests
+use that endpoint. Redirects are rejected, including
 same-origin redirects; authentication headers are never forwarded to a redirect
 target. No TCP/HTTP listener is opened by this implementation. Local test servers
 exist only inside `httptest` fixtures.
@@ -99,8 +109,8 @@ connection framing. HTTP session IDs are distinct from JSON-RPC request IDs.
 
 Each outgoing message becomes one POST. Requests accept either one JSON response
 or an SSE stream that may contain notifications and server callbacks before the
-matching response. Callback responses and notifications expect HTTP 202. Errors
-for outgoing requests are delivered by `Read` as JSON-RPC errors with the original
+matching response. Callback responses and notifications accept HTTP 202 or 204.
+Errors for outgoing requests are delivered by `Read` as JSON-RPC errors with the original
 request ID. Failed notifications/responses terminate the transport because there
 is no request ID to which an error could be returned. Transport-generated errors
 omit URLs, configured headers, response bodies and underlying network error text.
@@ -113,7 +123,8 @@ version and successful session state are installed before exposing the initializ
 result. Later POSTs and the optional GET stream wait for the initialized
 notification's HTTP acceptance. Subsequent requests include `Mcp-Session-Id`, when
 assigned, and `MCP-Protocol-Version`. A session-bearing HTTP 404 ends the transport;
-reconnection must start a fresh initialization. Tool requests are never replayed.
+reconnection must start a fresh initialization. Network failures and session
+expiration do not trigger replay of tool requests.
 
 After initialization, one optional GET SSE stream receives unsolicited requests
 and notifications. HTTP 405/501 or an unsupported GET response disables that
@@ -134,7 +145,8 @@ delivering the correlated response to the broker.
 
 ### Bounds, cancellation and shutdown
 
-- At most eight request POSTs and four separate control/reply POSTs are active.
+- At most eight ordinary request POSTs, eight modern `subscriptions/listen` POSTs
+  and four separate control/reply POSTs are active.
   No goroutine is started before a slot is reserved. A saturated lane makes
   `Write` return `ErrBusy` immediately. The broker must handle that write error.
 - Separate control capacity lets callback replies and cancellation proceed even
@@ -142,12 +154,15 @@ delivering the correlated response to the broker.
 - The receive queue contains at most eight messages. Backpressure observes the
   operation context. If a failed/cancelled request's completion cannot be queued,
   the transport terminates so the operation does not leave a blocked worker.
-- A POST has a two-minute overall deadline, including response headers and body.
-  The dial and TLS handshake deadlines are ten seconds. Backend context
-  cancellation interrupts all active operations.
-- `notifications/cancelled` is forwarded to the server and cancels the matching
-  local POST, except initialization. Local cancellation is not proof that the
-  remote operation stopped; it may already have executed.
+- All POSTs except modern `subscriptions/listen` have a two-minute overall
+  deadline, including response headers and body. Response headers still have a
+  two-minute timeout for subscriptions. The dial and TLS handshake deadlines are
+  ten seconds. Backend context cancellation interrupts all active operations.
+- In a legacy session, `notifications/cancelled` is forwarded to the server and
+  cancels the matching local POST, except initialization. Modern cancellation
+  closes the matching POST stream without another notification POST. Local
+  cancellation is not proof that the remote operation stopped; it may already
+  have executed.
 - Close cancels active operations, waits for workers, attempts session DELETE
   with a fresh context bounded to two seconds, and closes idle connections.
   DELETE errors and HTTP 405 are best effort and do not prevent local cleanup.
@@ -170,14 +185,19 @@ the protocol's sentinel encoding. The transport caches validated
 modern list. A direct `tools/call` **before** `tools/list` might lack schema-
 derived headers; clients should list tools first when using annotated tools.
 
+If a modern `tools/call` receives `HeaderMismatch` (`-32020`), the transport
+refreshes `tools/list` and, if that succeeds, retries the call once with updated
+headers. This error is a protocol rejection before execution; other tool failures
+do not trigger an automatic replay.
+
 Modern requests are routed independently and retain the originating client's
 `_meta`. Two clients' identical JSON-RPC IDs are remapped by the broker; modern
 clients are not merged into an already-initialized legacy stdio session.
 Normal modern JSON/SSE results, including multi-round-trip `input_required`
 results, are forwarded as received. MRTR input collection remains the calling
-client's responsibility. The current finite request timeout does not promise
-an indefinite `subscriptions/listen` stream, and no automatic stream restart
-or SSE cursor resumption is claimed.
+client's responsibility. Modern `subscriptions/listen` streams omit the ordinary
+overall request deadline. They are not automatically restarted or resumed with
+an SSE cursor.
 
 ### Explicit transport boundaries
 
@@ -193,6 +213,11 @@ OAuth 2.1 authorization is available through the official Go MCP SDK with an
 explicitly configured `oauth` block and `agentcfg auth login <server>`.
 Discovery, PKCE, encrypted cached tokens and refresh are supported; the broker
 never initiates an interactive login or opens a browser without a user command.
+Explicit scopes limit discovery defaults. Scopes required by a Bearer challenge
+are included in the next explicit authorization, together with existing grants.
+A callback issuer is still validated when the provider omits its metadata hint.
+Dynamic registration uses the SDK's redirect classification, including HTTPS
+loopback callbacks as native applications.
 The configured redirect URL must be registered with the authorization provider.
 Windows uses per-user DPAPI, while Linux/macOS need an explicitly supplied
 `AGENTCFG_OAUTH_KEY` (base64-encoded 32 random bytes) or an injected secure
@@ -205,14 +230,26 @@ implicit fallback to that protocol and no endpoint supplied by SSE is followed.
 
 ## Verification
 
-The package tests use the actual `go test` executable as a subprocess fixture,
-temporary files/directories and `httptest` endpoints. They do not modify installed
-harness configurations, contact an external MCP or depend on `npx`/Node being
-installed. They cover process identity, native/batch quoting, environment/cwd,
+The default package tests use the actual `go test` executable as a subprocess
+fixture, temporary files/directories and `httptest` endpoints. They do not modify
+installed harness configurations, contact an external MCP or depend on Node.js.
+They cover process identity, native/batch quoting, environment/cwd,
 data-directory creation, tree cleanup, concurrent close/write, cancellation,
 malformed/oversized frames, initialize/session/header ordering, callback replies,
 optional GET, JSON/SSE results, session expiration, redirect rejection and
 sanitized correlated errors.
+
+The OAuth integration opens a transport before login, verifies the unauthenticated
+error, then performs PKCE login and encrypted credential persistence against an
+SDK test server. It checks an authenticated tool call, rejection after logout and
+recovery after another login on that same transport, for legacy and stateless
+protocols with JSON and SSE responses.
+
+`AGENTCFG_TEST_NPX=1` explicitly enables the real npm integration. It downloads
+`@modelcontextprotocol/server-filesystem@2.2.0` into a temporary cache and requires
+Node.js 24 or newer. `TestNPXFilesystem` checks the transport directly;
+`TestCLINPXFilesystem` additionally checks the CLI, broker and shared/isolated
+clients. See [verification.md](verification.md) for the disposable Docker runner.
 
 ```text
 mise exec -- go test ./internal/upstream -count=1

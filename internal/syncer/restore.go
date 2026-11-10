@@ -186,26 +186,60 @@ func (p *Plan) captureRestoreEntry(change Change, previous *restoreEntry, backup
 			}
 			entry.Backup = filepath.ToSlash(filepath.Join("restore", "skills", rawDigest([]byte(relative))[:16]))
 			backup := filepath.Join(p.root, ".agentcfg", filepath.FromSlash(entry.Backup))
-			if err := ensureNoSymlinkParents(p.root, backup); err != nil {
-				return restoreEntry{}, err
-			}
 			entry.BeforeHash, err = SkillTreeSHA256(change.Path)
 			if err != nil {
 				return restoreEntry{}, err
 			}
-			if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
+			if err := p.saveRestoreSkill(change.Path, backup, entry.BeforeHash); err != nil {
 				return restoreEntry{}, err
-			}
-			if err := copySkill(change.Path, backup); err != nil {
-				return restoreEntry{}, err
-			}
-			hash, err := SkillTreeSHA256(backup)
-			if err != nil || hash != entry.BeforeHash {
-				return restoreEntry{}, errors.New("restore skill copy differs from the native original")
 			}
 		}
 	}
 	return entry, nil
+}
+
+// A failed sync restores the journal but may leave a verified original skill
+// backup behind. Reuse that snapshot only when it still matches the original;
+// a partial or externally edited backup must never become recovery permission.
+func (p *Plan) saveRestoreSkill(source, backup, expected string) error {
+	if err := ensureNoSymlinkParents(p.root, backup); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(backup); err == nil {
+		hash, err := SkillTreeSHA256(backup)
+		if err != nil || hash != expected {
+			return errors.New("existing restore skill backup differs from the native original")
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(filepath.Dir(backup), ".agentcfg-restore-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
+	staged := filepath.Join(staging, "skill")
+	if err := copySkill(source, staged); err != nil {
+		return err
+	}
+	check := func() error {
+		if err := p.checkScopeIdentity(); err != nil {
+			return err
+		}
+		if err := ensureNoSymlinkParents(p.root, backup); err != nil {
+			return err
+		}
+		hash, err := SkillTreeSHA256(staged)
+		if err != nil || hash != expected {
+			return errors.New("restore skill copy differs from the native original")
+		}
+		return nil
+	}
+	return fsops.Rename(context.Background(), staged, backup, check)
 }
 
 // RestorePlan reuses sync's preimage checks, atomic replacements, backups and

@@ -27,7 +27,8 @@ func TestInitYesMigratesNativeMCPAndRestoresOriginal(t *testing.T) {
 	}
 	executable := cliBinary(t)
 	cmd := exec.Command(executable, "init", "--yes")
-	cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home)
+	cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home,
+		"LOCALAPPDATA="+filepath.Join(home, "cache"), "XDG_CACHE_HOME="+filepath.Join(home, "cache"))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("init --yes failed: %v\n%s", err, output)

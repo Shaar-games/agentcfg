@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -91,7 +92,14 @@ func resolveCommand(command, cwd string, env []string) (string, error) {
 		return "", errors.New("MCP command is empty or invalid")
 	}
 	extensions := []string{""}
-	if runtime.GOOS == "windows" && filepath.Ext(command) == "" {
+	if runtime.GOOS == "windows" {
+		// npm ships a POSIX "npx" script beside "npx.cmd". Windows cannot
+		// execute the extensionless shell shim, even though os.Stat finds it.
+		// Use PATHEXT exclusively for names without an explicit extension.
+		extensions = nil
+		if filepath.Ext(command) != "" {
+			extensions = append(extensions, "")
+		}
 		pathext := environmentValue(env, "PATHEXT")
 		if pathext == "" {
 			pathext = ".COM;.EXE;.BAT;.CMD"
@@ -111,6 +119,11 @@ func resolveCommand(command, cwd string, env []string) (string, error) {
 	} else {
 		for _, directory := range filepath.SplitList(environmentValue(env, "PATH")) {
 			if directory == "" {
+				// Unlike Unix, an empty Windows PATH component is not ".".
+				// A trailing semicolon must not select a project-local executable.
+				if runtime.GOOS == "windows" {
+					continue
+				}
 				directory = "."
 			}
 			if !filepath.IsAbs(directory) {
@@ -122,8 +135,17 @@ func resolveCommand(command, cwd string, env []string) (string, error) {
 	for _, candidate := range candidates {
 		for _, ext := range extensions {
 			path := candidate + ext
+			if runtime.GOOS != "windows" {
+				// A group/other execute bit does not prove this user can run a
+				// file. Let os/exec check effective permissions (including ACLs)
+				// on this absolute candidate before moving to the next PATH entry.
+				if _, err := exec.LookPath(path); err == nil {
+					return path, nil
+				}
+				continue
+			}
 			info, err := os.Stat(path)
-			if err == nil && !info.IsDir() && (runtime.GOOS == "windows" || info.Mode()&0111 != 0) {
+			if err == nil && !info.IsDir() {
 				return path, nil
 			}
 		}
