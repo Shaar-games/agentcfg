@@ -447,6 +447,28 @@ func TestHTTPBoundedRequestsStillAcceptCallbackResponses(t *testing.T) {
 		writeHTTPJSON(w, wire.Result(message.ID(), true))
 	}))
 	initializeHTTP(t, transport)
+	// The initialized notification can mark the session ready while the
+	// initialize POST still holds a request slot. Reserve the whole lane once
+	// to wait for that cleanup before testing the capacity with real requests.
+	func() {
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		reserved := 0
+		defer func() {
+			for reserved > 0 {
+				<-transport.requests
+				reserved--
+			}
+		}()
+		for reserved < cap(transport.requests) {
+			select {
+			case transport.requests <- struct{}{}:
+				reserved++
+			case <-timer.C:
+				t.Fatal("initialize request did not release its concurrency slot")
+			}
+		}
+	}()
 	for i := 0; i < httpRequestLimit; i++ {
 		if err := transport.Write(rpcRequest(i, "tools/call", nil)); err != nil {
 			t.Fatalf("request %d: %v", i, err)
