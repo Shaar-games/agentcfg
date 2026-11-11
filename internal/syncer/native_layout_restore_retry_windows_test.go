@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"agentcfg/internal/fsops"
 
 	"golang.org/x/sys/windows"
 )
@@ -70,33 +73,58 @@ func TestNativeLayoutRestoreRejectsDescendantEditsDuringWindowsRetry(t *testing.
 			entry := point.Layout[0]
 			native := filepath.Join(home, filepath.FromSlash(entry.Path))
 			original := filepath.Join(home, ".agentcfg", filepath.FromSlash(entry.Original))
-			editRoot := native
+			editRoot, destination := native, filepath.Join(filepath.Dir(original), "restored-copy")
 			if phase == "original" || phase == "missing-native" {
-				editRoot = original
+				editRoot, destination = original, native
 			}
 			if phase == "missing-native" {
 				if err := os.RemoveAll(native); err != nil {
 					t.Fatal(err)
 				}
 			}
-			var held []*os.File
+			var foreignStage string
 			if phase == "rollback" {
-				second := point.Layout[1]
-				secondNative := filepath.Join(home, filepath.FromSlash(second.Path))
-				secondOriginal := filepath.Join(home, ".agentcfg", filepath.FromSlash(second.Original))
-				held = append(held, holdNativeRestoreRename(t, secondNative, filepath.Join(filepath.Dir(secondOriginal), "lock-probe")))
-			} else {
-				held = append(held, holdNativeRestoreRename(t, editRoot, filepath.Join(filepath.Dir(original), "lock-probe")))
+				destination = original
+				secondOriginal := filepath.Join(home, ".agentcfg", filepath.FromSlash(point.Layout[1].Original))
+				foreignStage = filepath.Join(filepath.Dir(secondOriginal), "restored-copy")
+				// Fail the second entry only after the first has been restored.
+				writeTestFile(t, foreignStage, "Foreign destination.\n")
+			}
+			ready, edited, abort := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			checks := 0
+			signaled := false
+			rename := func(ctx context.Context, source, target string, check func() error) error {
+				if source != editRoot || target != destination {
+					return fsops.Rename(ctx, source, target, check)
+				}
+				if check == nil {
+					return errors.New("restore did not provide a descendant check")
+				}
+				return fsops.Rename(ctx, source, target, func() error {
+					checks++
+					if err := check(); err != nil {
+						return err
+					}
+					if !signaled {
+						signaled = true
+						// The preflight and first descendant check have both succeeded.
+						close(ready)
+						select {
+						case <-edited:
+						case <-abort:
+							return context.Canceled
+						}
+					}
+					return nil
+				})
 			}
 			finished := make(chan error, 1)
 			exited := make(chan struct{})
-			go func() {
-				defer close(exited)
-				finished <- restoreNativeLayout(home, point)
-			}()
+			var held *os.File
 			defer func() {
-				for _, handle := range held {
-					_ = handle.Close()
+				close(abort)
+				if held != nil {
+					_ = held.Close()
 				}
 				select {
 				case <-exited:
@@ -104,34 +132,18 @@ func TestNativeLayoutRestoreRejectsDescendantEditsDuringWindowsRetry(t *testing.
 					t.Error("restore worker did not stop after fixture handles closed")
 				}
 			}()
-			if phase == "rollback" {
-				deadline := time.Now().Add(3 * time.Second)
-				for {
-					if _, err := os.Lstat(original); os.IsNotExist(err) {
-						break // The first original has been installed; the second move is held.
-					} else if err != nil {
-						t.Fatal(err)
-					}
-					select {
-					case err := <-finished:
-						t.Fatalf("restore ended before its first entry was installed: %v", err)
-					case <-time.After(10 * time.Millisecond):
-					}
-					if time.Now().After(deadline) {
-						t.Fatal("first restore entry was not installed")
-					}
-				}
-				held = append(held, holdNativeRestoreRename(t, native, filepath.Join(filepath.Dir(original), "rollback-probe")))
-				secondOriginal := filepath.Join(home, ".agentcfg", filepath.FromSlash(point.Layout[1].Original))
-				// A new destination forces the second move to fail without touching it.
-				// The first restored entry is then held in its inverse rename.
-				writeTestFile(t, filepath.Join(filepath.Dir(secondOriginal), "restored-copy"), "Foreign destination.\n")
-			}
+			go func() {
+				defer close(exited)
+				finished <- restoreNativeLayoutWithRename(home, point, rename)
+			}()
 			select {
+			case <-ready:
 			case err := <-finished:
-				t.Fatalf("restore ended before the locked fixture could be edited: %v", err)
-			case <-time.After(200 * time.Millisecond):
+				t.Fatalf("restore ended before the first checked %s rename: %v", phase, err)
+			case <-time.After(6 * time.Second):
+				t.Fatalf("restore did not reach the first checked %s rename", phase)
 			}
+			held = holdNativeRestoreRename(t, editRoot, filepath.Join(filepath.Dir(original), "lock-probe"))
 			before, err := os.Stat(editRoot)
 			if err != nil {
 				t.Fatal(err)
@@ -149,25 +161,41 @@ func TestNativeLayoutRestoreRejectsDescendantEditsDuringWindowsRetry(t *testing.
 				t.Fatal("fixture unexpectedly changed the root directory mtime")
 			}
 			t.Logf("descendant changed without changing root mtime %s", after.ModTime())
-			for _, handle := range held {
-				if err := handle.Close(); err != nil {
-					t.Fatal(err)
-				}
-			}
+			// Keep the handle open: the first native attempt must fail, so the
+			// next checked attempt sees the completed descendant edit.
+			close(edited)
 			select {
 			case err := <-finished:
 				if err == nil {
 					t.Fatal("restore accepted a descendant edit made during a blocked rename")
 				}
+				changed := false
+				for _, message := range strings.Split(err.Error(), "\n") {
+					if message == "native layout changed while waiting to rename: "+editRoot {
+						changed = true
+					}
+				}
+				if !changed {
+					t.Errorf("restore did not report the edited descendant: %v", err)
+				}
 				t.Logf("restore rejected the concurrent edit: %v", err)
 			case <-time.After(6 * time.Second):
-				t.Fatal("restore did not finish after releasing the native handles")
+				t.Fatal("restore did not reject the edit while the native handle remained open")
 			}
+			if checks < 2 {
+				t.Errorf("targeted rename ran %d descendant checks, want a check after the blocked attempt", checks)
+			}
+			if err := held.Close(); err != nil {
+				t.Fatal(err)
+			}
+			held = nil
 			assertAdoptionBytes(t, asset, manual)
 			if phase != "rollback" {
 				if _, err := os.Lstat(original); err != nil {
 					t.Fatalf("original recovery entry was consumed despite the conflict: %v", err)
 				}
+			} else {
+				assertAdoptionBytes(t, foreignStage, []byte("Foreign destination.\n"))
 			}
 		})
 	}

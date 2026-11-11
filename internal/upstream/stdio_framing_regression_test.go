@@ -37,10 +37,9 @@ func (r *stdioFramingChunks) Read(p []byte) (int, error) {
 	return 0, io.EOF
 }
 
-func readStdioFramingFixture(t *testing.T, chunks []string) ([]wire.Message, error) {
+func readStdioFramingFixture(t *testing.T, chunks []string, expectedMessages int) ([]wire.Message, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	reader := &singleMessageReader{
 		ReadCloser: io.NopCloser(&stdioFramingChunks{chunks: append([]string(nil), chunks...)}),
 	}
@@ -53,10 +52,20 @@ func readStdioFramingFixture(t *testing.T, chunks []string) ([]wire.Message, err
 	defer connection.Close()
 	var messages []wire.Message
 	for {
-		message, err := connection.Read(ctx)
+		readCtx := ctx
+		var cancel context.CancelFunc
+		if len(messages) == expectedMessages {
+			// Large payload validation and SDK conversion use the test's overall
+			// time budget. Guard termination after the expected messages arrive.
+			readCtx, cancel = context.WithTimeout(ctx, 15*time.Second)
+		}
+		message, err := connection.Read(readCtx)
+		if cancel != nil {
+			cancel()
+		}
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				t.Fatal("stdio fixture blocked after its input was exhausted")
+				t.Fatalf("stdio fixture did not terminate after %d expected messages", expectedMessages)
 			}
 			return messages, err
 		}
@@ -65,8 +74,8 @@ func readStdioFramingFixture(t *testing.T, chunks []string) ([]wire.Message, err
 			t.Fatal(err)
 		}
 		messages = append(messages, encoded)
-		if len(messages) > 4 {
-			t.Fatal("stdio fixture produced more messages than its input objects")
+		if len(messages) > expectedMessages {
+			t.Fatalf("stdio fixture produced %d messages, expected %d", len(messages), expectedMessages)
 		}
 	}
 }
@@ -90,7 +99,7 @@ func TestStdioFramingRejectsAdjacentValuesWithoutNewline(t *testing.T) {
 		{"embedded-carriage-return", []string{strings.ReplaceAll(first, ",", ",\r") + "\n"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			messages, err := readStdioFramingFixture(t, test.chunks)
+			messages, err := readStdioFramingFixture(t, test.chunks, 0)
 			if err == nil || errors.Is(err, io.EOF) || len(messages) != 0 {
 				t.Fatalf("malformed single line must fail before delivery; received %d messages, err=%v", len(messages), err)
 			}
@@ -111,7 +120,7 @@ func TestStdioFramingPreservesValidLineBeforeMalformedLine(t *testing.T) {
 		{"multiline", []string{valid + "\n{\n" + badFirst[1:] + "\n"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			messages, err := readStdioFramingFixture(t, test.chunks)
+			messages, err := readStdioFramingFixture(t, test.chunks, 1)
 			if len(messages) != 1 || string(messages[0].ID()) != "\"valid\"" {
 				t.Fatalf("must preserve only the preceding valid line; received %#v, err=%v", messages, err)
 			}
@@ -143,7 +152,7 @@ func TestStdioFramingAcceptsFragmentedMessages(t *testing.T) {
 		{"one-byte-at-a-time-including-utf8", oneByteChunks},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			messages, err := readStdioFramingFixture(t, test.chunks)
+			messages, err := readStdioFramingFixture(t, test.chunks, 2)
 			if !errors.Is(err, io.EOF) || len(messages) != 2 {
 				t.Fatalf("valid fragmented stream: received %d messages, err=%v", len(messages), err)
 			}
@@ -169,14 +178,14 @@ func TestStdioFramingRequiresFinalDelimiter(t *testing.T) {
 		{"valid-before-unterminated", []string{message + "\n", message}, 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			messages, err := readStdioFramingFixture(t, test.chunks)
+			messages, err := readStdioFramingFixture(t, test.chunks, test.want)
 			if len(messages) != test.want || !errors.Is(err, io.ErrUnexpectedEOF) {
 				t.Fatalf("unterminated line: received %d messages, err=%v", len(messages), err)
 			}
 		})
 	}
 	t.Run("empty-stream", func(t *testing.T) {
-		messages, err := readStdioFramingFixture(t, nil)
+		messages, err := readStdioFramingFixture(t, nil, 0)
 		if len(messages) != 0 || !errors.Is(err, io.EOF) {
 			t.Fatalf("empty stream: received %d messages, err=%v", len(messages), err)
 		}
@@ -185,7 +194,7 @@ func TestStdioFramingRequiresFinalDelimiter(t *testing.T) {
 
 func TestStdioFramingRejectsInvalidUTF8(t *testing.T) {
 	line := "{\"jsonrpc\":\"2.0\",\"id\":\"invalid\",\"result\":\"" + string([]byte{0xff}) + "\"}\n"
-	messages, err := readStdioFramingFixture(t, []string{line})
+	messages, err := readStdioFramingFixture(t, []string{line}, 0)
 	if len(messages) != 0 || err == nil || errors.Is(err, io.EOF) {
 		t.Fatalf("invalid UTF-8: received %d messages, err=%v", len(messages), err)
 	}
@@ -209,7 +218,7 @@ func TestStdioFramingPayloadLimit(t *testing.T) {
 			for range test.messages {
 				chunks = append(chunks, payload, test.delimiter)
 			}
-			messages, err := readStdioFramingFixture(t, chunks)
+			messages, err := readStdioFramingFixture(t, chunks, test.messages)
 			if len(messages) != test.messages || !errors.Is(err, io.EOF) {
 				t.Fatalf("maximum-sized payload: received %d messages, err=%v", len(messages), err)
 			}
@@ -217,7 +226,7 @@ func TestStdioFramingPayloadLimit(t *testing.T) {
 	}
 	t.Run("one-byte-over", func(t *testing.T) {
 		oversized := payload[:len(payload)-len(suffix)] + "x" + suffix
-		messages, err := readStdioFramingFixture(t, []string{oversized, "\n"})
+		messages, err := readStdioFramingFixture(t, []string{oversized, "\n"}, 0)
 		if len(messages) != 0 || err == nil || errors.Is(err, io.EOF) {
 			t.Fatalf("oversized payload: received %d messages, err=%v", len(messages), err)
 		}

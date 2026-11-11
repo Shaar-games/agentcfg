@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"agentcfg/internal/config"
+	"agentcfg/internal/pathutil"
 
 	"github.com/gofrs/flock"
 )
@@ -79,6 +80,15 @@ func TestConcurrentSettingsEditsDoNotMixSnapshots(t *testing.T) {
 	root := settingsFixture(t)
 	original := `{"harnesses":["codex"],"runtime":{"idleTimeout":"7m"}}`
 	putSettings(t, root, original)
+	// updateSettings resolves the path before reading; match its spelling even
+	// when the temporary directory uses a symlink or Windows short-name alias.
+	settingsPath, err := pathutil.Resolve(settingsFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The other writer may replace the file during the unlocked fsstate read,
+	// before the settings comparison detects the stale value.
+	replacedSnapshot := "entry replaced during snapshot: " + settingsPath
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for _, choice := range []string{"cursor", "gemini"} {
@@ -93,7 +103,7 @@ func TestConcurrentSettingsEditsDoNotMixSnapshots(t *testing.T) {
 	for _, err := range []error{first, second} {
 		if err == nil {
 			writes++
-		} else if !strings.Contains(err.Error(), "changed") {
+		} else if !strings.Contains(err.Error(), "changed") && err.Error() != replacedSnapshot {
 			t.Fatalf("expected a stale snapshot error, got %v", err)
 		}
 	}

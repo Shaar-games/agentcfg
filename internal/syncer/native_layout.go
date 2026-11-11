@@ -434,6 +434,10 @@ func validateNativeLayout(home string, point initRestorePoint) error {
 }
 
 func restoreNativeLayout(home string, point initRestorePoint) error {
+	return restoreNativeLayoutWithRename(home, point, fsops.Rename)
+}
+
+func restoreNativeLayoutWithRename(home string, point initRestorePoint, rename func(context.Context, string, string, func() error) error) error {
 	if err := validateNativeLayout(home, point); err != nil {
 		return err
 	}
@@ -441,7 +445,7 @@ func restoreNativeLayout(home string, point initRestorePoint) error {
 	// Recheck the full tree on each attempt, including inverse moves, because
 	// editing a descendant does not necessarily change its root directory mtime.
 	renameLayout := func(source, destination, expected string) error {
-		return fsops.Rename(context.Background(), source, destination, func() error {
+		return rename(context.Background(), source, destination, func() error {
 			return layoutEntryUnchanged(context.Background(), home, source, expected)
 		})
 	}
