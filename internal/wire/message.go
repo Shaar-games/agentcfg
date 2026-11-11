@@ -105,6 +105,19 @@ type Reader struct{ scanner *bufio.Scanner }
 func NewReader(reader io.Reader) *Reader {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64<<10), MaxFrameSize+1)
+	searched := 0
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		// Scanner retains an incomplete line between reads. Search only the
+		// new suffix so small reads do not repeatedly scan the growing prefix.
+		if !atEOF && bytes.IndexByte(data[searched:], '\n') < 0 {
+			searched = len(data)
+			return 0, nil, nil
+		}
+		searched = 0
+		// Delegate complete lines and EOF to preserve ScanLines' LF, CRLF,
+		// final unterminated line and empty-input behavior exactly.
+		return bufio.ScanLines(data, atEOF)
+	})
 	return &Reader{scanner: scanner}
 }
 

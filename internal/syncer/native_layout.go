@@ -37,7 +37,7 @@ func readInitPoint(home string) (initRestorePoint, []byte, error) {
 	if err := ensureNoSymlinkParents(home, path); err != nil {
 		return initRestorePoint{}, nil, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := fsstate.ReadFile(path, "", 16<<20)
 	if err != nil {
 		return initRestorePoint{}, nil, err
 	}
@@ -437,6 +437,14 @@ func restoreNativeLayout(home string, point initRestorePoint) error {
 	if err := validateNativeLayout(home, point); err != nil {
 		return err
 	}
+	// A Windows handle can delay these moves while descendants are edited.
+	// Recheck the full tree on each attempt, including inverse moves, because
+	// editing a descendant does not necessarily change its root directory mtime.
+	renameLayout := func(source, destination, expected string) error {
+		return fsops.Rename(context.Background(), source, destination, func() error {
+			return layoutEntryUnchanged(context.Background(), home, source, expected)
+		})
+	}
 	var undos []func() error
 	rollback := func(cause error) error {
 		for i := len(undos) - 1; i >= 0; i-- {
@@ -456,10 +464,10 @@ func restoreNativeLayout(home string, point initRestorePoint) error {
 			return rollback(err)
 		}
 		if _, err := os.Lstat(path); os.IsNotExist(err) && len(point.Native) == 0 {
-			if err := fsops.Rename(context.Background(), original, path, nil); err != nil {
+			if err := renameLayout(original, path, entry.OriginalHash); err != nil {
 				return rollback(err)
 			}
-			undos = append(undos, func() error { return fsops.Rename(context.Background(), path, original, nil) })
+			undos = append(undos, func() error { return renameLayout(path, original, entry.OriginalHash) })
 			continue
 		}
 		saved, err := fsstate.Capture(baseline, layoutOptions(false))
@@ -502,19 +510,19 @@ func restoreNativeLayout(home string, point initRestorePoint) error {
 		if _, err := os.Lstat(discard); !os.IsNotExist(err) {
 			return rollback(errors.New("native layout restore staging already exists"))
 		}
-		if err := fsops.Rename(context.Background(), path, discard, nil); err != nil {
+		if err := renameLayout(path, discard, entry.BaselineHash); err != nil {
 			return rollback(err)
 		}
 		installed := false
 		undos = append(undos, func() error {
 			if installed {
-				if err := fsops.Rename(context.Background(), path, original, nil); err != nil {
+				if err := renameLayout(path, original, entry.OriginalHash); err != nil {
 					return err
 				}
 			}
-			return fsops.Rename(context.Background(), discard, path, nil)
+			return renameLayout(discard, path, entry.BaselineHash)
 		})
-		if err := fsops.Rename(context.Background(), original, path, nil); err != nil {
+		if err := renameLayout(original, path, entry.OriginalHash); err != nil {
 			return rollback(err)
 		}
 		installed = true

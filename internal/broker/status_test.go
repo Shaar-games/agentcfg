@@ -16,6 +16,8 @@ import (
 // failure. The test uses a local private endpoint, not a running MCP server.
 func TestGetStatusDuringIPCShutdown(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	endpoint, err := ipc.ForRoot(root)
@@ -59,6 +61,8 @@ func TestGetStatusDuringIPCShutdown(t *testing.T) {
 
 func TestGetStatusPreservesProtocolErrors(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	endpoint, err := ipc.ForRoot(root)

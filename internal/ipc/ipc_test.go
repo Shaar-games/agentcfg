@@ -11,6 +11,10 @@ import (
 
 func TestPrivateIPCExchange(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	endpoint, err := ForRoot(root)
 	if err != nil {
 		t.Fatal(err)

@@ -35,6 +35,8 @@ type oauthFixture struct {
 	noAuth         atomic.Bool
 	refreshStarted chan struct{}
 	refreshBlock   chan struct{}
+	omitIssuerHint bool
+	allowWrite     bool
 }
 
 func newOAuthFixture(t *testing.T) *oauthFixture {
@@ -58,13 +60,17 @@ func (f *oauthFixture) serve(w http.ResponseWriter, r *http.Request) {
 	case "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource":
 		json.NewEncoder(w).Encode(map[string]any{"resource": f.http.URL + "/mcp", "authorization_servers": []string{f.http.URL}, "scopes_supported": []string{"tools.read", "tools.write"}})
 	case "/.well-known/oauth-authorization-server":
-		json.NewEncoder(w).Encode(map[string]any{
+		metadata := map[string]any{
 			"issuer": f.http.URL, "authorization_endpoint": f.http.URL + "/authorize", "token_endpoint": f.http.URL + "/token",
 			"registration_endpoint": f.http.URL + "/register", "response_types_supported": []string{"code"},
 			"grant_types_supported":            []string{"authorization_code", "refresh_token"},
 			"code_challenge_methods_supported": []string{"S256"}, "token_endpoint_auth_methods_supported": []string{"none", "client_secret_basic"},
 			"scopes_supported": []string{"tools.read", "offline_access"}, "authorization_response_iss_parameter_supported": true,
-		})
+		}
+		if f.omitIssuerHint {
+			delete(metadata, "authorization_response_iss_parameter_supported")
+		}
+		json.NewEncoder(w).Encode(metadata)
 	case "/register":
 		f.registrations.Add(1)
 		var metadata map[string]any
@@ -187,7 +193,7 @@ func (f *oauthFixture) fetch(ctx context.Context, args *sdkauth.AuthorizationArg
 	if query.Get("resource") != f.server.URL {
 		f.t.Error("authorization URL missing resource indicator")
 	}
-	if strings.Contains(query.Get("scope"), "tools.write") {
+	if strings.Contains(query.Get("scope"), "tools.write") && !f.allowWrite {
 		f.t.Error("explicit scopes broadened to every discovered scope")
 	}
 	f.mu.Lock()

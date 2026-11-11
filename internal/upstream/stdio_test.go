@@ -78,7 +78,7 @@ func TestUpstreamHelper(t *testing.T) {
 			cwd, _ := os.Getwd()
 			_ = writer.Write(wire.Result(message.ID(), map[string]any{
 				"pid": os.Getpid(), "cwd": cwd, "env": os.Getenv("AGENTCFG_TEST_VALUE"),
-				"args": os.Args[separator+2:], "pluginData": os.Getenv("PLUGIN_DATA"),
+				"args": os.Args[separator+2:], "pluginData": os.Getenv("PLUGIN_DATA"), "pwd": os.Getenv("PWD"),
 			}))
 		} else {
 			_ = writer.Write(wire.Result(message.ID(), message["params"]))

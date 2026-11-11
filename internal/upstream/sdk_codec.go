@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -93,33 +94,79 @@ func sdkIdentifierSupported(raw json.RawMessage) bool {
 	}
 }
 
-// A raw SDK IO connection does not receive the private protocol-version hook
-// that disables pre-2025 JSON-RPC batches. The broker API carries one message
-// per frame, so reject a batch before it can be split or regrouped by the SDK.
+// Validate a complete physical line before exposing any of it to the SDK's
+// streaming JSON decoder. Otherwise pipe read boundaries can make adjacent
+// objects, batches, or multiline objects look like separate valid messages.
 type singleMessageReader struct {
 	io.ReadCloser
-	atStart bool
-	err     error
+	scanner      *bufio.Scanner
+	searchOffset int
+	pending      []byte
+	err          error
 }
 
 func (r *singleMessageReader) Read(data []byte) (int, error) {
+	if len(data) == 0 {
+		return 0, nil
+	}
 	if r.err != nil {
 		return 0, r.err
 	}
-	n, err := r.ReadCloser.Read(data)
-	for index, value := range data[:n] {
-		if value == '\n' {
-			r.atStart = true
-		} else if r.atStart && value != ' ' && value != '\t' && value != '\r' {
-			r.atStart = false
-			if value == '[' {
-				r.err = errors.New("MCP JSON-RPC batches are unsupported")
-				if index == 0 {
-					return 0, r.err
-				}
-				return index, nil
-			}
-		}
+	if r.scanner == nil {
+		r.scanner = bufio.NewScanner(r.ReadCloser)
+		// The payload limit excludes its LF or CRLF delimiter.
+		r.scanner.Buffer(make([]byte, 64<<10), wire.MaxFrameSize+2)
+		r.scanner.Split(r.splitStdioLine)
 	}
-	return n, err
+	for len(r.pending) == 0 {
+		if !r.scanner.Scan() {
+			r.err = r.scanner.Err()
+			if r.err == nil {
+				r.err = io.EOF
+			}
+			return 0, r.err
+		}
+		line := r.scanner.Bytes()
+		if len(line) > wire.MaxFrameSize {
+			r.err = errors.New("MCP stdio frame exceeds 32 MiB")
+			return 0, r.err
+		}
+		message := bytes.Trim(line, " \t")
+		if len(message) == 0 {
+			continue
+		}
+		if message[0] == '[' {
+			r.err = errors.New("MCP JSON-RPC batches are unsupported")
+			return 0, r.err
+		}
+		if message[0] != '{' || bytes.ContainsRune(line, '\r') || !utf8.Valid(line) || !json.Valid(message) {
+			r.err = errors.New("MCP stdio line must contain one complete UTF-8 JSON-RPC object")
+			return 0, r.err
+		}
+		// Retain this scanner token until fully delivered. Only framing
+		// whitespace is normalized; the JSON object remains unchanged.
+		r.pending = append(message, '\n')
+	}
+	n := copy(data, r.pending)
+	r.pending = r.pending[n:]
+	return n, nil
+}
+
+func (r *singleMessageReader) splitStdioLine(data []byte, atEOF bool) (int, []byte, error) {
+	// Scanner retains the unfinished line across reads. Search only new bytes
+	// so small pipe fragments do not repeatedly scan the growing prefix.
+	if newline := bytes.IndexByte(data[r.searchOffset:], '\n'); newline >= 0 {
+		newline += r.searchOffset
+		r.searchOffset = 0
+		line := data[:newline]
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		return newline + 1, line, nil
+	}
+	r.searchOffset = len(data)
+	if atEOF && len(data) > 0 {
+		return 0, nil, io.ErrUnexpectedEOF
+	}
+	return 0, nil, nil
 }

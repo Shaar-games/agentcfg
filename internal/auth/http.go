@@ -161,9 +161,22 @@ func (t *resourceTransport) RoundTrip(request *http.Request) (*http.Response, er
 		return nil, fmt.Errorf("MCP request changed origin")
 	}
 	copy := request.Clone(request.Context())
-	copy.Header = request.Header.Clone()
+	copy.Header = make(http.Header, len(t.headers)+len(request.Header))
 	for name, value := range t.headers {
+		lower := strings.ToLower(name)
+		// These values describe the current SDK request/session and cannot be
+		// inherited from configuration. Match the normal MCP transport so the
+		// explicit login handshake works with the same configured headers.
+		if lower == "mcp-session-id" || lower == "mcp-protocol-version" ||
+			lower == "mcp-method" || lower == "mcp-name" || lower == "last-event-id" ||
+			strings.HasPrefix(lower, "mcp-param-") {
+			continue
+		}
 		copy.Header.Set(name, value)
+	}
+	// The SDK owns negotiation/framing headers such as Accept and Content-Type.
+	for name, values := range request.Header {
+		copy.Header[name] = append([]string(nil), values...)
 	}
 	return t.next.RoundTrip(copy)
 }

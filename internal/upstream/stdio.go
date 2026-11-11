@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -56,6 +57,15 @@ func startStdio(parent context.Context, s config.Server, stderr io.Writer) (Tran
 	if err != nil {
 		return nil, err
 	}
+	if _, overridden := s.Env["PWD"]; runtime.GOOS != "windows" && !overridden {
+		// An explicit Cmd.Env prevents os/exec from updating PWD for Cmd.Dir.
+		// Keep the inherited shell directory consistent with this client's cwd,
+		// while preserving a deliberate per-server PWD override.
+		env, err = mergeEnvironment(env, map[string]string{"PWD": cwd})
+		if err != nil {
+			return nil, err
+		}
+	}
 	command, err := resolveCommand(s.Command, cwd, env)
 	if err != nil {
 		return nil, err
@@ -98,8 +108,10 @@ func startStdio(parent context.Context, s config.Server, stderr io.Writer) (Tran
 	opened = nil
 	ctx, cancel := context.WithCancel(parent)
 	connection, err := (&mcp.IOTransport{
-		Reader: &singleMessageReader{ReadCloser: output, atStart: true},
-		Writer: input, MaxLineLength: wire.MaxFrameSize,
+		Reader: &singleMessageReader{ReadCloser: output},
+		// The reader enforces the payload limit; allow delimiter overhead
+		// in the SDK's byte budget between consecutive maximum-size objects.
+		Writer: input, MaxLineLength: wire.MaxFrameSize + 2,
 	}).Connect(ctx)
 	if err != nil {
 		cancel()

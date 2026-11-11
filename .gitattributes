@@ -1,0 +1,2 @@
+# Shell entrypoints are executed in Linux containers and WSL from Windows checkouts.
+*.sh text eol=lf

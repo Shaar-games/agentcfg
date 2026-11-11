@@ -120,6 +120,8 @@ func integrationRoot(t *testing.T, sharing, idle string) string {
 	root := t.TempDir()
 	t.Setenv("USERPROFILE", root)
 	t.Setenv("HOME", root)
+	t.Setenv("LOCALAPPDATA", filepath.Join(root, "cache"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	if err := os.MkdirAll(filepath.Join(root, ".agentcfg"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +196,8 @@ func startCLIPeerCommand(t *testing.T, binary, root string, args []string, direc
 	if len(directory) > 0 {
 		p.command.Dir = directory[0]
 	}
-	p.command.Env = append(os.Environ(), "USERPROFILE="+root, "HOME="+root)
+	p.command.Env = append(os.Environ(), "USERPROFILE="+root, "HOME="+root,
+		"LOCALAPPDATA="+filepath.Join(root, "cache"), "XDG_CACHE_HOME="+filepath.Join(root, "cache"))
 	input, err := p.command.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 )
 
 const maxPendingRequests = 1024
+const maxCancellationReasonBytes = 1024
 
 var nextRequest atomic.Uint64
 
@@ -29,13 +31,14 @@ type pending struct {
 }
 
 type backend struct {
-	name      string
-	isolated  bool
-	transport upstream.Transport
-	ctx       context.Context
-	cancel    context.CancelFunc
-	timeout   time.Duration
-	closeOnce sync.Once
+	name          string
+	isolated      bool
+	transport     upstream.Transport
+	ctx           context.Context
+	cancel        context.CancelFunc
+	timeout       time.Duration
+	closeOnce     sync.Once
+	cancellations chan wire.Message
 
 	mu       sync.Mutex
 	peers    map[*peer]bool
@@ -55,9 +58,11 @@ func newBackend(ctx context.Context, server config.Server, transport upstream.Tr
 		ctx: ctx, cancel: cancel, timeout: timeout,
 		peers: make(map[*peer]bool), pending: make(map[string]*pending),
 		progress: make(map[string]*pending), lastUsed: time.Now(),
+		cancellations: make(chan wire.Message, maxPendingRequests),
 	}
 	go b.readLoop()
 	go b.expiryLoop()
+	go b.cancellationLoop()
 	return b
 }
 
@@ -201,6 +206,7 @@ func (b *backend) initialize(p *peer, message wire.Message) {
 	if b.initResult == nil {
 		result, err := b.initializeUpstream(message)
 		if err != nil {
+			p.initialized.Store(0)
 			p.send(wire.Error(message.ID(), -32000, err.Error()))
 			return
 		}
@@ -530,16 +536,62 @@ func (b *backend) forwardCancellation(p *peer, message wire.Message) {
 	}
 	b.mu.Unlock()
 	if match != nil {
-		params["requestId"] = match.upstreamID
-		message["params"] = wire.Raw(params)
-		_ = b.transport.Write(message)
+		var reason string
+		if raw := params["reason"]; raw != nil && json.Unmarshal(raw, &reason) != nil {
+			return
+		}
+		b.cancelRequest(match, reason)
 	}
 }
 
 func (b *backend) cancelRequest(request *pending, reason string) {
-	_ = b.transport.Write(wire.Notification("notifications/cancelled", map[string]any{
+	// Cancellation reasons are advisory. Retaining arbitrary client frames in
+	// the bounded queue could still retain gigabytes when a writer is stalled.
+	// Preserve only the protocol fields and a small, valid UTF-8 reason.
+	if len(reason) > maxCancellationReasonBytes {
+		reason = strings.ToValidUTF8(reason[:maxCancellationReasonBytes], "")
+	}
+	b.queueCancellation(wire.Notification("notifications/cancelled", map[string]any{
 		"requestId": request.upstreamID, "reason": reason,
 	}))
+}
+
+// An upstream that stops reading stdin must not stop deadline delivery, peer
+// cleanup or the caller's read loop while an advisory cancellation is written.
+// One bounded queue avoids a goroutine per cancellation. If the upstream cannot
+// drain it, stop this backend so clients can reconnect to a fresh process.
+func (b *backend) queueCancellation(message wire.Message) {
+	if b.ctx.Err() != nil {
+		return
+	}
+	select {
+	case <-b.ctx.Done():
+	case b.cancellations <- message.Clone():
+	default:
+		b.close()
+	}
+}
+
+func (b *backend) cancellationLoop() {
+	for {
+		select {
+		case <-b.ctx.Done():
+			return
+		case message := <-b.cancellations:
+			if b.ctx.Err() != nil {
+				return
+			}
+			if err := b.transport.Write(message); err != nil {
+				if errors.Is(err, upstream.ErrBusy) {
+					// Drop this advisory notification when transport capacity is
+					// temporarily full; other requests and shared clients stay live.
+					continue
+				}
+				b.close()
+				return
+			}
+		}
+	}
 }
 
 func (b *backend) expiryLoop() {

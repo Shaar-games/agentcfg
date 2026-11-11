@@ -103,10 +103,16 @@ func newHandler(ctx context.Context, server config.Server, opts Options, useCach
 		AuthorizationCodeFetcher: fetcher,
 		Client:                   client,
 		RequestRefreshToken:      true,
-		AcceptUnadvertisedIss:    server.OAuth.Issuer != "",
+		// The SDK still compares iss with the discovered authorization server.
+		// A matching issuer is valid even when its metadata omitted the hint,
+		// including when the client was dynamically registered.
+		AcceptUnadvertisedIss: true,
 		ScopeFilter: func(discovered []string) []string {
 			if len(server.OAuth.Scopes) > 0 {
-				return unionScopes(server.OAuth.Scopes, scopes.get())
+				// Explicit scopes narrow metadata defaults, but a server challenge
+				// describes the permissions required for this operation. Dropping
+				// those scopes makes initial consent and later step-up fail forever.
+				return unionScopes(server.OAuth.Scopes, scopes.get(), h.challengeScopes)
 			}
 			return unionScopes(server.OAuth.Scopes, scopes.get(), discovered)
 		},
@@ -135,7 +141,11 @@ func newHandler(ctx context.Context, server config.Server, opts Options, useCach
 	if err = registration(sdkConfig, server.OAuth); err != nil {
 		return nil, err
 	}
-	if record != nil && useCachedToken {
+	// A broker may start before the separate login command has saved its
+	// first grant. Noninteractive sources reload the store on every request,
+	// so install one even when no credentials exist yet. Interactive handlers
+	// need a nil source initially so the SDK can obtain an HTTP challenge.
+	if useCachedToken && (record != nil || !h.interactive) {
 		tokenContext := context.WithValue(context.Background(), oauth2.HTTPClient, client)
 		sdkConfig.InitialTokenSource = managedTokenSource(tokenContext, store, locker, key, scopes, server.OAuth)
 	}
@@ -166,11 +176,6 @@ func registration(sdk *sdkauth.AuthorizationCodeHandlerConfig, cfg *config.OAuth
 	// dynamically registered client. This also keeps cached secret provenance
 	// unambiguous when a clientSecretEnv value later rotates.
 	if cfg.DynamicRegistration && cfg.ClientID == "" {
-		applicationType := "web"
-		redirect, _ := url.Parse(cfg.RedirectURL)
-		if redirect.Scheme == "http" {
-			applicationType = "native"
-		}
 		sdk.DynamicClientRegistrationConfig = &sdkauth.DynamicClientRegistrationConfig{
 			Metadata: &oauthex.ClientRegistrationMetadata{
 				RedirectURIs:            []string{cfg.RedirectURL},
@@ -179,7 +184,8 @@ func registration(sdk *sdkauth.AuthorizationCodeHandlerConfig, cfg *config.OAuth
 				ResponseTypes:           []string{"code"},
 				ClientName:              "agentcfg",
 				Scope:                   strings.Join(cfg.Scopes, " "),
-				ApplicationType:         applicationType,
+				// Let the SDK classify the redirect. HTTPS loopback callbacks
+				// are native applications too, not just their HTTP equivalents.
 			},
 		}
 	}
@@ -234,6 +240,7 @@ type handler struct {
 	flow                  chan struct{}
 	persisted             atomic.Bool
 	authorizationResource string
+	challengeScopes       []string // only read/written while flow is held
 }
 
 func (h *handler) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
@@ -261,6 +268,19 @@ func (h *handler) Authorize(ctx context.Context, request *http.Request, response
 	case <-ctx.Done():
 		_ = response.Body.Close()
 		return ctx.Err()
+	}
+	challenges, err := oauthex.ParseWWWAuthenticate(response.Header.Values("WWW-Authenticate"))
+	if err != nil {
+		_ = response.Body.Close()
+		return safeError("parse OAuth challenge", err)
+	}
+	h.challengeScopes = nil
+	defer func() { h.challengeScopes = nil }()
+	for _, challenge := range challenges {
+		if challenge.Scheme == "bearer" && challenge.Params["scope"] != "" {
+			h.challengeScopes = strings.Fields(challenge.Params["scope"])
+			break
+		}
 	}
 	if err := h.sdk.Authorize(ctx, request, response); err != nil {
 		if errors.Is(err, ErrLoginRequired) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

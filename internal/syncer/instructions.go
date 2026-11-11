@@ -192,10 +192,16 @@ func (p *Plan) planInstructions(c *config.Config, opts Options, selected map[str
 		}
 	}
 	for harness, path := range destinations {
+		previous := old.Instructions[path]
+		want := exists && selected[harness] && config.Allows(filter, harness)
+		if !want && previous == "" {
+			// A never-managed instruction target is outside this sync's write
+			// set, just like an unselected native MCP or skills destination.
+			continue
+		}
 		if err := ensureNoSymlinkParents(opts.Home, path); err != nil {
 			return err
 		}
-		previous := old.Instructions[path]
 		original, present, err := readOptional(path)
 		if err != nil {
 			return err
@@ -203,7 +209,6 @@ func (p *Plan) planInstructions(c *config.Config, opts Options, selected map[str
 		if previous != "" && (!present || rawDigest(original) != previous) {
 			return fmt.Errorf("managed global instructions modified manually: %s", path)
 		}
-		want := exists && selected[harness] && config.Allows(filter, harness)
 		if !want {
 			if previous != "" {
 				p.Changes = append(p.Changes, Change{Path: path, Action: "remove managed global instructions", before: original, exists: present, remove: true, source: source, sourceExists: exists, sourceHash: rawDigest(contents)})

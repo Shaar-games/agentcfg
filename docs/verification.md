@@ -22,6 +22,91 @@ les transports MCP et l'authentification. Les fixtures utilisent des répertoire
 temporaires : elles ne doivent pas écrire dans les configurations des harnesses
 de la machine de développement.
 
+## Serveur MCP npm réel et Docker
+
+Les essais réseau sont activés explicitement. Depuis Linux ou WSL avec Docker
+disponible :
+
+```sh
+./scripts/test-docker.sh
+```
+
+Le script construit une image avec Go 1.26.10 et Node.js 24.22.1, exécute la suite
+complète, `go vet`, le détecteur de courses sur tous les packages, puis les
+tests npm. Il ne monte aucun home, configuration MCP, source ou socket Docker
+hôte dans le conteneur. Le code entre dans l'image par un contexte limité aux
+sources, exemples et fixtures de test. Les homes, caches utilisateur, caches Go
+et répertoires temporaires des tests sont placés dans un répertoire temporaire
+du conteneur. Le conteneur utilise un utilisateur non privilégié ;
+le conteneur et son tag d'image sont supprimés à la fin. `--skip-npx` omet les
+essais npm et `--skip-race` omet le détecteur de courses.
+
+Les mêmes essais npm peuvent être lancés sans Docker :
+
+```sh
+AGENTCFG_TEST_NPX=1 go test ./internal/upstream ./cmd/agentcfg \
+  -run '^Test(NPXFilesystem|CLINPXFilesystem)' -count=1 -timeout=300s
+```
+
+Ils téléchargent le serveur officiel
+`@modelcontextprotocol/server-filesystem@2.2.0` dans un cache temporaire. Node.js
+24 ou plus récent et `npx` doivent être dans le `PATH`. Le premier test passe par
+le transport stdio directement. Le second ajoute le proxy CLI et le broker, avec
+deux clients en modes partagé et isolé. Ils contrôlent la découverte des outils,
+une lecture avec accents et espaces dans le chemin, le refus d'un fichier hors
+du dossier autorisé et la fermeture des processus. Le parcours CLI vérifie aussi
+qu'un client continue après la déconnexion de l'autre.
+
+Les sockets Unix doivent être autorisées sous Linux/macOS pour le broker et
+Docker. Une interdiction de sockets bloque ces vérifications ; elle ne doit pas
+être transformée en réussite ou en désactivation permanente des tests. Docker
+Linux ne valide pas les wrappers Windows : lancer les tests stdio et l'opt-in
+npm sous Windows pour vérifier réellement `npx.cmd`, `PATHEXT` et les Job Objects.
+
+Les régressions de tramage stdio utilisent les mêmes octets avec des lectures
+groupées ou fragmentées. Elles refusent les objets accolés sans séparateur, les
+batches, les objets répartis sur plusieurs lignes physiques, l'UTF-8 invalide et
+une dernière ligne sans délimiteur. Elles préservent les messages valides
+précédents et acceptent les lectures octet par octet, les caractères UTF-8
+fragmentés, LF et CRLF. La limite de 32 MiB est testée exactement, y compris pour
+deux messages maximaux consécutifs, puis avec un octet de dépassement. Ces tests
+et le transport ne dépendent d'aucune commande particulière ; `npx` sert à
+l'intégration avec un serveur réel.
+
+Les lecteurs stdio et IPC sont aussi vérifiés avec des grandes lignes découpées
+en fragments fixes de 1 KiB, alternées avec une petite ligne. Ces cas contrôlent
+l'intégrité du contenu et la reprise correcte à chaque délimiteur. La recherche
+du séparateur conserve sa progression au lieu de reparcourir tout le préfixe
+à chaque lecture. Les mesures comparatives peuvent être reproduites sans lancer
+la suite de tests :
+
+```sh
+go test ./internal/upstream ./internal/wire -run '^$' \
+  -bench 'Benchmark(StdioFramingFixedFragments|ReaderFixedFragments)$' \
+  -benchtime=1x -count=1
+```
+
+Les tests OAuth locaux utilisent le SDK MCP officiel et un émetteur de test :
+PKCE, scopes des challenges, validation d'émetteur, callbacks DCR, stockage
+chiffré, connexion créée avant le login, logout puis nouveau login sur le même
+transport, avec protocoles legacy/moderne et réponses JSON/SSE. Ils vérifient
+aussi la priorité des en-têtes SDK et le repli legacy après une découverte
+refusée, interrompue ou incompatible. Aucun compte OAuth personnel n'est utilisé.
+
+Les régressions du broker vérifient qu'une écriture d'annulation bloquée n'arrête
+ni l'expiration des autres opérations, ni la déconnexion, ni les réponses aux
+ping locaux. Les annulations sont envoyées dans une file bornée, avec un motif
+de taille limitée ; une saturation de cette file ferme le backend pour permettre
+une reconnexion. Une saturation temporaire des emplacements HTTP de contrôle
+abandonne seulement l'annulation consultative refusée. Un test avec le vrai
+transport HTTP bloque quatre notifications, provoque deux refus `ErrBusy` et
+vérifie que les deux clients, un appel indépendant et un nouvel appel restent
+fonctionnels. Une erreur d'écriture fatale ferme toujours le backend.
+Un serveur qui ne lit plus son stdin peut toujours bloquer une nouvelle écriture
+vers ce serveur.
+
+## Régressions de configuration et de synchronisation
+
 Les régressions de liens utilisent huit emplacements natifs de skills et leurs
 56 paires orientées : liens absolus et relatifs sur Unix/Windows, plus jonctions
 sur Windows, soit 168 parcours init → sync sans changement → restore sur Windows.
@@ -38,6 +123,10 @@ partage. Ils vérifient la reprise après libération, le verrou persistant born
 l'annulation, le refus d'une destination étrangère, le remplacement MCP et la
 restauration des skills legacy liés ou contenant une jonction et un asset en
 lecture seule. Les journaux de staging des anciennes versions restent couverts.
+La restauration revérifie aussi le contenu complet avant chaque tentative de
+déplacement et de rollback. Quatre cas Windows modifient un descendant pendant
+un verrou natif, y compris dans la sauvegarde originale ou pendant un rollback :
+le conflit est signalé et les octets modifiés restent dans leur chemin.
 
 Les plugins combinent des liens sur le répertoire canonique, le catalogue,
 le package, les manifestes, les composants MCP, les commandes et les skills.
@@ -108,11 +197,19 @@ manifeste `SHA256SUMS` de test. Ils contrôlent le rejet d'un hash invalide,
 l'installation d'un exécutable `agentcfg`, son aide sans argument et la
 réinstallation dans un répertoire temporaire. PowerShell est testé sur Windows ;
 Bash est testé sur Unix et, si Git Bash est disponible, sur Windows.
+Les subprocess PowerShell ont aussi un profil, un répertoire courant et un
+cache d'analyse des modules privés. Une régression vérifie les chemins vus par
+PowerShell et les dossiers Windows connus, pour éviter un cache relatif dans
+le dépôt même quand `LocalApplicationData` serait vide.
 
 `.github/workflows/check.yml` vérifie le formatage Go et exécute `go vet`,
 `go test -shuffle=on`, un build CLI et un
 smoke test de l'aide sur Windows, Ubuntu et macOS. Le détecteur de courses est
-également exécuté sur Linux. `.github/workflows/release.yml` vérifie le code,
+également exécuté sur Linux. La même matrice configure Node.js 24.22.1 et active
+explicitement les deux tests npm réels : transport stdio, puis CLI/broker en
+modes partagé et isolé. Cette étape doit s'exécuter sur un runner Windows pour
+valider le vrai `npx.cmd` ; sa présence dans le workflow ne prouve pas son succès.
+`.github/workflows/release.yml` vérifie le code,
 construit six binaires sans CGO (Linux, macOS et Windows × AMD64/ARM64), publie
 les archives `agentcfg_*` et leur `SHA256SUMS`, puis teste l'installation des
 archives publiées sous Windows, Linux et macOS.
@@ -149,8 +246,9 @@ lignes vides accumulées, `Exit` rouge, `NO_COLOR` et le mode accessible avec
 plusieurs réponses fournies dans le même flux. Une fin d'entrée doit annuler,
 jamais boucler ou valider implicitement.
 
-Les tests automatisés utilisent des processus et des serveurs factices. Ils ne
-prouvent pas la compatibilité de bout en bout de chaque version de Claude Code,
+Les tests par défaut utilisent des processus et des serveurs factices. Ils ne
+prouvent pas, même avec l'essai npm réel optionnel, la compatibilité de bout en
+bout de chaque version de Claude Code,
 Codex, Cursor, OpenCode, Gemini ou Antigravity. Les opérations de configuration
 doivent être vérifiées avec les applications réelles avant d'affirmer une telle
 compatibilité.

@@ -48,6 +48,40 @@ func fixtureServer(t *testing.T, asset string, data []byte, badHash bool) *httpt
 	return server
 }
 
+func powerShellFixtureCommand(t *testing.T, shell string, args, environment []string) *exec.Cmd {
+	t.Helper()
+	fixture := t.TempDir()
+	home := filepath.Join(fixture, "home")
+	local := filepath.Join(home, "AppData", "Local")
+	roaming := filepath.Join(home, "AppData", "Roaming")
+	temp := filepath.Join(fixture, "tmp")
+	modules := filepath.Join(fixture, "modules")
+	cache := filepath.Join(local, "Microsoft", "Windows", "PowerShell", "ModuleAnalysisCache")
+	xdgConfig, xdgCache := filepath.Join(fixture, "config"), filepath.Join(fixture, "cache")
+	xdgData, xdgState := filepath.Join(fixture, "data"), filepath.Join(fixture, "state")
+	xdgRuntime := filepath.Join(fixture, "runtime")
+	for _, directory := range []string{home, local, roaming, temp, modules, filepath.Dir(cache), xdgConfig, xdgCache, xdgData, xdgState, xdgRuntime} {
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	command := exec.Command(shell, args...)
+	command.Dir = fixture
+	volume := filepath.VolumeName(home)
+	command.Env = append(append([]string(nil), environment...),
+		"HOME="+home, "USERPROFILE="+home, "HOMEDRIVE="+volume, "HOMEPATH="+strings.TrimPrefix(home, volume),
+		"APPDATA="+roaming, "LOCALAPPDATA="+local,
+		"TMP="+temp, "TEMP="+temp, "TMPDIR="+temp,
+		"XDG_CONFIG_HOME="+xdgConfig, "XDG_CACHE_HOME="+xdgCache,
+		"XDG_DATA_HOME="+xdgData, "XDG_STATE_HOME="+xdgState, "XDG_RUNTIME_DIR="+xdgRuntime,
+		// Windows PowerShell can get an empty LocalApplicationData known folder
+		// for a temporary profile and otherwise write its cache relative to cwd.
+		"PSModuleAnalysisCachePath="+cache,
+		"PSModulePath="+modules+string(os.PathListSeparator)+filepath.Join(filepath.Dir(shell), "Modules"),
+	)
+	return command
+}
+
 func windowsArchive(t *testing.T) []byte {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "agentcfg.exe")
@@ -139,8 +173,7 @@ func TestPowerShellDownloadsAndVerifiesRelease(t *testing.T) {
 			}
 			args := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(root(t), "install.ps1")}
 			environment := append(os.Environ(), "AGENTCFG_VERSION=latest", "AGENTCFG_RELEASE_BASE_URL="+server.URL, "AGENTCFG_BIN_DIR="+dir)
-			command := exec.Command(shell, args...)
-			command.Env = environment
+			command := powerShellFixtureCommand(t, shell, args, environment)
 			output, err := command.CombinedOutput()
 			if bad {
 				if err == nil || !strings.Contains(string(output), "SHA-256 mismatch") {
@@ -160,8 +193,7 @@ func TestPowerShellDownloadsAndVerifiesRelease(t *testing.T) {
 			if help, err := exec.Command(binary).CombinedOutput(); err != nil || !bytes.Contains(help, []byte("Usage: agentcfg")) {
 				t.Fatalf("no-argument help failed: %v\n%s", err, help)
 			}
-			again := exec.Command(shell, args...)
-			again.Env = environment
+			again := powerShellFixtureCommand(t, shell, args, environment)
 			if output, err = again.CombinedOutput(); err != nil {
 				t.Fatalf("existing binary was not replaced: %v\n%s", err, output)
 			}

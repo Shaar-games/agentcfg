@@ -43,6 +43,15 @@ jobs:
           fi
       - name: Unit and integration tests
         run: go test -shuffle=on -count=1 -timeout=300s ./...
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Real npx MCP through stdio and broker
+        timeout-minutes: 10
+        env:
+          AGENTCFG_TEST_NPX: '1'
+        run: go test ./internal/upstream ./cmd/agentcfg -run '^Test(NPXFilesystem|CLINPXFilesystem)$' -count=1 -timeout=300s
       - name: CLI build
         run: go build -o ${{ runner.temp }}/agentcfg${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd/agentcfg
       - name: No-argument CLI help
