@@ -78,7 +78,8 @@ before exposing it to the SDK, so pipe read boundaries cannot change which
 messages are accepted. Adjacent objects without a delimiter, batches, embedded
 physical newlines, invalid UTF-8, oversized input and an unterminated final line
 fail the read. Earlier valid lines remain readable before that error. Child
-stderr stays separate from protocol stdout.
+stderr stays separate from protocol stdout. Delimiter scanning visits each
+received byte once, including when large messages arrive in small pipe reads.
 
 ### Windows batch wrappers
 

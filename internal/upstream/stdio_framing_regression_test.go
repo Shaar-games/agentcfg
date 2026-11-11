@@ -1,7 +1,9 @@
 package upstream
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"strings"
@@ -220,4 +222,95 @@ func TestStdioFramingPayloadLimit(t *testing.T) {
 			t.Fatalf("oversized payload: received %d messages, err=%v", len(messages), err)
 		}
 	})
+}
+
+type stdioFramingFixedFragments struct {
+	reader io.Reader
+	size   int
+	reads  int
+}
+
+func (r *stdioFramingFixedFragments) Read(p []byte) (int, error) {
+	if len(p) > r.size {
+		p = p[:r.size]
+	}
+	r.reads++
+	return r.reader.Read(p)
+}
+
+func stdioFramingSizedResponse(size int) string {
+	const prefix = "{\"jsonrpc\":\"2.0\",\"id\":\"fragmented\",\"result\":\""
+	const suffix = "\"}"
+	return prefix + strings.Repeat("x", size-len(prefix)-len(suffix)) + suffix
+}
+
+func TestStdioFramingLargeFixedFragments(t *testing.T) {
+	large := stdioFramingSizedResponse(wire.MaxFrameSize)
+	const small = "{\"jsonrpc\":\"2.0\",\"id\":\"between\",\"result\":true}"
+	source := io.MultiReader(
+		strings.NewReader(large), strings.NewReader("\r\n"),
+		strings.NewReader(small), strings.NewReader("\n"),
+		strings.NewReader(large), strings.NewReader("\n"),
+	)
+	fragments := &stdioFramingFixedFragments{reader: source, size: 1024}
+	reader := &singleMessageReader{ReadCloser: io.NopCloser(fragments)}
+	defer reader.Close()
+	got := sha256.New()
+	count, err := io.Copy(got, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sha256.New()
+	for _, part := range []string{large, "\n", small, "\n", large, "\n"} {
+		_, _ = io.WriteString(want, part)
+	}
+	wantBytes := int64(2*len(large) + len(small) + 3)
+	if count != wantBytes || !bytes.Equal(got.Sum(nil), want.Sum(nil)) {
+		t.Fatalf("fixed fragments changed consecutive frames: bytes=%d, want=%d", count, wantBytes)
+	}
+	if fragments.reads < len(large)/fragments.size {
+		t.Fatalf("fixture did not deliver the intended small fragments: %d reads", fragments.reads)
+	}
+}
+
+func BenchmarkStdioFramingFixedFragments(b *testing.B) {
+	for _, test := range []struct {
+		name      string
+		size      int
+		fragment  int
+		oversized bool
+	}{
+		{"8MiB-1KiB", 8 << 20, 1 << 10, false},
+		{"32MiB-1KiB", wire.MaxFrameSize, 1 << 10, false},
+		{"32MiB-64KiB", wire.MaxFrameSize, 64 << 10, false},
+		{"oversized-32MiB-1KiB", wire.MaxFrameSize + 2, 1 << 10, true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			var stream string
+			if test.oversized {
+				stream = strings.Repeat("x", test.size)
+			} else {
+				stream = stdioFramingSizedResponse(test.size) + "\n"
+			}
+			b.SetBytes(int64(len(stream)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			var totalReads int
+			for range b.N {
+				fragments := &stdioFramingFixedFragments{reader: strings.NewReader(stream), size: test.fragment}
+				reader := &singleMessageReader{ReadCloser: io.NopCloser(fragments)}
+				count, err := io.Copy(io.Discard, reader)
+				_ = reader.Close()
+				if test.oversized {
+					if err == nil || count != 0 {
+						b.Fatalf("oversized frame: bytes=%d err=%v", count, err)
+					}
+				} else if err != nil || count != int64(len(stream)) {
+					b.Fatalf("valid frame: bytes=%d err=%v", count, err)
+				}
+				totalReads += fragments.reads
+			}
+			b.ReportMetric(float64(totalReads)/float64(b.N), "reads/op")
+		})
+	}
 }

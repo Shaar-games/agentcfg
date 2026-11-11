@@ -73,6 +73,19 @@ deux messages maximaux consécutifs, puis avec un octet de dépassement. Ces tes
 et le transport ne dépendent d'aucune commande particulière ; `npx` sert à
 l'intégration avec un serveur réel.
 
+Les lecteurs stdio et IPC sont aussi vérifiés avec des grandes lignes découpées
+en fragments fixes de 1 KiB, alternées avec une petite ligne. Ces cas contrôlent
+l'intégrité du contenu et la reprise correcte à chaque délimiteur. La recherche
+du séparateur conserve sa progression au lieu de reparcourir tout le préfixe
+à chaque lecture. Les mesures comparatives peuvent être reproduites sans lancer
+la suite de tests :
+
+```sh
+go test ./internal/upstream ./internal/wire -run '^$' \
+  -bench 'Benchmark(StdioFramingFixedFragments|ReaderFixedFragments)$' \
+  -benchtime=1x -count=1
+```
+
 Les tests OAuth locaux utilisent le SDK MCP officiel et un émetteur de test :
 PKCE, scopes des challenges, validation d'émetteur, callbacks DCR, stockage
 chiffré, connexion créée avant le login, logout puis nouveau login sur le même

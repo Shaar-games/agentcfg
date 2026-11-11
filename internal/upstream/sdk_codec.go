@@ -99,9 +99,10 @@ func sdkIdentifierSupported(raw json.RawMessage) bool {
 // objects, batches, or multiline objects look like separate valid messages.
 type singleMessageReader struct {
 	io.ReadCloser
-	scanner *bufio.Scanner
-	pending []byte
-	err     error
+	scanner      *bufio.Scanner
+	searchOffset int
+	pending      []byte
+	err          error
 }
 
 func (r *singleMessageReader) Read(data []byte) (int, error) {
@@ -115,7 +116,7 @@ func (r *singleMessageReader) Read(data []byte) (int, error) {
 		r.scanner = bufio.NewScanner(r.ReadCloser)
 		// The payload limit excludes its LF or CRLF delimiter.
 		r.scanner.Buffer(make([]byte, 64<<10), wire.MaxFrameSize+2)
-		r.scanner.Split(splitStdioLine)
+		r.scanner.Split(r.splitStdioLine)
 	}
 	for len(r.pending) == 0 {
 		if !r.scanner.Scan() {
@@ -151,14 +152,19 @@ func (r *singleMessageReader) Read(data []byte) (int, error) {
 	return n, nil
 }
 
-func splitStdioLine(data []byte, atEOF bool) (int, []byte, error) {
-	if newline := bytes.IndexByte(data, '\n'); newline >= 0 {
+func (r *singleMessageReader) splitStdioLine(data []byte, atEOF bool) (int, []byte, error) {
+	// Scanner retains the unfinished line across reads. Search only new bytes
+	// so small pipe fragments do not repeatedly scan the growing prefix.
+	if newline := bytes.IndexByte(data[r.searchOffset:], '\n'); newline >= 0 {
+		newline += r.searchOffset
+		r.searchOffset = 0
 		line := data[:newline]
 		if len(line) > 0 && line[len(line)-1] == '\r' {
 			line = line[:len(line)-1]
 		}
 		return newline + 1, line, nil
 	}
+	r.searchOffset = len(data)
 	if atEOF && len(data) > 0 {
 		return 0, nil, io.ErrUnexpectedEOF
 	}
