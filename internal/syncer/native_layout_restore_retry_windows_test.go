@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"agentcfg/internal/pathutil"
 
 	"golang.org/x/sys/windows"
 )
@@ -46,9 +49,19 @@ func nativeRestoreRetryFixture(t *testing.T, count int) (string, initRestorePoin
 
 func holdNativeRestoreRename(t *testing.T, path, probe string) *os.File {
 	t.Helper()
-	held, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
+	var held *os.File
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var err error
+		held, err = os.Open(path)
+		if err == nil {
+			break
+		}
+		// A completed install can become visible before its rename handle closes.
+		if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) || time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	t.Cleanup(func() { _ = held.Close() })
 	blocked := os.Rename(path, probe)
@@ -137,6 +150,10 @@ func TestNativeLayoutRestoreRejectsDescendantEditsDuringWindowsRetry(t *testing.
 				t.Fatal(err)
 			}
 			asset := filepath.Join(editRoot, "references", "rules.txt")
+			resolvedAsset, err := pathutil.Resolve(asset)
+			if err != nil {
+				t.Fatal(err)
+			}
 			manual := []byte("User changed the descendant while the Windows rename was waiting.\n")
 			if err := os.WriteFile(asset, manual, 0600); err != nil {
 				t.Fatal(err)
@@ -149,19 +166,32 @@ func TestNativeLayoutRestoreRejectsDescendantEditsDuringWindowsRetry(t *testing.
 				t.Fatal("fixture unexpectedly changed the root directory mtime")
 			}
 			t.Logf("descendant changed without changing root mtime %s", after.ModTime())
-			for _, handle := range held {
-				if err := handle.Close(); err != nil {
-					t.Fatal(err)
-				}
-			}
+			// Keep the rename blocked until the content check rejects the edit.
+			// Releasing here permits a checked attempt to move the edited tree.
 			select {
 			case err := <-finished:
 				if err == nil {
 					t.Fatal("restore accepted a descendant edit made during a blocked rename")
 				}
+				changed := false
+				for _, message := range strings.Split(err.Error(), "\n") {
+					switch message {
+					case "native layout changed while waiting to rename: " + editRoot,
+						"file changed while reading: " + resolvedAsset:
+						changed = true
+					}
+				}
+				if !changed {
+					t.Errorf("restore did not report the edited descendant: %v", err)
+				}
 				t.Logf("restore rejected the concurrent edit: %v", err)
 			case <-time.After(6 * time.Second):
-				t.Fatal("restore did not finish after releasing the native handles")
+				t.Fatal("restore did not reject the edit while the native handles remained open")
+			}
+			for _, handle := range held {
+				if err := handle.Close(); err != nil {
+					t.Fatal(err)
+				}
 			}
 			assertAdoptionBytes(t, asset, manual)
 			if phase != "rollback" {
