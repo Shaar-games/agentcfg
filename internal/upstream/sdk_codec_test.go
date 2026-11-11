@@ -57,8 +57,8 @@ func (discardWriteCloser) Close() error { return nil }
 
 func TestSDKIORejectsBatchesAndPreservesPriorFrame(t *testing.T) {
 	reader := &singleMessageReader{ReadCloser: io.NopCloser(strings.NewReader(
-		"{\"jsonrpc\":\"2.0\",\"id\":\"ok\",\"result\":true}\n [{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":false}]\n")), atStart: true}
-	connection, err := (&mcp.IOTransport{Reader: reader, Writer: discardWriteCloser{io.Discard}, MaxLineLength: wire.MaxFrameSize}).Connect(context.Background())
+		"{\"jsonrpc\":\"2.0\",\"id\":\"ok\",\"result\":true}\n [{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":false}]\n"))}
+	connection, err := (&mcp.IOTransport{Reader: reader, Writer: discardWriteCloser{io.Discard}, MaxLineLength: wire.MaxFrameSize + 2}).Connect(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

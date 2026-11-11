@@ -108,8 +108,10 @@ func startStdio(parent context.Context, s config.Server, stderr io.Writer) (Tran
 	opened = nil
 	ctx, cancel := context.WithCancel(parent)
 	connection, err := (&mcp.IOTransport{
-		Reader: &singleMessageReader{ReadCloser: output, atStart: true},
-		Writer: input, MaxLineLength: wire.MaxFrameSize,
+		Reader: &singleMessageReader{ReadCloser: output},
+		// The reader enforces the payload limit; allow delimiter overhead
+		// in the SDK's byte budget between consecutive maximum-size objects.
+		Writer: input, MaxLineLength: wire.MaxFrameSize + 2,
 	}).Connect(ctx)
 	if err != nil {
 		cancel()

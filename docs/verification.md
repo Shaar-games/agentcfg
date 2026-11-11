@@ -63,6 +63,16 @@ Docker. Une interdiction de sockets bloque ces vérifications ; elle ne doit pas
 Linux ne valide pas les wrappers Windows : lancer les tests stdio et l'opt-in
 npm sous Windows pour vérifier réellement `npx.cmd`, `PATHEXT` et les Job Objects.
 
+Les régressions de tramage stdio utilisent les mêmes octets avec des lectures
+groupées ou fragmentées. Elles refusent les objets accolés sans séparateur, les
+batches, les objets répartis sur plusieurs lignes physiques, l'UTF-8 invalide et
+une dernière ligne sans délimiteur. Elles préservent les messages valides
+précédents et acceptent les lectures octet par octet, les caractères UTF-8
+fragmentés, LF et CRLF. La limite de 32 MiB est testée exactement, y compris pour
+deux messages maximaux consécutifs, puis avec un octet de dépassement. Ces tests
+et le transport ne dépendent d'aucune commande particulière ; `npx` sert à
+l'intégration avec un serveur réel.
+
 Les tests OAuth locaux utilisent le SDK MCP officiel et un émetteur de test :
 PKCE, scopes des challenges, validation d'émetteur, callbacks DCR, stockage
 chiffré, connexion créée avant le login, logout puis nouveau login sur le même
@@ -73,9 +83,14 @@ refusée, interrompue ou incompatible. Aucun compte OAuth personnel n'est utilis
 Les régressions du broker vérifient qu'une écriture d'annulation bloquée n'arrête
 ni l'expiration des autres opérations, ni la déconnexion, ni les réponses aux
 ping locaux. Les annulations sont envoyées dans une file bornée, avec un motif
-de taille limitée ; une saturation ferme le backend pour permettre une
-reconnexion. Un serveur qui ne lit plus son stdin peut toujours bloquer une
-nouvelle écriture vers ce serveur.
+de taille limitée ; une saturation de cette file ferme le backend pour permettre
+une reconnexion. Une saturation temporaire des emplacements HTTP de contrôle
+abandonne seulement l'annulation consultative refusée. Un test avec le vrai
+transport HTTP bloque quatre notifications, provoque deux refus `ErrBusy` et
+vérifie que les deux clients, un appel indépendant et un nouvel appel restent
+fonctionnels. Une erreur d'écriture fatale ferme toujours le backend.
+Un serveur qui ne lit plus son stdin peut toujours bloquer une nouvelle écriture
+vers ce serveur.
 
 ## Régressions de configuration et de synchronisation
 

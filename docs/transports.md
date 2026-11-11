@@ -30,6 +30,7 @@ used for execution and executable lookup. Windows environment names are matched
 case-insensitively; if override spellings collide, the lexically last spelling
 wins. No implicit current-directory executable search is added: name lookup uses
 the configured `PATH` and Windows `PATHEXT`. Paths containing spaces are supported.
+The same executable lookup and MCP transport serve every configured stdio command.
 
 On Windows, a command without an extension is resolved through `PATHEXT`, so
 the POSIX `npx` shim shipped beside `npx.cmd` is not selected. A name containing
@@ -70,9 +71,14 @@ mechanism. It is process cleanup, not an operating-system sandbox.
 
 If the direct process exits naturally, remaining group/job members are stopped,
 but buffered stdout remains readable. This preserves the last JSON-RPC response.
-Stdin and stdout use the shared bounded newline framing: a JSON-RPC object is at
-most **32 MiB**. Malformed or oversized input fails the read. Child stderr stays
-separate from protocol stdout.
+Each stdio message is one UTF-8 JSON-RPC object terminated by LF; CRLF is also
+accepted. The payload, including surrounding spaces or tabs, is at most
+**32 MiB**, excluding the delimiter. The reader validates the complete line
+before exposing it to the SDK, so pipe read boundaries cannot change which
+messages are accepted. Adjacent objects without a delimiter, batches, embedded
+physical newlines, invalid UTF-8, oversized input and an unterminated final line
+fail the read. Earlier valid lines remain readable before that error. Child
+stderr stays separate from protocol stdout.
 
 ### Windows batch wrappers
 
@@ -151,6 +157,9 @@ delivering the correlated response to the broker.
   `Write` return `ErrBusy` immediately. The broker must handle that write error.
 - Separate control capacity lets callback replies and cancellation proceed even
   when all request slots hold streams awaiting a reply.
+- In shared mode, an advisory cancellation rejected with `ErrBusy` is dropped
+  without disconnecting attached clients. Exhausting the broker's bounded
+  cancellation queue or encountering a fatal write error still stops the backend.
 - The receive queue contains at most eight messages. Backpressure observes the
   operation context. If a failed/cancelled request's completion cannot be queued,
   the transport terminates so the operation does not leave a blocked worker.
@@ -260,6 +269,7 @@ mise exec -- go vet ./internal/upstream
 Protocol references:
 
 - [MCP 2025-06-18 transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [MCP 2026-07-28 stdio](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)
 - [MCP 2026-07-28 Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 - [MCP 2025-11-25 transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 - [MCP lifecycle](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle)

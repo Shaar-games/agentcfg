@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -581,6 +582,11 @@ func (b *backend) cancellationLoop() {
 				return
 			}
 			if err := b.transport.Write(message); err != nil {
+				if errors.Is(err, upstream.ErrBusy) {
+					// Drop this advisory notification when transport capacity is
+					// temporarily full; other requests and shared clients stay live.
+					continue
+				}
 				b.close()
 				return
 			}
