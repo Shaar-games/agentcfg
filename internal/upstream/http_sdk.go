@@ -46,7 +46,7 @@ func (t *httpTransport) sdkExchange(ctx context.Context, outgoing wire.Message, 
 	}
 	connection, err := sdk.Connect(ctx)
 	if err != nil {
-		return err
+		return &sdkExchangeError{status: adapter.status, err: err}
 	}
 	// Connect detaches its lifetime context. Explicitly cancel it even when
 	// OAuth token refresh or an asynchronous JSON/SSE reader is still active.
@@ -72,14 +72,14 @@ func (t *httpTransport) sdkExchange(ctx context.Context, outgoing wire.Message, 
 	for {
 		message, err := connection.Read(ctx)
 		if err != nil {
-			return err
+			return &sdkExchangeError{status: adapter.status, err: err}
 		}
 		incoming, err := encodeSDKMessage(message)
 		if err != nil {
-			return err
+			return &sdkExchangeError{status: adapter.status, err: err}
 		}
 		if err := receive(incoming); err != nil {
-			return err
+			return &sdkExchangeError{status: adapter.status, err: err}
 		}
 	}
 }
@@ -93,11 +93,31 @@ type requestOAuthHandler struct {
 }
 
 func (h requestOAuthHandler) TokenSource(context.Context) (oauth2.TokenSource, error) {
-	return h.handler.TokenSource(h.ctx)
+	source, err := h.handler.TokenSource(h.ctx)
+	if err != nil {
+		return nil, &oauthRequestError{token: true, err: err}
+	}
+	if source == nil {
+		return nil, nil
+	}
+	return requestTokenSource{source: source}, nil
 }
 
 func (h requestOAuthHandler) Authorize(_ context.Context, request *http.Request, response *http.Response) error {
-	return h.handler.Authorize(h.ctx, request, response)
+	if err := h.handler.Authorize(h.ctx, request, response); err != nil {
+		return &oauthRequestError{err: err}
+	}
+	return nil
+}
+
+type requestTokenSource struct{ source oauth2.TokenSource }
+
+func (s requestTokenSource) Token() (*oauth2.Token, error) {
+	token, err := s.source.Token()
+	if err != nil {
+		return nil, &oauthRequestError{token: true, err: err}
+	}
+	return token, nil
 }
 
 // The SDK's public raw connection has no sessionUpdated or Tool context hook.
