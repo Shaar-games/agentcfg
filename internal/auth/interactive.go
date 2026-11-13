@@ -67,14 +67,15 @@ func InteractiveServer(server config.Server) config.Server {
 }
 
 // NewInteractiveHandler supports browser consent supplied by the caller, without
-// opening a browser or listener itself. It defers all credential-store access
-// until the resource challenges a request, so public HTTP servers work even on
-// machines without a configured secure store. Existing explicit credentials
-// retain priority over implicit OAuth.
+// opening a browser or listener itself. Explicit OAuth uses stored credentials
+// from the first request. URL-only servers defer store access until a challenge,
+// so public HTTP servers work without a configured secure store. Pass the original
+// server configuration; this constructor supplies InteractiveServer defaults.
 func NewInteractiveHandler(ctx context.Context, server config.Server, opts Options) (sdkauth.OAuthHandler, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	explicit := server.OAuth != nil
 	server = InteractiveServer(server)
 	if server.OAuth == nil {
 		return nil, nil
@@ -82,13 +83,14 @@ func NewInteractiveHandler(ctx context.Context, server config.Server, opts Optio
 	if err := validateServer(server); err != nil {
 		return nil, err
 	}
-	return &interactiveHandler{server: server, options: opts, key: CredentialKey(server), initialize: make(chan struct{}, 1)}, nil
+	return &interactiveHandler{server: server, options: opts, key: CredentialKey(server), explicit: explicit, initialize: make(chan struct{}, 1)}, nil
 }
 
 type interactiveHandler struct {
 	server     config.Server
 	options    Options
 	key        string
+	explicit   bool
 	initialize chan struct{}
 	pending    atomic.Int32
 	attempts   atomic.Uint64
@@ -163,12 +165,22 @@ func (h *interactiveHandler) TokenSource(ctx context.Context) (oauth2.TokenSourc
 	h.mu.Lock()
 	state := h.state
 	h.mu.Unlock()
-	if state == nil {
+	if state == nil && !h.explicit {
 		return nil, nil
 	}
 	h.pending.Add(1)
 	h.attempts.Add(1)
 	defer h.pending.Add(-1)
+	if state == nil {
+		var err error
+		state, err = h.credentials(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, err
+		}
+	}
 	token, err := state.source.token(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -202,7 +214,7 @@ func (h *interactiveHandler) AuthorizationPending() bool { return h.pending.Load
 
 // AuthorizationAttempts counts credential and authorization operations so a short
 // discovery probe can notice OAuth activity even if it finished before the timer.
-// Public requests that have never received a challenge do not increment it.
+// URL-only requests that have never received a challenge do not increment it.
 func (h *interactiveHandler) AuthorizationAttempts() uint64 { return h.attempts.Load() }
 
 func (h *interactiveHandler) Authorize(ctx context.Context, request *http.Request, response *http.Response) error {

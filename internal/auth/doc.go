@@ -15,11 +15,12 @@
 // state, issuer and S256 PKCE. This package creates no listener or browser.
 //
 // NewInteractiveHandler accepts the same fetcher for a stdio client's private
-// control channel. It waits for the first HTTP challenge before accessing the
-// secure store, then reuses stored credentials and refreshes without opening a
-// browser. Missing or revoked grants can request new consent. Concurrent callers
-// of the same identity share one consent flow; cancelling one caller does not
-// cancel a flow still needed by another. The last departing caller cancels it.
+// control channel. Explicit OAuth uses saved credentials from the first request;
+// URL-only entries wait for an HTTP challenge before accessing the secure store.
+// Stored credentials and refresh do not open a browser. Missing or revoked grants
+// can request new consent. Concurrent callers of the same identity share one
+// consent flow; cancelling one caller does not cancel a flow still needed by
+// another. The last departing caller cancels it.
 // Authorization does not hold the credential rotation lock while waiting for the
 // browser. Provider/store failures remain errors, not automatic login requests.
 //

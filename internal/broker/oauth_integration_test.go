@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"agentcfg/internal/auth"
+	"agentcfg/internal/config"
 	"agentcfg/internal/ipc"
 	"agentcfg/internal/wire"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
@@ -44,6 +45,7 @@ type oauthStdioFixture struct {
 	discovers        atomic.Int32
 	discoveryDelay   atomic.Int64
 	toolCalls        atomic.Int32
+	bearerToolCalls  atomic.Int32
 	mu               sync.Mutex
 	validAccess      string
 	grants           map[string]oauthStdioGrant
@@ -207,6 +209,9 @@ func (f *oauthStdioFixture) serveMCP(w http.ResponseWriter, r *http.Request) {
 		}}}
 	case "tools/call":
 		f.toolCalls.Add(1)
+		if access != "" && r.Header.Get("Authorization") == "Bearer "+access {
+			f.bearerToolCalls.Add(1)
+		}
 		if f.dropTool.Load() {
 			connection, _, err := w.(http.Hijacker).Hijack()
 			if err != nil {
@@ -491,6 +496,50 @@ func TestOAuthStdioURLOnlyAuthenticatesAndReusesCredentials(t *testing.T) {
 			t.Fatal("credential record contains plaintext fixture credentials")
 		}
 	}
+}
+
+func TestOAuthStdioExplicitOAuthReusesGrantWithoutChallenge(t *testing.T) {
+	f := newOAuthStdioFixture(t)
+	root := oauthStdioHome(t, f.http.URL+"/mcp", "isolated", nil)
+	loaded, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := auth.InteractiveServer(loaded.Servers["fixture"])
+	if server.OAuth == nil {
+		t.Fatal("fixture did not obtain an explicit OAuth policy")
+	}
+	data, err := json.Marshal(map[string]any{"mcpServers": map[string]config.Server{"fixture": server}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".agentcfg", "mcp.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	serveOAuthStdioBroker(t, root)
+	first := connectOAuthStdio(t, root, f.fetch)
+	first.initialize(t)
+	first.call(t, "before-reconnect", true)
+	records, err := filepath.Glob(filepath.Join(root, ".agentcfg", "credentials", "oauth", "*.json"))
+	if err != nil || len(records) == 0 {
+		t.Fatal("successful explicit OAuth did not persist its grant")
+	}
+	first.close(t)
+	challenges := f.challenges.Load()
+	// A resource may expose both public and personalized tools. Once a user has
+	// logged in, a new transport must preserve that identity even if anonymous
+	// requests would succeed and therefore no longer trigger an OAuth challenge.
+	f.public.Store(true)
+	second := connectOAuthStdio(t, root, f.fetch)
+	second.initialize(t)
+	second.call(t, "after-reconnect", true)
+	if f.toolCalls.Load() != 2 || f.bearerToolCalls.Load() != 2 {
+		t.Fatalf("reconnected explicit OAuth client lost its saved identity: tools=%d with_saved_bearer=%d", f.toolCalls.Load(), f.bearerToolCalls.Load())
+	}
+	if f.challenges.Load() != challenges || f.browserCalls.Load() != 1 || f.exchanges.Load() != 1 || f.registrations.Load() != 1 {
+		t.Fatalf("cached explicit OAuth triggered a new challenge or login: challenges=%d want=%d browsers=%d exchanges=%d registrations=%d", f.challenges.Load(), challenges, f.browserCalls.Load(), f.exchanges.Load(), f.registrations.Load())
+	}
+	assertOAuthStdioSecretsAbsent(t, second, f.http.URL)
 }
 
 func TestOAuthStdioConcurrentClientsShareInteractiveLogin(t *testing.T) {

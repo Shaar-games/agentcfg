@@ -274,6 +274,13 @@ func (b *backend) discover(p *peer, message wire.Message) {
 		p.send(wire.Error(message.ID(), -32000, err.Error()))
 		return
 	}
+	if cancellable, ok := b.transport.(interface{ CancelRequest(json.RawMessage) }); ok {
+		// A detach or expiry can synthesize the reply before HTTP has finished
+		// cancelling discovery. Drain in this goroutine before releasing initMu,
+		// so peer cleanup stays responsive and legacy fallback sees settled state.
+		// A real upstream result has already removed its pending request.
+		defer cancellable.CancelRequest(request.upstreamID)
+	}
 	limit := b.timeout
 	if limit > 5*time.Second {
 		limit = 5 * time.Second
@@ -306,11 +313,6 @@ waiting:
 			b.mu.Lock()
 			b.removeLocked(string(request.upstreamID), request)
 			b.mu.Unlock()
-			if cancellable, ok := b.transport.(interface{ CancelRequest(json.RawMessage) }); ok {
-				// Drain an abandoned HTTP discovery before allowing the legacy
-				// initialize fallback on this same upstream transport.
-				cancellable.CancelRequest(request.upstreamID)
-			}
 			p.initialized.Store(0)
 			p.send(wire.Error(message.ID(), -32001, "modern MCP discovery timed out; legacy initialization may be available"))
 			return

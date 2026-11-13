@@ -203,6 +203,10 @@ stream, or a session DELETE. `MCP-Protocol-Version` and `Mcp-Method` are set
 for each request. `Mcp-Name` is set for `tools/call`, `prompts/get`, and
 `resources/read`, using `params.name` or `params.uri` as appropriate.
 
+The broker waits for an abandoned discovery to finish cancelling before allowing
+legacy initialization on the same HTTP transport, including when its client
+disconnects or its request deadline expires.
+
 Header values requiring escaping are represented as `=?base64?...?=` following
 the protocol's sentinel encoding. The transport caches validated
 `x-mcp-header` parameter annotations from modern `tools/list` responses
@@ -251,6 +255,9 @@ reconnecting clients: this private IPC capability requires the updated broker.
 
 Discovery, PKCE, encrypted cached tokens and refresh are supported. An explicit
 `oauth` block can select a preregistered client, scopes, account or callback.
+It also uses saved credentials before the first resource challenge, so a server
+that permits anonymous access can still return the authenticated user's results.
+Storage errors remain visible instead of silently downgrading to anonymous access.
 Explicit scopes limit discovery defaults. Scopes required by a Bearer challenge
 are included in the next authorization, together with existing grants.
 A callback issuer is still validated when the provider omits its metadata hint.
@@ -267,8 +274,8 @@ deadline can also cancel an in-progress browser sign-in.
 
 Windows uses per-user DPAPI, while Linux/macOS need an explicitly supplied
 `AGENTCFG_OAUTH_KEY` (base64-encoded 32 random bytes) or an injected secure
-store. A missing secure store must not prevent access to a public HTTP MCP that
-does not require OAuth. Static configured headers are supported without OAuth; a configured
+store. Public URL-only entries remain independent of credential storage until an
+OAuth challenge requires it. Static configured headers are supported without OAuth; a configured
 literal Authorization header cannot be combined with OAuth. HTTP 401/403
 failures without valid credentials return sanitized errors. Legacy 2024
 HTTP+SSE (`type: "sse"`, with

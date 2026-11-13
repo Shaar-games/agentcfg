@@ -108,7 +108,8 @@ func TestInteractivePublicServerDoesNotResolveCredentialStore(t *testing.T) {
 func TestInteractiveImplicitLoginReconnectAndLogout(t *testing.T) {
 	f := newOAuthFixture(t)
 	f.server.OAuth = nil
-	f.server = InteractiveServer(f.server)
+	original := f.server
+	f.server = InteractiveServer(original)
 	f.allowWrite = true
 	store := testStore(t)
 	var prompts atomic.Int32
@@ -117,7 +118,7 @@ func TestInteractiveImplicitLoginReconnectAndLogout(t *testing.T) {
 		return f.fetch(ctx, args)
 	}}
 	for session := range 2 {
-		handler, err := NewInteractiveHandler(t.Context(), f.server, opts)
+		handler, err := NewInteractiveHandler(t.Context(), original, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -186,6 +187,7 @@ func TestInteractiveRefreshActivityAndCancellation(t *testing.T) {
 	f.refreshBlock = make(chan struct{})
 	store := testStore(t)
 	f.authorize(t, store)
+	expireRecord(t, store, CredentialKey(f.server))
 	var prompts atomic.Int32
 	h, err := NewInteractiveHandler(t.Context(), f.server, Options{Store: store, AuthorizationCodeFetcher: func(ctx context.Context, args *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
 		prompts.Add(1)
@@ -195,11 +197,6 @@ func TestInteractiveRefreshActivityAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := h.(*interactiveHandler)
-	request, response := interactiveChallenge(t, f.server.URL, "", http.StatusUnauthorized, "")
-	if err := handler.Authorize(t.Context(), request, response); err != nil {
-		t.Fatal(err)
-	}
-	expireRecord(t, store, CredentialKey(f.server))
 	previous := handler.AuthorizationAttempts()
 	guard, stop := context.WithTimeout(t.Context(), 5*time.Second)
 	defer stop()
