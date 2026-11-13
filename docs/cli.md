@@ -144,8 +144,15 @@ persistently.
 
 ## Other useful commands
 
-`agentcfg auth login <server>` explicitly starts an OAuth authorization
-flow. `agentcfg status` inspects the broker without starting it;
+Connections started by a harness through `agentcfg connect` open the browser
+when an HTTP MCP requires OAuth. A compatible URL-only server uses automatic
+discovery; no preliminary terminal login or configuration rewrite is required.
+`agentcfg auth login <server>` remains available for an explicit login or a
+manual callback. `agentcfg auth status <server>` and `agentcfg auth logout <server>`
+use the same credential identity as automatic connections. See
+[transports.md](transports.md) for callback and secure-storage requirements.
+
+`agentcfg status` inspects the broker without starting it;
 `agentcfg stop` stops a running broker. `agentcfg update` updates the
 executable, while `agentcfg version` prints the current version.
 

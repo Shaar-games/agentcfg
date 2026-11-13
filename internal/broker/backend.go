@@ -39,6 +39,7 @@ type backend struct {
 	timeout       time.Duration
 	closeOnce     sync.Once
 	cancellations chan wire.Message
+	authorization *authorizationRelay
 
 	mu       sync.Mutex
 	peers    map[*peer]bool
@@ -73,11 +74,17 @@ func (b *backend) attach(p *peer) error {
 		return fmt.Errorf("MCP backend stopped; reconnect to start a fresh process")
 	}
 	b.peers[p] = true
+	if b.authorization != nil {
+		b.authorization.attach(p)
+	}
 	b.lastUsed = time.Now()
 	return nil
 }
 
 func (b *backend) detach(p *peer) {
+	if b.authorization != nil {
+		b.authorization.detach(p)
+	}
 	b.mu.Lock()
 	delete(b.peers, p)
 	b.lastUsed = time.Now()
@@ -90,6 +97,9 @@ func (b *backend) detach(p *peer) {
 	}
 	b.mu.Unlock()
 	for _, request := range cancelled {
+		if request.reply != nil {
+			b.deliver(request, wire.Error(request.originalID, -32800, "MCP client disconnected during initialization"))
+		}
 		b.cancelRequest(request, "client disconnected")
 	}
 	if b.isolated {
@@ -148,6 +158,10 @@ func (b *backend) handle(p *peer, message wire.Message) {
 	if method == "notifications/initialized" || method == "notifications/roots/list_changed" {
 		return
 	}
+	if method == "notifications/cancelled" {
+		b.forwardCancellation(p, message)
+		return
+	}
 	if p.initialized.Load() == 0 && wire.IsModernRequest(message) {
 		b.initMu.Lock()
 		if b.protocolEra == 1 {
@@ -163,10 +177,6 @@ func (b *backend) handle(p *peer, message wire.Message) {
 		if message.HasID() {
 			p.send(wire.Error(message.ID(), -32002, "initialize must complete before using a shared MCP server"))
 		}
-		return
-	}
-	if method == "notifications/cancelled" {
-		b.forwardCancellation(p, message)
 		return
 	}
 	if method == "" {
@@ -198,13 +208,18 @@ func (b *backend) handle(p *peer, message wire.Message) {
 func (b *backend) initialize(p *peer, message wire.Message) {
 	b.initMu.Lock()
 	defer b.initMu.Unlock()
+	select {
+	case <-p.done:
+		return
+	default:
+	}
 	if b.protocolEra == 2 {
 		p.initialized.Store(0)
 		p.send(wire.Error(message.ID(), -32601, "upstream uses stateless MCP 2026; configure sharing=isolated for legacy clients"))
 		return
 	}
 	if b.initResult == nil {
-		result, err := b.initializeUpstream(message)
+		result, err := b.initializeUpstream(p, message)
 		if err != nil {
 			p.initialized.Store(0)
 			p.send(wire.Error(message.ID(), -32000, err.Error()))
@@ -234,13 +249,22 @@ func (b *backend) initialize(p *peer, message wire.Message) {
 func (b *backend) discover(p *peer, message wire.Message) {
 	b.initMu.Lock()
 	defer b.initMu.Unlock()
+	select {
+	case <-p.done:
+		return
+	default:
+	}
 	if b.protocolEra == 1 {
 		p.initialized.Store(0)
 		p.send(wire.Error(message.ID(), -32601, "server/discover unavailable after legacy MCP initialization"))
 		return
 	}
 	replies := make(chan wire.Message, 1)
-	request, err := b.forward(nil, message, replies)
+	var authorizationAttempts uint64
+	if state, ok := b.transport.(interface{ AuthorizationAttempts() uint64 }); ok {
+		authorizationAttempts = state.AuthorizationAttempts()
+	}
+	request, err := b.forward(p, message, replies)
 	if err != nil {
 		p.initialized.Store(0)
 		p.send(wire.Error(message.ID(), -32000, err.Error()))
@@ -252,25 +276,45 @@ func (b *backend) discover(p *peer, message wire.Message) {
 	}
 	timer := time.NewTimer(limit)
 	defer timer.Stop()
+	deadline := time.Now().Add(b.timeout)
+	extended := false
 	var response wire.Message
-	select {
-	case response = <-replies:
-	case <-timer.C:
-		b.mu.Lock()
-		b.removeLocked(string(request.upstreamID), request)
-		b.mu.Unlock()
-		if cancellable, ok := b.transport.(interface{ CancelRequest(json.RawMessage) }); ok {
-			// Drain an abandoned HTTP discovery before allowing the legacy
-			// initialize fallback on this same upstream transport.
-			cancellable.CancelRequest(request.upstreamID)
+waiting:
+	for {
+		select {
+		case response = <-replies:
+			break waiting
+		case <-timer.C:
+			authorized := false
+			if state, ok := b.transport.(interface{ AuthorizationPending() bool }); ok {
+				authorized = state.AuthorizationPending()
+			}
+			if state, ok := b.transport.(interface{ AuthorizationAttempts() uint64 }); ok {
+				authorized = authorized || state.AuthorizationAttempts() != authorizationAttempts
+			}
+			if !extended && authorized && time.Now().Before(deadline) {
+				// Consent cannot fit inside the short protocol-probing timeout. Keep
+				// the configured request budget and transport cancellation intact.
+				extended = true
+				timer.Reset(time.Until(deadline))
+				continue
+			}
+			b.mu.Lock()
+			b.removeLocked(string(request.upstreamID), request)
+			b.mu.Unlock()
+			if cancellable, ok := b.transport.(interface{ CancelRequest(json.RawMessage) }); ok {
+				// Drain an abandoned HTTP discovery before allowing the legacy
+				// initialize fallback on this same upstream transport.
+				cancellable.CancelRequest(request.upstreamID)
+			}
+			p.initialized.Store(0)
+			p.send(wire.Error(message.ID(), -32001, "modern MCP discovery timed out; legacy initialization may be available"))
+			return
+		case <-b.ctx.Done():
+			p.initialized.Store(0)
+			p.send(wire.Error(message.ID(), -32000, "MCP stopped during discovery"))
+			return
 		}
-		p.initialized.Store(0)
-		p.send(wire.Error(message.ID(), -32001, "modern MCP discovery timed out; legacy initialization may be available"))
-		return
-	case <-b.ctx.Done():
-		p.initialized.Store(0)
-		p.send(wire.Error(message.ID(), -32000, "MCP stopped during discovery"))
-		return
 	}
 	response["id"] = message.ID()
 	if response["error"] != nil {
@@ -303,7 +347,7 @@ func (b *backend) discover(p *peer, message wire.Message) {
 	p.send(response)
 }
 
-func (b *backend) initializeUpstream(message wire.Message) (wire.Message, error) {
+func (b *backend) initializeUpstream(owner *peer, message wire.Message) (wire.Message, error) {
 	request := message.Clone()
 	var params map[string]json.RawMessage
 	if err := json.Unmarshal(request["params"], &params); err != nil || params == nil {
@@ -318,7 +362,7 @@ func (b *backend) initializeUpstream(message wire.Message) (wire.Message, error)
 	params["clientInfo"] = wire.Raw(map[string]string{"name": "agentcfg", "version": "0.1.0"})
 	request["params"] = wire.Raw(params)
 	reply := make(chan wire.Message, 1)
-	if _, err := b.forward(nil, request, reply); err != nil {
+	if _, err := b.forward(owner, request, reply); err != nil {
 		return nil, err
 	}
 	select {

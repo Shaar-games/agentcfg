@@ -93,6 +93,18 @@ transport, avec protocoles legacy/moderne et réponses JSON/SSE. Ils vérifient
 aussi la priorité des en-têtes SDK et le repli legacy après une découverte
 refusée, interrompue ou incompatible. Aucun compte OAuth personnel n'est utilisé.
 
+Les parcours de connexion automatique passent aussi par le vrai broker, son IPC
+natif et les flux stdio : une URL seule déclenche la découverte puis le login,
+sans lire stdin ni publier les contrôles OAuth sur stdout. Les fixtures vérifient
+la réutilisation et le rejet des jetons, un login partagé entre plusieurs clients,
+le départ du client portant le navigateur et la reprise après nettoyage du
+callback. La découverte moderne garde son budget de requête pendant le login
+ou le renouvellement, y compris lorsque le consentement termine juste avant
+le délai court. Un faux ouvreur de navigateur permet de vérifier méthode,
+chemin, state, port occupé, annulation et diagnostics sans aucun compte réel.
+Les tests conservent la priorité des credentials explicites et l'absence de
+rejeu d'un outil après une erreur réseau indéterminée.
+
 Les régressions du broker vérifient qu'une écriture d'annulation bloquée n'arrête
 ni l'expiration des autres opérations, ni la déconnexion, ni les réponses aux
 ping locaux. Les annulations sont envoyées dans une file bornée, avec un motif

@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 
+	"agentcfg/internal/auth"
 	"agentcfg/internal/config"
 	"agentcfg/internal/wire"
 )
@@ -34,6 +35,17 @@ var ErrClosed = errors.New("MCP transport is closed")
 // Start uses ctx for the backend's entire lifetime, not one client request.
 // stderr must return promptly from Write; it is never closed by this package.
 func Start(ctx context.Context, s config.Server, stderr io.Writer) (Transport, error) {
+	return start(ctx, s, stderr, nil)
+}
+
+// StartWithOAuth enables browser authorization supplied by the local client.
+// The HTTP SDK owns discovery, token use and retries after an auth rejection.
+// Stdio upstreams retain their own authentication behavior unchanged.
+func StartWithOAuth(ctx context.Context, s config.Server, stderr io.Writer, opts auth.Options) (Transport, error) {
+	return start(ctx, s, stderr, &opts)
+}
+
+func start(ctx context.Context, s config.Server, stderr io.Writer, opts *auth.Options) (Transport, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -41,7 +53,7 @@ func Start(ctx context.Context, s config.Server, stderr io.Writer) (Transport, e
 	case "", "stdio":
 		return startStdio(ctx, s, stderr)
 	case "http", "streamable-http":
-		return startHTTP(ctx, s)
+		return startHTTPWithOAuth(ctx, s, opts)
 	case "sse":
 		return nil, errors.New("legacy HTTP+SSE transport is unsupported; configure a Streamable HTTP endpoint")
 	default:

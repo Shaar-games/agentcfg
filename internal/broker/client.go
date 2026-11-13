@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"agentcfg/internal/auth"
 	"agentcfg/internal/config"
 	"agentcfg/internal/ipc"
 	"agentcfg/internal/wire"
@@ -54,7 +55,7 @@ func exchange(ctx context.Context, connection net.Conn, request wire.Message) (*
 	if err := wire.NewWriter(connection).Write(request); err != nil {
 		return nil, nil, exchangeError(ctx, err)
 	}
-	reader := wire.NewReader(connection)
+	reader := wire.NewReaderLimit(connection, maxIPCFrameSize)
 	response, err := reader.Read()
 	if err != nil {
 		return nil, nil, exchangeError(ctx, err)
@@ -213,6 +214,14 @@ func spawn(root string, endpoint ipc.Endpoint) error {
 // Connect is a transparent stdio proxy after a private IPC handshake. EOF on
 // either side tears down this client, not the shared upstream process.
 func Connect(ctx context.Context, root, name, harness string, input io.Reader, output io.Writer) error {
+	return ConnectWithOptions(ctx, root, name, harness, input, output, ConnectOptions{})
+}
+
+// ConnectWithOptions keeps browser interaction in the process launched by the
+// harness. Private IPC controls are never exposed to the harness's MCP stream.
+func ConnectWithOptions(ctx context.Context, root, name, harness string, input io.Reader, output io.Writer, opts ConnectOptions) error {
+	ctx, cancelConnection := context.WithCancel(ctx)
+	defer cancelConnection()
 	cfg, err := config.Load(root)
 	if err != nil {
 		return err
@@ -230,6 +239,9 @@ func Connect(ctx context.Context, root, name, harness string, input io.Reader, o
 	defer connection.Close()
 	request := hello("connect")
 	request["server"], request["harness"] = wire.Raw(name), wire.Raw(harness)
+	if opts.AuthorizationCodeFetcher != nil {
+		request["authorization"] = wire.Raw(true)
+	}
 	if entry.Type == "stdio" && entry.Cwd == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -241,10 +253,50 @@ func Connect(ctx context.Context, root, name, harness string, input io.Reader, o
 	if err != nil {
 		return err
 	}
+	var authorization *clientAuthorization
+	var ipcWriter *wire.Writer
+	if opts.AuthorizationCodeFetcher != nil {
+		entry.Name = name
+		interactive := auth.InteractiveServer(entry)
+		redirect := ""
+		if interactive.OAuth != nil {
+			redirect = interactive.OAuth.RedirectURL
+		}
+		ipcWriter = wire.NewWriterLimit(connection, maxIPCFrameSize)
+		authorization = &clientAuthorization{ctx: ctx, redirect: redirect, writer: ipcWriter, opts: opts,
+			flows: make(map[string]context.CancelFunc)}
+		defer func() {
+			cancelConnection()
+			// Give a cancelled browser callback time to release its listener and
+			// acknowledge departure before another client resumes the same flow.
+			_ = connection.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			authorization.close()
+			_ = connection.Close()
+		}()
+	}
 	finished := make(chan error, 2)
 	go func() {
-		_, err := io.Copy(connection, input)
-		finished <- err
+		if authorization == nil {
+			_, err := io.Copy(connection, input)
+			finished <- err
+			return
+		}
+		reader := wire.NewReader(input)
+		for {
+			message, err := reader.Read()
+			if err != nil {
+				finished <- err
+				return
+			}
+			envelope, err := encodeMCPEnvelope(message)
+			if err == nil {
+				err = ipcWriter.Write(envelope)
+			}
+			if err != nil {
+				finished <- err
+				return
+			}
+		}
 	}()
 	go func() {
 		writer := wire.NewWriter(output)
@@ -253,6 +305,20 @@ func Connect(ctx context.Context, root, name, harness string, input io.Reader, o
 			if err != nil {
 				finished <- err
 				return
+			}
+			if authorization != nil {
+				if message["mcp"] == nil {
+					if err := authorization.handle(message); err != nil {
+						finished <- err
+						return
+					}
+					continue
+				}
+				message, err = decodeMCPEnvelope(message)
+				if err != nil {
+					finished <- err
+					return
+				}
 			}
 			if err := writer.Write(message); err != nil {
 				finished <- err

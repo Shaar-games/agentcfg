@@ -124,8 +124,10 @@ omit URLs, configured headers, response bodies and underlying network error text
 HTTP rejections retain their numeric status and distinguish authentication,
 access denial, redirects, rate limits and server errors. Typed DNS, certificate,
 connection, timeout and OAuth token/authorization failures use fixed messages.
-An HTTP 401 alone cannot distinguish missing credentials from rejected ones;
-it does not automatically configure OAuth or start an interactive login.
+An HTTP 401 alone cannot distinguish missing credentials from rejected ones.
+Client connections can perform OAuth discovery and browser sign-in when an
+upstream authentication challenge requires it; HTTP status alone does not
+authorize replaying an operation after an unrelated network failure.
 Invalid or interrupted JSON/SSE responses are reported without copying their
 contents. Raw valid MCP messages, including server-supplied error responses,
 retain their content for the broker.
@@ -225,19 +227,40 @@ result and expects GET resumption. Such an incomplete POST stream returns a
 correlated error; the operation is not replayed. Unsolicited GET reconnection is
 not lossless and does not replay missed events.
 
-OAuth 2.1 authorization is available through the official Go MCP SDK with an
-explicitly configured `oauth` block and `agentcfg auth login <server>`.
-Discovery, PKCE, encrypted cached tokens and refresh are supported; the broker
-never initiates an interactive login or opens a browser without a user command.
+OAuth 2.1 authorization uses the official Go MCP SDK. When a client starts
+`agentcfg connect`, a required OAuth sign-in opens the browser from that client
+process, including for a remote HTTPS entry containing only its URL. The local MCP
+connection stays on stdio. Authorization prompts and callback responses travel
+over private broker IPC and never become MCP messages or consume the client's
+stdin. Browser instructions go only to stderr. Credentials remain in agentcfg's
+encrypted store; native client token caches are not imported.
+
+Concurrent clients with the same credential identity share one sign-in. If its
+client disconnects, another connected client can finish the same authorization.
+Cancellation waits for callback cleanup before a new flow can reuse its port.
+After upgrading, restart an existing broker with `agentcfg stop` before
+reconnecting clients: this private IPC capability requires the updated broker.
+
+Discovery, PKCE, encrypted cached tokens and refresh are supported. An explicit
+`oauth` block can select a preregistered client, scopes, account or callback.
 Explicit scopes limit discovery defaults. Scopes required by a Bearer challenge
-are included in the next explicit authorization, together with existing grants.
+are included in the next authorization, together with existing grants.
 A callback issuer is still validated when the provider omits its metadata hint.
 Dynamic registration uses the SDK's redirect classification, including HTTPS
 loopback callbacks as native applications.
-The configured redirect URL must be registered with the authorization provider.
+
+Automatic browser login requires an HTTP loopback callback with a nonzero port.
+The callback listener is bound before the browser opens and is closed on success,
+failure, cancellation or timeout. A configured redirect URL must be registered
+with the authorization provider; configurations requiring a manual callback can
+still use `agentcfg auth login <server>`. That command also supports `--no-browser`.
+No terminal input is requested by `connect`. A client-imposed startup or request
+deadline can also cancel an in-progress browser sign-in.
+
 Windows uses per-user DPAPI, while Linux/macOS need an explicitly supplied
 `AGENTCFG_OAUTH_KEY` (base64-encoded 32 random bytes) or an injected secure
-store. Static configured headers are supported without OAuth; a configured
+store. A missing secure store must not prevent access to a public HTTP MCP that
+does not require OAuth. Static configured headers are supported without OAuth; a configured
 literal Authorization header cannot be combined with OAuth. HTTP 401/403
 failures without valid credentials return sanitized errors. Legacy 2024
 HTTP+SSE (`type: "sse"`, with
@@ -255,7 +278,10 @@ malformed/oversized frames, initialize/session/header ordering, callback replies
 optional GET, JSON/SSE results, session expiration, redirect rejection and
 sanitized correlated errors.
 
-The OAuth integration opens a transport before login, verifies the unauthenticated
+Browser callback tests use an injected opener instead of launching a real browser.
+They verify listener availability before navigation, callback state/path/method,
+provider refusal, output failures, cancellation and port cleanup without terminal
+input. The OAuth integration opens a transport before login, verifies the unauthenticated
 error, then performs PKCE login and encrypted credential persistence against an
 SDK test server. It checks an authenticated tool call, rejection after logout and
 recovery after another login on that same transport, for legacy and stateless

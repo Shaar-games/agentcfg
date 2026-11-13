@@ -85,6 +85,10 @@ type httpTransport struct {
 }
 
 func startHTTP(parent context.Context, s config.Server) (Transport, error) {
+	return startHTTPWithOAuth(parent, s, nil)
+}
+
+func startHTTPWithOAuth(parent context.Context, s config.Server, opts *auth.Options) (Transport, error) {
 	u, err := url.Parse(s.URL)
 	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") ||
 		u.Host == "" || u.Hostname() == "" || u.Fragment != "" || u.Opaque != "" {
@@ -125,7 +129,11 @@ func startHTTP(parent context.Context, s config.Server) (Transport, error) {
 	t.client = &http.Client{Transport: network, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	t.oauth, err = auth.NewHandler(ctx, s, auth.Options{})
+	if opts == nil {
+		t.oauth, err = auth.NewHandler(ctx, s, auth.Options{})
+	} else {
+		t.oauth, err = auth.NewInteractiveHandler(ctx, s, *opts)
+	}
 	if err != nil {
 		cancel()
 		network.CloseIdleConnections()
@@ -136,6 +144,21 @@ func startHTTP(parent context.Context, s config.Server) (Transport, error) {
 }
 
 func (t *httpTransport) PID() int { return 0 }
+
+// AuthorizationPending lets the broker distinguish a quick capability probe
+// from a discovery request waiting for interactive user authorization.
+func (t *httpTransport) AuthorizationPending() bool {
+	state, ok := t.oauth.(interface{ AuthorizationPending() bool })
+	return ok && state.AuthorizationPending()
+}
+
+func (t *httpTransport) AuthorizationAttempts() uint64 {
+	state, ok := t.oauth.(interface{ AuthorizationAttempts() uint64 })
+	if !ok {
+		return 0
+	}
+	return state.AuthorizationAttempts()
+}
 
 func (t *httpTransport) Read() (wire.Message, error) {
 	message, _, err := t.ReadRouted()

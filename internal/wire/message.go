@@ -87,7 +87,11 @@ func Notification(method string, params any) Message {
 }
 
 func Decode(data []byte) (Message, error) {
-	if len(data) > MaxFrameSize {
+	return decode(data, MaxFrameSize)
+}
+
+func decode(data []byte, limit int) (Message, error) {
+	if len(data) > limit {
 		return nil, errors.New("JSON-RPC frame exceeds 32 MiB")
 	}
 	var m Message
@@ -100,11 +104,20 @@ func Decode(data []byte) (Message, error) {
 	return m, nil
 }
 
-type Reader struct{ scanner *bufio.Scanner }
+type Reader struct {
+	scanner *bufio.Scanner
+	limit   int
+}
 
 func NewReader(reader io.Reader) *Reader {
+	return NewReaderLimit(reader, MaxFrameSize)
+}
+
+// NewReaderLimit allows private IPC envelopes to carry a complete MCP frame.
+// MCP streams themselves must use NewReader and its standard frame budget.
+func NewReaderLimit(reader io.Reader, limit int) *Reader {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64<<10), MaxFrameSize+1)
+	scanner.Buffer(make([]byte, 64<<10), limit+1)
 	searched := 0
 	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
 		// Scanner retains an incomplete line between reads. Search only the
@@ -118,7 +131,7 @@ func NewReader(reader io.Reader) *Reader {
 		// final unterminated line and empty-input behavior exactly.
 		return bufio.ScanLines(data, atEOF)
 	})
-	return &Reader{scanner: scanner}
+	return &Reader{scanner: scanner, limit: limit}
 }
 
 func (r *Reader) Read() (Message, error) {
@@ -127,7 +140,7 @@ func (r *Reader) Read() (Message, error) {
 		if len(data) == 0 {
 			continue
 		}
-		return Decode(data)
+		return decode(data, r.limit)
 	}
 	if err := r.scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read JSON-RPC frame (maximum 32 MiB): %w", err)
@@ -136,18 +149,22 @@ func (r *Reader) Read() (Message, error) {
 }
 
 type Writer struct {
-	mu sync.Mutex
-	w  io.Writer
+	mu    sync.Mutex
+	w     io.Writer
+	limit int
 }
 
-func NewWriter(writer io.Writer) *Writer { return &Writer{w: writer} }
+func NewWriter(writer io.Writer) *Writer { return NewWriterLimit(writer, MaxFrameSize) }
+
+// NewWriterLimit is the private IPC counterpart of NewReaderLimit.
+func NewWriterLimit(writer io.Writer, limit int) *Writer { return &Writer{w: writer, limit: limit} }
 
 func (w *Writer) Write(m Message) error {
 	data, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
-	if len(data) > MaxFrameSize {
+	if len(data) > w.limit {
 		return errors.New("JSON-RPC frame exceeds 32 MiB")
 	}
 	w.mu.Lock()
