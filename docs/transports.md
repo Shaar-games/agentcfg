@@ -121,8 +121,14 @@ Errors for outgoing requests are delivered by `Read` as JSON-RPC errors with the
 request ID. Failed notifications/responses terminate the transport because there
 is no request ID to which an error could be returned. Transport-generated errors
 omit URLs, configured headers, response bodies and underlying network error text.
-Raw valid MCP messages, including server-supplied error responses, retain their
-content for the broker.
+HTTP rejections retain their numeric status and distinguish authentication,
+access denial, redirects, rate limits and server errors. Typed DNS, certificate,
+connection, timeout and OAuth token/authorization failures use fixed messages.
+An HTTP 401 alone cannot distinguish missing credentials from rejected ones;
+it does not automatically configure OAuth or start an interactive login.
+Invalid or interrupted JSON/SSE responses are reported without copying their
+contents. Raw valid MCP messages, including server-supplied error responses,
+retain their content for the broker.
 
 Initialization response headers are retained before parsing its SSE events, so
 callbacks during initialization can use the session. The negotiated protocol

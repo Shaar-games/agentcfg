@@ -8,23 +8,11 @@ import (
 	"net/http"
 	"time"
 
-	"agentcfg/internal/auth"
 	"agentcfg/internal/wire"
 )
 
 var errSessionExpired = errors.New("MCP HTTP session expired; reconnect and initialize a new session")
 var errUndeliveredEvent = errors.New("MCP HTTP unsolicited message could not be delivered; reconnect to create a new session")
-
-func requestError(ctx context.Context) error {
-	switch {
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return errors.New("MCP HTTP request timed out; the operation is not retried")
-	case ctx.Err() != nil:
-		return errors.New("MCP HTTP request cancelled; remote execution may already have started")
-	default:
-		return errors.New("MCP HTTP request failed; the operation is not retried")
-	}
-}
 
 func (t *httpTransport) post(ctx context.Context, data []byte, id json.RawMessage, request, initialize, initialized, discover bool) error {
 	var outgoing wire.Message
@@ -106,12 +94,9 @@ func (t *httpTransport) post(ctx context.Context, data []byte, id json.RawMessag
 	if errors.Is(err, errSessionExpired) {
 		return errSessionExpired
 	}
-	if errors.Is(err, auth.ErrLoginRequired) {
-		return auth.ErrLoginRequired
-	}
 	// SDK errors may contain a URL, session ID, invalid response bytes or auth
 	// diagnostics. Only validated JSON-RPC errors are exposed verbatim above.
-	return requestError(ctx)
+	return requestError(ctx, err)
 }
 
 func modernProtocolError(message wire.Message) bool {

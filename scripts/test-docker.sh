@@ -61,9 +61,10 @@ tar -C "$repository" -cf - \
     --build-arg "GO_VERSION=${AGENTCFG_GO_VERSION:-1.26.10}" \
     --build-arg "NODE_VERSION=${AGENTCFG_NODE_VERSION:-24.22.1}" -
 
+# Go executes its generated test binaries from temporary directories in /tmp.
 docker run --rm --name "$container" --cap-drop=ALL \
   --security-opt=no-new-privileges \
-  --tmpfs /tmp:rw,nosuid,nodev \
+  --tmpfs /tmp:rw,nosuid,nodev,exec \
   --env "AGENTCFG_TEST_NPX=$test_npx" \
   --env "AGENTCFG_TEST_RACE=$test_race" \
   "$image"

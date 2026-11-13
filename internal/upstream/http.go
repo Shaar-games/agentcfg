@@ -301,7 +301,7 @@ func (t *httpTransport) Write(message wire.Message) error {
 			select {
 			case <-t.ready:
 			case <-ctx.Done():
-				t.postFailure(id, request, initialize, discover, requestError(ctx), false)
+				t.postFailure(id, request, initialize, discover, requestError(ctx, ctx.Err()), false)
 				return
 			}
 		}
