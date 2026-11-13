@@ -4,7 +4,9 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,10 +21,102 @@ func TestPrivateIPCExchange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	checkPrivateIPCExchange(t, endpoint)
+}
+
+func TestPrivateIPCLongTemporaryPath(t *testing.T) {
+	endpoint := longTemporaryEndpoint(t)
+	checkPrivateIPCExchange(t, endpoint)
+	if len(endpoint.Address) > 100 {
+		t.Fatalf("Unix IPC address exceeds the portable limit: %d bytes", len(endpoint.Address))
+	}
+}
+
+func TestPrivateIPCFallbackRejectsSymlink(t *testing.T) {
+	endpoint := longTemporaryEndpoint(t)
+	target := t.TempDir()
+	if err := os.Chmod(target, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(endpoint.Directory); !os.IsNotExist(err) {
+		t.Fatalf("test endpoint already exists or cannot be inspected: %v", err)
+	}
+	if err := os.Symlink(target, endpoint.Directory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Remove(endpoint.Directory); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := endpoint.Prepare(); err == nil {
+		t.Fatal("private IPC directory followed a preexisting symlink")
+	}
+	info, err := os.Stat(target)
+	if err != nil || info.Mode().Perm() != 0o750 {
+		t.Fatalf("symlink target permissions changed: %v %v", info, err)
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("symlink target was modified: %v %v", entries, err)
+	}
+}
+
+func longTemporaryEndpoint(t *testing.T) Endpoint {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix socket path limits do not apply to named pipes")
+	}
+	base := t.TempDir()
+	root := filepath.Join(base, "home")
+	cache := filepath.Join(base, strings.Repeat("c", 90))
+	temporary := filepath.Join(base, strings.Repeat("t", 90))
+	for _, path := range []string{root, cache, temporary} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("LOCALAPPDATA", cache)
+	t.Setenv("XDG_CACHE_HOME", cache)
+	t.Setenv("TMPDIR", temporary)
+	t.Setenv("TMP", temporary)
+	t.Setenv("TEMP", temporary)
+	endpoint, err := ForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := ForRoot(root)
+	if err != nil || repeated != endpoint {
+		t.Fatalf("endpoint changed for the same root: %+v %+v %v", endpoint, repeated, err)
+	}
+	otherRoot := filepath.Join(base, "other-home")
+	if err := os.MkdirAll(otherRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	other, err := ForRoot(otherRoot)
+	if err != nil || other == endpoint {
+		t.Fatalf("distinct roots shared an endpoint: %+v %v", other, err)
+	}
+	return endpoint
+}
+
+func checkPrivateIPCExchange(t *testing.T, endpoint Endpoint) {
+	t.Helper()
+	// A fallback may be outside t.TempDir, but its hash belongs exclusively to
+	// this test's fresh root. Never remove a directory that already existed.
+	if _, err := os.Lstat(endpoint.Directory); !os.IsNotExist(err) {
+		t.Fatalf("test endpoint already exists or cannot be inspected: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(endpoint.Directory); err != nil {
+			t.Error(err)
+		}
+	})
 	if err := endpoint.Prepare(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(endpoint.Directory) })
 	listener, err := Listen(endpoint)
 	if err != nil {
 		t.Fatal(err)

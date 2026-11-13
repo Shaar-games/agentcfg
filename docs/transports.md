@@ -141,6 +141,12 @@ assigned, and `MCP-Protocol-Version`. A session-bearing HTTP 404 ends the transp
 reconnection must start a fresh initialization. Network failures and session
 expiration do not trigger replay of tool requests.
 
+A shared initialization stays owned by the backend if its first client
+disconnects. Other clients can use its actual result; a new handshake only starts
+after a failed result has reset the transport. MCP does not permit cancellation
+of `initialize`. If its deadline expires, the backend closes so a subsequent
+connection cannot reuse an unfinished session.
+
 After initialization, one optional GET SSE stream receives unsolicited requests
 and notifications. HTTP 405/501 or an unsupported GET response disables that
 optional channel while POST remains available. A clean GET EOF reconnects after
@@ -176,8 +182,10 @@ delivering the correlated response to the broker.
   deadline, including response headers and body. Response headers still have a
   two-minute timeout for subscriptions. The dial and TLS handshake deadlines are
   ten seconds. Backend context cancellation interrupts all active operations.
-- In a legacy session, `notifications/cancelled` is forwarded to the server and
-  cancels the matching local POST, except initialization. Modern cancellation
+- In a legacy session, `notifications/cancelled` for an active cancellable request
+  is forwarded to the server and cancels the matching local POST. Initialization,
+  unknown IDs and completed requests ignore cancellation, including a notification
+  arriving after failed discovery has reset the transport. Modern cancellation
   closes the matching POST stream without another notification POST. Local
   cancellation is not proof that the remote operation stopped; it may already
   have executed.

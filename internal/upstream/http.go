@@ -218,17 +218,26 @@ func (t *httpTransport) Write(message wire.Message) error {
 		t.mu.Unlock()
 		return ErrClosed
 	}
-	// In the stateless protocol cancellation is the closing of this POST's
-	// response stream; there is no cancellation notification POST.
-	if method == "notifications/cancelled" && t.state == httpModern {
+	if method == "notifications/cancelled" && !message.HasID() {
 		pending := t.cancelNotificationLocked(message)
-		t.mu.Unlock()
-		if pending != nil && pending.discover {
-			// Finish cancelling the optional probe before a legacy initialize
-			// can race the old POST and its state transition.
-			<-pending.done
+		if pending == nil {
+			// Ignore unknown or completed requests and initialize, which MCP
+			// clients must not cancel. A late notification can arrive after a
+			// failed discovery has already reset the transport to httpNew.
+			t.mu.Unlock()
+			return nil
 		}
-		return nil
+		// Stateless cancellation closes the POST without a notification POST.
+		// A discovery can already be resetting its protocol state, so identify
+		// it by the pending request as well as the transport's current mode.
+		if t.state == httpModern || pending.discover {
+			t.mu.Unlock()
+			if pending.discover {
+				// Drain the probe before a legacy initialize can reuse its state.
+				<-pending.done
+			}
+			return nil
+		}
 	}
 	if modern && t.state != httpNew && t.state != httpModern {
 		t.mu.Unlock()
@@ -298,9 +307,6 @@ func (t *httpTransport) Write(message wire.Message) error {
 	pending := &httpPending{cancel: cancel, initialize: initialize, discover: discover, done: make(chan struct{})}
 	if request {
 		t.pending[key] = pending
-	}
-	if method == "notifications/cancelled" {
-		t.cancelNotificationLocked(message)
 	}
 	waitReady := !initialize && !initialized && method != "" && t.state != httpReady && t.state != httpModern
 	t.wg.Add(1)

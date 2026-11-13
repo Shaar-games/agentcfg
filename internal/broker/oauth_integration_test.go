@@ -255,8 +255,7 @@ func oauthStdioHome(t *testing.T, endpoint, sharing string, headers map[string]s
 	for _, name := range []string{"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"} {
 		t.Setenv(name, root)
 	}
-	// Unix-domain sockets may fall back to os.TempDir when the cache path is
-	// long. Give that fallback its own short, test-owned temporary directory.
+	// Isolate runtime files when Unix sockets need a temporary-directory fallback.
 	socketTemp, err := os.MkdirTemp("", "ao-")
 	if err != nil {
 		t.Fatal(err)
@@ -265,6 +264,21 @@ func oauthStdioHome(t *testing.T, endpoint, sharing string, headers map[string]s
 	for _, name := range []string{"TMP", "TEMP", "TMPDIR"} {
 		t.Setenv(name, socketTemp)
 	}
+	ipcEndpoint, err := ipc.ForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(ipcEndpoint.Directory); !os.IsNotExist(err) {
+		t.Fatalf("test IPC directory already exists or cannot be inspected: %v", err)
+	}
+	// A long TMPDIR can require a further fallback outside socketTemp. The
+	// endpoint belongs to this test's unique root; Serve's later cleanup runs
+	// first, so its socket and lock are closed before this directory is removed.
+	t.Cleanup(func() {
+		if err := os.RemoveAll(ipcEndpoint.Directory); err != nil {
+			t.Error(err)
+		}
+	})
 	t.Setenv("AGENTCFG_OAUTH_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x6e}, 32)))
 	if err := os.MkdirAll(filepath.Join(root, ".agentcfg"), 0o700); err != nil {
 		t.Fatal(err)
@@ -573,45 +587,57 @@ func TestOAuthStdioDisconnectCancelsLogin(t *testing.T) {
 }
 
 func TestOAuthStdioOwnerDisconnectKeepsOtherClient(t *testing.T) {
-	f := newOAuthStdioFixture(t)
-	root := oauthStdioHome(t, f.http.URL+"/mcp", "isolated", nil)
-	serveOAuthStdioBroker(t, root)
-	started := make(chan struct{}, 1)
-	first := connectOAuthStdio(t, root, func(ctx context.Context, _ string, _ *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
-		select {
-		case started <- struct{}{}:
-		default:
-		}
-		<-ctx.Done()
-		return nil, ctx.Err()
-	})
-	first.beginInitialize(t)
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("first client never started authorization")
-	}
-	second := connectOAuthStdio(t, root, f.fetch)
-	second.beginInitialize(t)
-	// Both independent HTTP transports must have encountered the auth challenge
-	// before the client hosting the first browser interaction disappears.
-	deadline := time.Now().Add(5 * time.Second)
-	for f.challenges.Load() < 2 {
-		if time.Now().After(deadline) {
-			t.Fatal("second isolated client never reached the OAuth challenge")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if status, err := GetStatus(ctx, root); err != nil || len(status.Backends) != 2 {
-		t.Fatalf("both isolated clients did not attach before disconnection: %v, %+v", err, status)
-	}
-	_ = first.conn.Close()
-	second.finishInitialize(t)
-	second.call(t, "surviving-client", true)
-	if f.exchanges.Load() != 1 {
-		t.Fatalf("surviving client did not complete one new grant: %d", f.exchanges.Load())
+	for _, sharing := range []string{"shared", "isolated"} {
+		t.Run(sharing, func(t *testing.T) {
+			f := newOAuthStdioFixture(t)
+			root := oauthStdioHome(t, f.http.URL+"/mcp", sharing, nil)
+			serveOAuthStdioBroker(t, root)
+			started := make(chan struct{}, 1)
+			first := connectOAuthStdio(t, root, func(ctx context.Context, _ string, _ *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
+				select {
+				case started <- struct{}{}:
+				default:
+				}
+				<-ctx.Done()
+				return nil, ctx.Err()
+			})
+			first.beginInitialize(t)
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("first client never started authorization")
+			}
+			second := connectOAuthStdio(t, root, f.fetch)
+			second.beginInitialize(t)
+			// A shared backend has one upstream initialization and auth challenge.
+			// Isolated transports must both reach the challenge before the owner
+			// disappears, so the surviving waiter already participates in the flow.
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				status, err := GetStatus(ctx, root)
+				cancel()
+				if err == nil {
+					if sharing == "shared" && len(status.Backends) == 1 && status.Backends[0].Clients == 2 {
+						break
+					}
+					if sharing == "isolated" && len(status.Backends) == 2 &&
+						status.Backends[0].Clients == 1 && status.Backends[1].Clients == 1 && f.challenges.Load() >= 2 {
+						break
+					}
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("both %s clients did not attach before disconnection: %v, %+v; challenges=%d", sharing, err, status, f.challenges.Load())
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			_ = first.conn.Close()
+			second.finishInitialize(t)
+			second.call(t, "surviving-client", true)
+			if f.exchanges.Load() != 1 {
+				t.Fatalf("surviving client did not complete one new grant: %d", f.exchanges.Load())
+			}
+		})
 	}
 }
 

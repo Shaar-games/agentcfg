@@ -28,6 +28,7 @@ type pending struct {
 	upstreamToken json.RawMessage
 	deadline      time.Time
 	reply         chan wire.Message
+	initialize    bool
 }
 
 type backend struct {
@@ -90,7 +91,10 @@ func (b *backend) detach(p *peer) {
 	b.lastUsed = time.Now()
 	var cancelled []*pending
 	for key, request := range b.pending {
-		if request.owner == p {
+		// The upstream handshake belongs to the shared backend. Its HTTP state
+		// is not reusable until the actual response arrives, and a remaining
+		// client can still complete OAuth and use that same initialization.
+		if request.owner == p && !request.initialize {
 			cancelled = append(cancelled, request)
 			b.removeLocked(key, request)
 		}
@@ -401,7 +405,7 @@ func hasTaskRequest(message wire.Message) bool {
 func (b *backend) forward(owner *peer, message wire.Message, reply chan wire.Message) (*pending, error) {
 	request := &pending{owner: owner, originalID: append(json.RawMessage(nil), message.ID()...),
 		upstreamID: wire.Raw(fmt.Sprintf("agentcfg-%d", nextRequest.Add(1))),
-		deadline:   time.Now().Add(b.timeout), reply: reply}
+		deadline:   time.Now().Add(b.timeout), reply: reply, initialize: message.Method() == "initialize"}
 	forwarded := message.Clone()
 	forwarded["id"] = request.upstreamID
 	remapProgress(forwarded, request)
@@ -589,6 +593,11 @@ func (b *backend) forwardCancellation(p *peer, message wire.Message) {
 }
 
 func (b *backend) cancelRequest(request *pending, reason string) {
+	// MCP clients must not cancel initialize. Keep the shared handshake until
+	// its real result, or close the unfinished transport when its deadline ends.
+	if request.initialize {
+		return
+	}
 	// Cancellation reasons are advisory. Retaining arbitrary client frames in
 	// the bounded queue could still retain gigabytes when a writer is stalled.
 	// Preserve only the protocol fields and a small, valid UTF-8 reason.
@@ -654,13 +663,21 @@ func (b *backend) expiryLoop() {
 func (b *backend) expire(now time.Time) {
 	b.mu.Lock()
 	var expired []*pending
+	expiredInitialize := false
 	for key, request := range b.pending {
 		if now.After(request.deadline) {
 			expired = append(expired, request)
+			expiredInitialize = expiredInitialize || request.initialize
 			b.removeLocked(key, request)
 		}
 	}
 	b.mu.Unlock()
+	if expiredInitialize {
+		// An unfinished initialize cannot be cancelled or safely retried on the
+		// same transport. A later connection must acquire a fresh backend.
+		b.close()
+		return
+	}
 	for _, request := range expired {
 		b.deliver(request, wire.Error(request.originalID, -32001, "MCP request timed out; the operation may already have run and is not retried"))
 		b.cancelRequest(request, "agentcfg request timeout")
