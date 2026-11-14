@@ -7,7 +7,7 @@
 | Location relative to root | Purpose |
 | --- | --- |
 | `.agentcfg/mcp.json` | Explicit canonical MCP servers and optional agentcfg fields |
-| `.agentcfg/agentcfg.json` | Selected harnesses, runtime durations and named overrides |
+| `.agentcfg/agentcfg.json` | Selected harnesses, runtime durations, OAuth interaction preferences and named overrides |
 | `.agentcfg/skills/<skill>/SKILL.md` | Standalone skills |
 | `.agentcfg/plugins/<folder>/plugin.json` | Required portable plugin manifest |
 | `.agentcfg/plugins/<folder>/mcp.json` | Optional portable MCP component |
@@ -138,6 +138,9 @@ The default settings are:
     "idleTimeout": "5m",
     "requestTimeout": "5m"
   },
+  "oauth": {
+    "autoOpenBrowser": false
+  },
   "serverOverrides": {}
 }
 ~~~
@@ -145,6 +148,24 @@ The default settings are:
 `antigravity` is also accepted and targets `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/`, the Google Antigravity personal layout. VS Code has no supported user-scope adapter: `agentcfg init --harnesses vscode` refuses this selection. Duplicate harness names are removed while retaining their order. Unknown names are errors.
 
 Runtime durations use Go duration syntax, such as `30s` or `5m`, and must be positive. An omitted field retains its default.
+
+`oauth.autoOpenBrowser` controls the automatic browser fallback used by
+`agentcfg connect` when an HTTP MCP requires sign-in and the client does not
+support URL elicitation. It defaults to `false`; omitting `oauth` or using an
+empty `oauth` object has the same effect. Set it to `true` to opt in. Clients
+advertising `elicitation.url` receive a sign-in request through the local
+`agentcfg_authenticate` tool. Declining or cancelling that request never starts
+the automatic browser fallback, even when the option is enabled. The settings
+object accepts only `autoOpenBrowser`, whose value must be a JSON boolean;
+`null`, strings and unknown fields are rejected.
+
+An explicit `agentcfg auth login <server>` remains available and can open the
+browser regardless of this preference. Add `--no-browser` to that command to use
+its manual URL/callback flow. After a manual login, refresh or reconnect the MCP
+client to load the saved credentials. These interaction preferences belong in
+`~/.agentcfg/agentcfg.json`; the per-server `oauth` blocks describe provider/client
+settings separately.
+Portable MCP and Agent Plugins manifests do not contain this preference.
 
 The global `harnesses` list selects sync destinations. An explicit empty global list selects none. A server or skill filter narrows those destinations. An omitted filter allows all selected harnesses. For skills, `metadata.harness: none` represents an explicitly empty selection. Direct CLI connections with no harness name are allowed by `config.Allows`; these filters are routing preferences, not authorization controls.
 

@@ -21,11 +21,20 @@ const maxIPCFrameSize = wire.MaxFrameSize + 1024
 
 var errAuthorizationClientClosed = errors.New("OAuth client disconnected")
 
+// ErrAuthorizationUnavailable lets another attached client present the same
+// grant when this client has no eligible operation or URL presentation support.
+// It is not a refusal: a user's decline or cancellation remains terminal.
+var ErrAuthorizationUnavailable = errors.New("OAuth client cannot present authorization for this operation")
+
 // ConnectOptions belongs to the local stdio proxy, never the remote MCP server.
 // AuthorizationCodeFetcher must honor cancellation and must not use MCP stdin
 // or stdout. The broker keeps token exchange and credential storage private.
 type ConnectOptions struct {
 	AuthorizationCodeFetcher func(context.Context, string, *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error)
+	// ClientAuthorizationCodeFetcher binds the local callback before presenting
+	// the authorization URL through the MCP client's declared URL capability.
+	// The presenter never receives the authorization code or resulting tokens.
+	ClientAuthorizationCodeFetcher func(context.Context, string, *sdkauth.AuthorizationArgs, func(context.Context, string) error) (*sdkauth.AuthorizationResult, error)
 }
 
 type authorizationRequest struct {
@@ -95,7 +104,7 @@ func (r *authorizationRelay) fetch(ctx context.Context, args *sdkauth.Authorizat
 		}
 		attempted[selected] = true
 		result, err := selected.authorize(ctx, r.redirect, args.URL)
-		if !errors.Is(err, errAuthorizationClientClosed) {
+		if !errors.Is(err, errAuthorizationClientClosed) && !errors.Is(err, ErrAuthorizationUnavailable) {
 			return result, err
 		}
 		// Another connected client for this credential identity may finish the
@@ -137,6 +146,10 @@ func (p *peer) authorize(ctx context.Context, redirect, url string) (*sdkauth.Au
 			return nil, context.DeadlineExceeded
 		case "disconnected":
 			return nil, errAuthorizationClientClosed
+		case "unavailable":
+			return nil, ErrAuthorizationUnavailable
+		case "login_required":
+			return nil, auth.ErrLoginRequired
 		default:
 			return nil, errors.New("OAuth browser authorization failed; inspect the MCP client diagnostics")
 		}
@@ -253,6 +266,10 @@ func (c *clientAuthorization) handle(message wire.Message) error {
 				response.Error = "cancelled"
 			case errors.Is(err, context.DeadlineExceeded):
 				response.Error = "timeout"
+			case errors.Is(err, auth.ErrLoginRequired):
+				response.Error = "login_required"
+			case errors.Is(err, ErrAuthorizationUnavailable):
+				response.Error = "unavailable"
 			default:
 				response.Error = "failed"
 			}

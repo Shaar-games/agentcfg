@@ -220,6 +220,25 @@ func Connect(ctx context.Context, root, name, harness string, input io.Reader, o
 // ConnectWithOptions keeps browser interaction in the process launched by the
 // harness. Private IPC controls are never exposed to the harness's MCP stream.
 func ConnectWithOptions(ctx context.Context, root, name, harness string, input io.Reader, output io.Writer, opts ConnectOptions) error {
+	if opts.ClientAuthorizationCodeFetcher != nil {
+		cfg, err := config.Load(root)
+		if err != nil {
+			return err
+		}
+		entry, ok := cfg.Servers[name]
+		if !ok || !config.Allows(entry.Harnesses, harness) || !harnessEnabled(cfg.Settings.Harnesses, harness) {
+			return fmt.Errorf("unknown MCP server or excluded harness: %s", name)
+		}
+		entry.Name = name
+		if auth.InteractiveServer(entry).OAuth != nil {
+			return connectOAuthFacade(ctx, cfg.Root, name, harness, input, output, opts,
+				cfg.Settings.OAuth.AutoOpenBrowser, duration(cfg.Settings.Runtime.RequestTimeout, 5*time.Minute))
+		}
+	}
+	return connectStdioProxy(ctx, root, name, harness, input, output, opts)
+}
+
+func connectStdioProxy(ctx context.Context, root, name, harness string, input io.Reader, output io.Writer, opts ConnectOptions) error {
 	ctx, cancelConnection := context.WithCancel(ctx)
 	defer cancelConnection()
 	cfg, err := config.Load(root)

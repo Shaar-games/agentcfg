@@ -36,7 +36,14 @@ type Skill struct {
 type Settings struct {
 	Harnesses       []string            `json:"harnesses"`
 	Runtime         Runtime             `json:"runtime,omitempty"`
+	OAuth           OAuthSettings       `json:"oauth,omitempty"`
 	ServerOverrides map[string]Override `json:"serverOverrides,omitempty"`
+}
+
+// OAuthSettings controls the optional browser fallback from connect.
+// Explicit auth login commands remain independent of this opt-in preference.
+type OAuthSettings struct {
+	AutoOpenBrowser bool `json:"autoOpenBrowser,omitempty"`
 }
 
 type Runtime struct {

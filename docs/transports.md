@@ -125,9 +125,10 @@ HTTP rejections retain their numeric status and distinguish authentication,
 access denial, redirects, rate limits and server errors. Typed DNS, certificate,
 connection, timeout and OAuth token/authorization failures use fixed messages.
 An HTTP 401 alone cannot distinguish missing credentials from rejected ones.
-Client connections can perform OAuth discovery and browser sign-in when an
-upstream authentication challenge requires it; HTTP status alone does not
-authorize replaying an operation after an unrelated network failure.
+Client connections can perform OAuth discovery and sign-in when an upstream
+authentication challenge requires it. Client URL interaction and the optional
+browser fallback are described below; HTTP status alone does not authorize
+replaying an operation after an unrelated network failure.
 Invalid or interrupted JSON/SSE responses are reported without copying their
 contents. Raw valid MCP messages, including server-supplied error responses,
 retain their content for the broker.
@@ -239,13 +240,35 @@ result and expects GET resumption. Such an incomplete POST stream returns a
 correlated error; the operation is not replayed. Unsolicited GET reconnection is
 not lossless and does not replay missed events.
 
-OAuth 2.1 authorization uses the official Go MCP SDK. When a client starts
-`agentcfg connect`, a required OAuth sign-in opens the browser from that client
-process, including for a remote HTTPS entry containing only its URL. The local MCP
-connection stays on stdio. Authorization prompts and callback responses travel
-over private broker IPC and never become MCP messages or consume the client's
-stdin. Browser instructions go only to stderr. Credentials remain in agentcfg's
-encrypted store; native client token caches are not imported.
+OAuth 2.1 authorization uses the official Go MCP SDK, including discovery for
+compatible remote HTTPS entries containing only their URL. While an eligible
+HTTP connection requires sign-in, `agentcfg connect` exposes a local MCP facade
+with an `agentcfg_authenticate` tool. When that tool is called by a client
+advertising `elicitation.url`, agentcfg presents a URL authorization request
+through MCP. The client's interface controls how the request appears; a native
+OAuth button is not guaranteed. Native stdio MCP connections keep their ordinary
+forwarding behavior.
+
+When the upstream is already accessible, its initialization/discovery metadata,
+negotiated version and supported capabilities are preserved, including the
+existing restrictions of shared mode. If OAuth initially hides the upstream's
+protocol version, the temporary authentication facade may need a different
+version. After consent, agentcfg then asks the client to reconnect so it can
+negotiate the real version; the completed grant remains stored for that connection.
+
+For a client without URL elicitation, the default is to use
+`agentcfg auth login <server>` explicitly, then refresh or reconnect the client
+to load the saved credentials. Setting `oauth.autoOpenBrowser` to `true` in
+`~/.agentcfg/agentcfg.json` enables automatic browser fallback from `connect`.
+The setting is `false` by default and does not restrict an explicit `auth login`
+command. Declining or cancelling a client URL request never triggers that
+fallback, even when enabled.
+
+The local MCP connection stays on stdio. Client-facing authorization requests
+are MCP messages; private broker authorization controls and callback responses
+remain on private IPC. `connect` never reads stdin as terminal input, and
+diagnostics go only to stderr. Credentials remain in agentcfg's encrypted store;
+native client token caches are not imported.
 
 Concurrent clients with the same credential identity share one sign-in. If its
 client disconnects, another connected client can finish the same authorization.
@@ -264,9 +287,10 @@ A callback issuer is still validated when the provider omits its metadata hint.
 Dynamic registration uses the SDK's redirect classification, including HTTPS
 loopback callbacks as native applications.
 
-Automatic browser login requires an HTTP loopback callback with a nonzero port.
-The callback listener is bound before the browser opens and is closed on success,
-failure, cancellation or timeout. A configured redirect URL must be registered
+Client URL sign-in and automatic browser fallback require an HTTP loopback callback
+with a nonzero port. The listener is bound before the URL is presented or the
+browser opens, and is closed on success, failure, cancellation or timeout.
+A configured redirect URL must be registered
 with the authorization provider; configurations requiring a manual callback can
 still use `agentcfg auth login <server>`. That command also supports `--no-browser`.
 No terminal input is requested by `connect`. A client-imposed startup or request

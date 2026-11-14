@@ -144,12 +144,23 @@ persistently.
 
 ## Other useful commands
 
-Connections started by a harness through `agentcfg connect` open the browser
-when an HTTP MCP requires OAuth. A compatible URL-only server uses automatic
-discovery; no preliminary terminal login or configuration rewrite is required.
-`agentcfg auth login <server>` remains available for an explicit login or a
-manual callback. `agentcfg auth status <server>` and `agentcfg auth logout <server>`
-use the same credential identity as automatic connections. See
+When an eligible HTTP connection requires OAuth, `agentcfg connect` exposes a
+local `agentcfg_authenticate` tool. Invoke that tool to sign in. A client that
+advertises `elicitation.url` receives a URL authorization request during the
+tool call; its own interface determines how the link appears. This does not
+guarantee a native OAuth button in any particular client.
+
+Without URL elicitation, run `agentcfg auth login <server>`, then refresh or
+reconnect the MCP client to load the saved credentials. That explicit command
+can open the browser independently of the automatic-opening preference;
+`--no-browser` selects the manual URL/callback flow. Automatic browser fallback
+from `connect` requires `oauth.autoOpenBrowser: true` in
+`~/.agentcfg/agentcfg.json`; its default is `false`. Refusing or cancelling a
+client URL request never falls back to automatic browser opening.
+
+`agentcfg auth status <server>` and `agentcfg auth logout <server>` use the same
+credential identity as client connections. Compatible URL-only HTTP servers
+use OAuth discovery without requiring a configuration rewrite. See
 [transports.md](transports.md) for callback and secure-storage requirements.
 
 `agentcfg status` inspects the broker without starting it;
