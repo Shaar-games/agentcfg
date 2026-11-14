@@ -93,6 +93,34 @@ transport, avec protocoles legacy/moderne et réponses JSON/SSE. Ils vérifient
 aussi la priorité des en-têtes SDK et le repli legacy après une découverte
 refusée, interrompue ou incompatible. Aucun compte OAuth personnel n'est utilisé.
 
+Les parcours OAuth passent aussi par le vrai broker, son IPC natif et les flux
+stdio, avec découverte pour des entrées HTTP à URL seule. Le flux stdin n'est
+jamais traité comme une saisie de terminal ; stdout reste réservé aux messages
+MCP, y compris les demandes d'autorisation destinées au client. Les contrôles
+privés du broker restent sur son IPC. Les fixtures vérifient
+la réutilisation et le rejet des jetons, un login partagé entre plusieurs clients,
+le départ du client portant le navigateur et la reprise après nettoyage du
+callback. La découverte moderne garde son budget de requête pendant le login
+ou le renouvellement, y compris lorsque le consentement termine juste avant
+le délai court. Un faux ouvreur de navigateur permet de vérifier méthode,
+chemin, state, port occupé, annulation et diagnostics sans aucun compte réel.
+Les tests conservent la priorité des credentials explicites et l'absence de
+rejeu d'un outil après une erreur réseau indéterminée.
+
+Les demandes URL couvrent le protocole legacy et les continuations modernes,
+la capacité URL explicite, les clients sans cette capacité, le repli navigateur
+désactivé par défaut ou activé, et le refus sans ouverture de secours. Les tests
+vérifient aussi qu'un client inactif ne récupère pas la demande d'un autre client,
+qu'une continuation ne peut pas changer l'appel initial et que le login manuel
+reste disponible. Un test du vrai binaire CLI suit le lien vers un fournisseur
+local, termine le vrai callback puis reconnecte un second processus sans capacité
+URL en réutilisant les identifiants ; aucun navigateur réel n'est lancé.
+
+Les régressions de la façade conservent les métadonnées d'initialisation et de
+découverte des serveurs publics ou déjà authentifiés, les notifications de
+progression et les flux d'abonnement. Une différence de version révélée après
+consentement exige une nouvelle négociation sans perdre les identifiants acquis.
+
 Les régressions du broker vérifient qu'une écriture d'annulation bloquée n'arrête
 ni l'expiration des autres opérations, ni la déconnexion, ni les réponses aux
 ping locaux. Les annulations sont envoyées dans une file bornée, avec un motif

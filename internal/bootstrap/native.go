@@ -328,7 +328,7 @@ func convertServer(root *os.Root, harness, name string, raw json.RawMessage) (na
 		if err = validateRemote(server); err != nil {
 			return fail(err.Error())
 		}
-		warnings = append(warnings, "stored native OAuth credentials are not imported; authenticate separately if required")
+		warnings = append(warnings, "stored native OAuth credentials are not imported; agentcfg opens a browser when OAuth sign-in is required")
 	}
 	return nativeServerImport{server: server, warnings: warnings, advisories: advisories}, nil
 }

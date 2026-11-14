@@ -136,7 +136,10 @@ Use agentcfg <command> --help for options.`)
 		if *name == "" {
 			return errors.New("connect requires --server")
 		}
-		return broker.Connect(ctx, *root, *name, *harness, input, output)
+		return broker.ConnectWithOptions(ctx, *root, *name, *harness, input, output, broker.ConnectOptions{
+			AuthorizationCodeFetcher:       connectAuthorizationCodeFetcher(diagnostics, openBrowser),
+			ClientAuthorizationCodeFetcher: connectClientAuthorizationCodeFetcher(diagnostics),
+		})
 	case "daemon", "status", "stop", "list", "validate":
 		plain := flags.Bool("plain", false, "plain output without Huh terminal forms")
 		var asJSON, yes *bool

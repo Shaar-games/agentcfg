@@ -14,6 +14,16 @@
 // validates a manually supplied redirect URL; the SDK validates the flow's
 // state, issuer and S256 PKCE. This package creates no listener or browser.
 //
+// NewInteractiveHandler accepts the same fetcher for a stdio client's private
+// control channel. Explicit OAuth uses saved credentials from the first request;
+// URL-only entries wait for an HTTP challenge before accessing the secure store.
+// Stored credentials and refresh do not open a browser. Missing or revoked grants
+// can request new consent. Concurrent callers of the same identity share one
+// consent flow; cancelling one caller does not cancel a flow still needed by
+// another. The last departing caller cancels it.
+// Authorization does not hold the credential rotation lock while waiting for the
+// browser. Provider/store failures remain errors, not automatic login requests.
+//
 // Inspect reads local state without refreshing or checking the provider.
 // Logout removes this server/account's cached credentials, not the remote grant.
 // Login starts fresh authorization while preserving any old record until a
@@ -26,14 +36,23 @@
 // .agentcfg/agentcfg.json serverOverrides.<name>.oauth. It is never a portable
 // Agent Plugins mcp.json field. config.OAuthConfig accepts account, clientId,
 // issuer, clientSecretEnv, clientMetadataUrl, redirectUrl, scopes and
-// dynamicRegistration. DCR requires explicit opt-in; an explicitly configured
-// client ID takes priority over client metadata URLs and DCR. Client secrets can only
+// dynamicRegistration. In explicit OAuth configuration, DCR requires opt-in;
+// an explicitly configured client ID takes priority over client metadata URLs
+// and DCR. Client secrets can only
 // be named through an environment variable and require a pinned issuer. Refresh
 // reads that variable again, after matching the cached client and pinned issuer.
 // Explicit scopes replace metadata defaults while retaining granted scopes and
 // scopes required by an explicit challenge; omitted scopes use discovery.
 // Response issuers are checked against the discovered authorization server,
 // including matching issuers whose metadata omitted the support flag.
+//
+// InteractiveServer supplies runtime-only DCR and a stable loopback redirect for
+// HTTPS/loopback HTTP servers without explicit OAuth, authorization headers, or
+// URL credentials. It never edits the canonical configuration. Other HTTP MCP
+// servers remain usable without implicit OAuth. Interactive CLI inspection and
+// logout must use the same effective policy to address the same credentials.
+// A callback port collision is an error for the interactive caller to report;
+// changing the redirect silently would change the registration and store key.
 //
 // The account label partitions credentials and broker configurations; it does
 // not verify a provider's subject. Use a distinct label for each desired

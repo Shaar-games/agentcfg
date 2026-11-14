@@ -36,7 +36,7 @@ func (l *loader) parseSettings(data []byte) error {
 	if err != nil {
 		return err
 	}
-	if err = allowFields(fields, "harnesses", "runtime", "serverOverrides"); err != nil {
+	if err = allowFields(fields, "harnesses", "runtime", "oauth", "serverOverrides"); err != nil {
 		return err
 	}
 	settings := &l.config.Settings
@@ -51,11 +51,34 @@ func (l *loader) parseSettings(data []byte) error {
 			return err
 		}
 	}
+	if raw, exists := fields["oauth"]; exists {
+		settings.OAuth, err = parseOAuthSettings(raw)
+		if err != nil {
+			return err
+		}
+	}
 	settings.ServerOverrides, err = parseOverrides(fields["serverOverrides"], false)
 	if err != nil {
 		return fmt.Errorf("serverOverrides: %w", err)
 	}
 	return nil
+}
+
+func parseOAuthSettings(raw json.RawMessage) (OAuthSettings, error) {
+	fields, err := object(raw)
+	if err != nil {
+		return OAuthSettings{}, fmt.Errorf("oauth must be an object: %w", err)
+	}
+	if err = allowFields(fields, "autoOpenBrowser"); err != nil {
+		return OAuthSettings{}, fmt.Errorf("oauth: %w", err)
+	}
+	var settings OAuthSettings
+	if raw, exists := fields["autoOpenBrowser"]; exists {
+		if string(raw) == "null" || json.Unmarshal(raw, &settings.AutoOpenBrowser) != nil {
+			return OAuthSettings{}, fmt.Errorf("oauth.autoOpenBrowser must be a boolean")
+		}
+	}
+	return settings, nil
 }
 
 func parseRuntime(raw json.RawMessage, runtime *Runtime) error {

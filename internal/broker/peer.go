@@ -18,6 +18,9 @@ type peer struct {
 	done        chan struct{}
 	closeOnce   sync.Once
 	initialized atomic.Int32
+	authorizes  bool
+	authMu      sync.Mutex
+	authPending map[string]chan authorizationResponse
 }
 
 func newPeer(connection net.Conn) *peer {
@@ -26,6 +29,18 @@ func newPeer(connection net.Conn) *peer {
 }
 
 func (p *peer) send(message wire.Message) {
+	if p.authorizes {
+		var err error
+		message, err = encodeMCPEnvelope(message)
+		if err != nil {
+			p.close()
+			return
+		}
+	}
+	p.sendFrame(message)
+}
+
+func (p *peer) sendFrame(message wire.Message) {
 	select {
 	case <-p.done:
 		return
@@ -48,7 +63,7 @@ func (p *peer) close() {
 }
 
 func (p *peer) writeLoop() {
-	writer := wire.NewWriter(p.connection)
+	writer := wire.NewWriterLimit(p.connection, maxIPCFrameSize)
 	for {
 		select {
 		case <-p.done:

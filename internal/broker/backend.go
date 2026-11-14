@@ -28,6 +28,7 @@ type pending struct {
 	upstreamToken json.RawMessage
 	deadline      time.Time
 	reply         chan wire.Message
+	initialize    bool
 }
 
 type backend struct {
@@ -39,6 +40,7 @@ type backend struct {
 	timeout       time.Duration
 	closeOnce     sync.Once
 	cancellations chan wire.Message
+	authorization *authorizationRelay
 
 	mu       sync.Mutex
 	peers    map[*peer]bool
@@ -73,23 +75,35 @@ func (b *backend) attach(p *peer) error {
 		return fmt.Errorf("MCP backend stopped; reconnect to start a fresh process")
 	}
 	b.peers[p] = true
+	if b.authorization != nil {
+		b.authorization.attach(p)
+	}
 	b.lastUsed = time.Now()
 	return nil
 }
 
 func (b *backend) detach(p *peer) {
+	if b.authorization != nil {
+		b.authorization.detach(p)
+	}
 	b.mu.Lock()
 	delete(b.peers, p)
 	b.lastUsed = time.Now()
 	var cancelled []*pending
 	for key, request := range b.pending {
-		if request.owner == p {
+		// The upstream handshake belongs to the shared backend. Its HTTP state
+		// is not reusable until the actual response arrives, and a remaining
+		// client can still complete OAuth and use that same initialization.
+		if request.owner == p && !request.initialize {
 			cancelled = append(cancelled, request)
 			b.removeLocked(key, request)
 		}
 	}
 	b.mu.Unlock()
 	for _, request := range cancelled {
+		if request.reply != nil {
+			b.deliver(request, wire.Error(request.originalID, -32800, "MCP client disconnected during initialization"))
+		}
 		b.cancelRequest(request, "client disconnected")
 	}
 	if b.isolated {
@@ -148,6 +162,10 @@ func (b *backend) handle(p *peer, message wire.Message) {
 	if method == "notifications/initialized" || method == "notifications/roots/list_changed" {
 		return
 	}
+	if method == "notifications/cancelled" {
+		b.forwardCancellation(p, message)
+		return
+	}
 	if p.initialized.Load() == 0 && wire.IsModernRequest(message) {
 		b.initMu.Lock()
 		if b.protocolEra == 1 {
@@ -163,10 +181,6 @@ func (b *backend) handle(p *peer, message wire.Message) {
 		if message.HasID() {
 			p.send(wire.Error(message.ID(), -32002, "initialize must complete before using a shared MCP server"))
 		}
-		return
-	}
-	if method == "notifications/cancelled" {
-		b.forwardCancellation(p, message)
 		return
 	}
 	if method == "" {
@@ -198,13 +212,18 @@ func (b *backend) handle(p *peer, message wire.Message) {
 func (b *backend) initialize(p *peer, message wire.Message) {
 	b.initMu.Lock()
 	defer b.initMu.Unlock()
+	select {
+	case <-p.done:
+		return
+	default:
+	}
 	if b.protocolEra == 2 {
 		p.initialized.Store(0)
 		p.send(wire.Error(message.ID(), -32601, "upstream uses stateless MCP 2026; configure sharing=isolated for legacy clients"))
 		return
 	}
 	if b.initResult == nil {
-		result, err := b.initializeUpstream(message)
+		result, err := b.initializeUpstream(p, message)
 		if err != nil {
 			p.initialized.Store(0)
 			p.send(wire.Error(message.ID(), -32000, err.Error()))
@@ -234,17 +253,33 @@ func (b *backend) initialize(p *peer, message wire.Message) {
 func (b *backend) discover(p *peer, message wire.Message) {
 	b.initMu.Lock()
 	defer b.initMu.Unlock()
+	select {
+	case <-p.done:
+		return
+	default:
+	}
 	if b.protocolEra == 1 {
 		p.initialized.Store(0)
 		p.send(wire.Error(message.ID(), -32601, "server/discover unavailable after legacy MCP initialization"))
 		return
 	}
 	replies := make(chan wire.Message, 1)
-	request, err := b.forward(nil, message, replies)
+	var authorizationAttempts uint64
+	if state, ok := b.transport.(interface{ AuthorizationAttempts() uint64 }); ok {
+		authorizationAttempts = state.AuthorizationAttempts()
+	}
+	request, err := b.forward(p, message, replies)
 	if err != nil {
 		p.initialized.Store(0)
 		p.send(wire.Error(message.ID(), -32000, err.Error()))
 		return
+	}
+	if cancellable, ok := b.transport.(interface{ CancelRequest(json.RawMessage) }); ok {
+		// A detach or expiry can synthesize the reply before HTTP has finished
+		// cancelling discovery. Drain in this goroutine before releasing initMu,
+		// so peer cleanup stays responsive and legacy fallback sees settled state.
+		// A real upstream result has already removed its pending request.
+		defer cancellable.CancelRequest(request.upstreamID)
 	}
 	limit := b.timeout
 	if limit > 5*time.Second {
@@ -252,25 +287,40 @@ func (b *backend) discover(p *peer, message wire.Message) {
 	}
 	timer := time.NewTimer(limit)
 	defer timer.Stop()
+	deadline := time.Now().Add(b.timeout)
+	extended := false
 	var response wire.Message
-	select {
-	case response = <-replies:
-	case <-timer.C:
-		b.mu.Lock()
-		b.removeLocked(string(request.upstreamID), request)
-		b.mu.Unlock()
-		if cancellable, ok := b.transport.(interface{ CancelRequest(json.RawMessage) }); ok {
-			// Drain an abandoned HTTP discovery before allowing the legacy
-			// initialize fallback on this same upstream transport.
-			cancellable.CancelRequest(request.upstreamID)
+waiting:
+	for {
+		select {
+		case response = <-replies:
+			break waiting
+		case <-timer.C:
+			authorized := false
+			if state, ok := b.transport.(interface{ AuthorizationPending() bool }); ok {
+				authorized = state.AuthorizationPending()
+			}
+			if state, ok := b.transport.(interface{ AuthorizationAttempts() uint64 }); ok {
+				authorized = authorized || state.AuthorizationAttempts() != authorizationAttempts
+			}
+			if !extended && authorized && time.Now().Before(deadline) {
+				// Consent cannot fit inside the short protocol-probing timeout. Keep
+				// the configured request budget and transport cancellation intact.
+				extended = true
+				timer.Reset(time.Until(deadline))
+				continue
+			}
+			b.mu.Lock()
+			b.removeLocked(string(request.upstreamID), request)
+			b.mu.Unlock()
+			p.initialized.Store(0)
+			p.send(wire.Error(message.ID(), -32001, "modern MCP discovery timed out; legacy initialization may be available"))
+			return
+		case <-b.ctx.Done():
+			p.initialized.Store(0)
+			p.send(wire.Error(message.ID(), -32000, "MCP stopped during discovery"))
+			return
 		}
-		p.initialized.Store(0)
-		p.send(wire.Error(message.ID(), -32001, "modern MCP discovery timed out; legacy initialization may be available"))
-		return
-	case <-b.ctx.Done():
-		p.initialized.Store(0)
-		p.send(wire.Error(message.ID(), -32000, "MCP stopped during discovery"))
-		return
 	}
 	response["id"] = message.ID()
 	if response["error"] != nil {
@@ -303,7 +353,7 @@ func (b *backend) discover(p *peer, message wire.Message) {
 	p.send(response)
 }
 
-func (b *backend) initializeUpstream(message wire.Message) (wire.Message, error) {
+func (b *backend) initializeUpstream(owner *peer, message wire.Message) (wire.Message, error) {
 	request := message.Clone()
 	var params map[string]json.RawMessage
 	if err := json.Unmarshal(request["params"], &params); err != nil || params == nil {
@@ -318,7 +368,7 @@ func (b *backend) initializeUpstream(message wire.Message) (wire.Message, error)
 	params["clientInfo"] = wire.Raw(map[string]string{"name": "agentcfg", "version": "0.1.0"})
 	request["params"] = wire.Raw(params)
 	reply := make(chan wire.Message, 1)
-	if _, err := b.forward(nil, request, reply); err != nil {
+	if _, err := b.forward(owner, request, reply); err != nil {
 		return nil, err
 	}
 	select {
@@ -357,7 +407,7 @@ func hasTaskRequest(message wire.Message) bool {
 func (b *backend) forward(owner *peer, message wire.Message, reply chan wire.Message) (*pending, error) {
 	request := &pending{owner: owner, originalID: append(json.RawMessage(nil), message.ID()...),
 		upstreamID: wire.Raw(fmt.Sprintf("agentcfg-%d", nextRequest.Add(1))),
-		deadline:   time.Now().Add(b.timeout), reply: reply}
+		deadline:   time.Now().Add(b.timeout), reply: reply, initialize: message.Method() == "initialize"}
 	forwarded := message.Clone()
 	forwarded["id"] = request.upstreamID
 	remapProgress(forwarded, request)
@@ -545,6 +595,11 @@ func (b *backend) forwardCancellation(p *peer, message wire.Message) {
 }
 
 func (b *backend) cancelRequest(request *pending, reason string) {
+	// MCP clients must not cancel initialize. Keep the shared handshake until
+	// its real result, or close the unfinished transport when its deadline ends.
+	if request.initialize {
+		return
+	}
 	// Cancellation reasons are advisory. Retaining arbitrary client frames in
 	// the bounded queue could still retain gigabytes when a writer is stalled.
 	// Preserve only the protocol fields and a small, valid UTF-8 reason.
@@ -610,13 +665,21 @@ func (b *backend) expiryLoop() {
 func (b *backend) expire(now time.Time) {
 	b.mu.Lock()
 	var expired []*pending
+	expiredInitialize := false
 	for key, request := range b.pending {
 		if now.After(request.deadline) {
 			expired = append(expired, request)
+			expiredInitialize = expiredInitialize || request.initialize
 			b.removeLocked(key, request)
 		}
 	}
 	b.mu.Unlock()
+	if expiredInitialize {
+		// An unfinished initialize cannot be cancelled or safely retried on the
+		// same transport. A later connection must acquire a fresh backend.
+		b.close()
+		return
+	}
 	for _, request := range expired {
 		b.deliver(request, wire.Error(request.originalID, -32001, "MCP request timed out; the operation may already have run and is not retried"))
 		b.cancelRequest(request, "agentcfg request timeout")

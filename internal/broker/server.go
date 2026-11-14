@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"agentcfg/internal/auth"
 	"agentcfg/internal/config"
 	"agentcfg/internal/ipc"
 	"agentcfg/internal/upstream"
@@ -24,7 +25,7 @@ import (
 	"github.com/gofrs/flock"
 )
 
-const IPCVersion = 2
+const IPCVersion = 3
 
 // Keep status/stop usable against an older broker so an upgrade can restart it.
 const controlIPCVersion = 1
@@ -45,16 +46,17 @@ type Status struct {
 }
 
 type server struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	root     string
-	idle     time.Duration
-	timeout  time.Duration
-	stderr   io.Writer
-	mu       sync.Mutex
-	backends map[string]*backend
-	lastUsed time.Time
-	clients  int
+	ctx            context.Context
+	cancel         context.CancelFunc
+	root           string
+	idle           time.Duration
+	timeout        time.Duration
+	stderr         io.Writer
+	mu             sync.Mutex
+	backends       map[string]*backend
+	authorizations map[string]*authorizationRelay
+	lastUsed       time.Time
+	clients        int
 }
 
 func duration(value string, fallback time.Duration) time.Duration {
@@ -142,7 +144,7 @@ func Serve(ctx context.Context, root string, stderr io.Writer) error {
 func (s *server) handleConnection(connection net.Conn) {
 	defer connection.Close()
 	_ = connection.SetReadDeadline(time.Now().Add(5 * time.Second))
-	reader, writer := wire.NewReader(connection), wire.NewWriter(connection)
+	reader, writer := wire.NewReaderLimit(connection, maxIPCFrameSize), wire.NewWriterLimit(connection, maxIPCFrameSize)
 	hello, err := reader.Read()
 	if err != nil {
 		return
@@ -191,6 +193,12 @@ func (s *server) connect(connection net.Conn, reader *wire.Reader, writer *wire.
 		return
 	}
 	p := newPeer(connection)
+	if raw := hello["authorization"]; raw != nil {
+		if json.Unmarshal(raw, &p.authorizes) != nil {
+			_ = writer.Write(wire.Message{"error": wire.Raw("invalid authorization capability")})
+			return
+		}
+	}
 	defer p.close()
 	b, err := s.acquire(entry, p)
 	if err != nil {
@@ -206,6 +214,18 @@ func (s *server) connect(connection net.Conn, reader *wire.Reader, writer *wire.
 		message, err := reader.Read()
 		if err != nil {
 			return
+		}
+		if p.authorizes {
+			if len(message) == 1 && message["authorization"] != nil {
+				if p.authorizationResponse(message["authorization"]) != nil {
+					return
+				}
+				continue
+			}
+			message, err = decodeMCPEnvelope(message)
+			if err != nil {
+				return
+			}
 		}
 		b.handle(p, message)
 	}
@@ -239,11 +259,28 @@ func (s *server) acquire(entry config.Server, p *peer) (*backend, error) {
 	}
 	b := s.backends[key]
 	if b == nil || b.ctx.Err() != nil {
-		transport, err := upstream.Start(s.ctx, entry, s.stderr)
+		interactive := auth.InteractiveServer(entry)
+		redirect := ""
+		if interactive.OAuth != nil {
+			redirect = interactive.OAuth.RedirectURL
+		}
+		authorizationKey := auth.CredentialKey(interactive)
+		if s.authorizations == nil {
+			s.authorizations = make(map[string]*authorizationRelay)
+		}
+		relay := s.authorizations[authorizationKey]
+		if relay == nil {
+			relay = newAuthorizationRelay(redirect)
+			s.authorizations[authorizationKey] = relay
+		}
+		transport, err := upstream.StartWithOAuth(s.ctx, entry, s.stderr, auth.Options{
+			Home: s.root, AuthorizationCodeFetcher: relay.fetch,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("start %s: %w", entry.Name, err)
 		}
 		b = newBackend(s.ctx, entry, transport, s.timeout)
+		b.authorization = relay
 		s.backends[key] = b
 	}
 	if err := b.attach(p); err != nil {

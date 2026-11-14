@@ -25,7 +25,7 @@ var (
 	ErrNotFound               = errors.New("OAuth credentials not found")
 	ErrSecureStoreUnavailable = errors.New("no native secure credential store is available; supply an explicit encrypted Store")
 	ErrStoreCorrupt           = errors.New("OAuth credential store is corrupt or cannot be decrypted")
-	ErrLoginRequired          = errors.New("OAuth login required: provide an AuthorizationCodeFetcher through the interactive caller")
+	ErrLoginRequired          = errors.New("OAuth login required; run 'agentcfg auth login <server>' and retry the MCP connection")
 )
 
 const maxCredentialBytes = 1 << 20

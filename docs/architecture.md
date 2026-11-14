@@ -10,12 +10,16 @@ ses descendants sont mutualisés.
 Le broker utilise un endpoint dérivé du chemin canonique de la racine source et
 de l’utilisateur. Windows : named pipe protégé par une ACL pour le SID courant.
 Unix : socket dans un répertoire 0700, socket 0600. Aucun port réseau d’écoute.
+Si le chemin du cache dépasse la limite du socket Unix, le broker utilise un
+répertoire privé dans le dossier temporaire, puis dans `/tmp` si ce chemin reste
+trop long. Ces replis conservent la même identité de racine et d’utilisateur,
+ainsi que les contrôles de propriétaire et de permissions.
 
 Un verrou de démarrage permet à plusieurs relais concurrents de vérifier puis
 lancer le broker. Un deuxième verrou est conservé toute la vie du broker. Le
 processus lancé est le même exécutable, en sous-commande `daemon`, détaché de la
-console. Les journaux du broker se trouvent dans le répertoire cache agentcfg de
-l’utilisateur ; les diagnostics ne sont jamais envoyés sur stdout des relais.
+console. Les journaux du broker se trouvent dans le même répertoire privé que
+l’endpoint ; les diagnostics ne sont jamais envoyés sur stdout des relais.
 
 ## Identité et cycle de vie
 

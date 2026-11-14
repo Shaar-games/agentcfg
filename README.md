@@ -56,6 +56,15 @@ Opening `agentcfg config` before setup offers to run `init`. Use `agentcfg resto
 
 Use `agentcfg mcp`, `agentcfg skill` or `agentcfg harness` to jump directly to a section; plural aliases work too. `--plain` gives noninteractive output where supported.
 
+When an eligible HTTP MCP needs OAuth, its local `agentcfg_authenticate` tool
+lets clients advertising `elicitation.url` present a sign-in link. The client
+controls how that request appears. You can also run `agentcfg auth login <server>`
+explicitly, then refresh or reconnect the client; `--no-browser` selects the
+manual URL/callback flow. Automatic browser fallback during `connect` is disabled
+by default. To enable it for clients without URL elicitation, set
+`oauth.autoOpenBrowser` to `true` in `~/.agentcfg/agentcfg.json`.
+[OAuth configuration](docs/configuration.md).
+
 ## Browse the configuration
 
 <img src="docs/demo/agentcfg-list.gif" width="850" alt="Animated agentcfg list browsing synthetic Vercel skills and Context7 and Playwright MCP entries" />
