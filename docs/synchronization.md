@@ -13,8 +13,8 @@ et les skills dans les listes Huh, puis examiner `agentcfg sync` avant toute
 application avec `agentcfg sync --apply`.
 
 Lors de la première configuration, `agentcfg init` importe les MCP et skills
-natifs dans `~/.agentcfg/`, remplace les MCP des harnesses sélectionnés par les
-proxies du broker et copie les skills depuis les sources canoniques. Une seule
+natifs dans `~/.agentcfg/`, remplace par défaut les MCP des harnesses sélectionnés
+par les proxies du broker et copie les skills depuis les sources canoniques. Une seule
 confirmation autorise ce parcours complet. `init --yes` autorise la même
 migration sans formulaire ; `init --plain` reste une prévisualisation sans écriture.
 Après un init réussi, `~/.agentcfg/` est la seule source de vérité. Les imports
@@ -50,7 +50,8 @@ sortie sans formulaire ; l'écriture nécessite toujours `--apply`.
 L'initialisation adopte uniquement les entrées prouvées par le scanner, avec
 sauvegarde et revalidation CAS : MCP JSON/JSONC ou TOML Codex, et arbres de skills
 identiques à leur copie canonique. Les définitions upstream restent dans
-`~/.agentcfg/mcp.json` ; les fichiers natifs utilisent `agentcfg connect`.
+`~/.agentcfg/mcp.json` ; les fichiers natifs utilisent `agentcfg connect`, ou les
+URL HTTP locales lorsque la gateway est explicitement activée.
 Les skills importés sont retirés de leurs emplacements d'origine, y compris
 ceux des harnesses non sélectionnés, puis copiés dans les destinations activées.
 Les autres clés de configuration native sont conservées.
@@ -60,6 +61,63 @@ Les filtres de l’entrée canonique et les overrides des plugins sont évalués
 avant la génération. Un filtre vide signifie tous les harnesses globalement
 sélectionnés ; une sélection globale vide retire seulement les éléments déjà
 gérés et inchangés lors de la prochaine application.
+
+## Projection HTTP native optionnelle
+
+`gateway.enabled` est faux par défaut. Quand il est vrai, les entrées canoniques
+`http` et `streamable-http` deviennent des URL de la gateway dans les harnesses
+sélectionnés par `gateway.harnesses`. Une liste absente ou vide les autorise tous ;
+`["none"]` désactive les routes nommées. Les autres clients synchronisés gardent
+leur entrée `agentcfg connect`. Les MCP `stdio` utilisent toujours cette commande, et les
+filtres de disponibilité restent évalués avant la projection.
+
+| Harness | Entrée HTTP produite |
+| --- | --- |
+| Claude Code | `type: "http"`, `url` |
+| Cursor | `url` |
+| Codex | `url` dans la table MCP TOML gérée |
+| OpenCode | `type: "remote"`, `url`, `enabled: true` |
+| Gemini CLI | `httpUrl` |
+| Antigravity | `serverUrl` |
+
+La migration d'une entrée stdio gérée vers une URL HTTP, puis son retour lorsque
+la gateway est désactivée ou que le harness quitte son sélecteur, utilise les mêmes contrôles de propriété, sauvegardes
+et protections contre les modifications manuelles. Les autres clés natives et
+les sources canoniques restent conservées. Le mode partagé du broker ne fusionne
+pas les sessions HTTP clientes de la gateway.
+
+Après avoir activé le réglage dans `~/.agentcfg/agentcfg.json`, démarrer
+`agentcfg gateway start` avant `agentcfg sync --plain`, puis confirmer avec
+`agentcfg sync --apply`. Le premier démarrage crée la clé de routage chiffrée.
+La construction d'un plan lit cette clé sans la créer ; une clé absente ou
+illisible bloque la projection. `sync` n'ouvre aucun listener, ne contacte pas
+les MCP et ne connecte aucun compte. Pour un démarrage à l'ouverture de session,
+configurer soi-même `agentcfg gateway run` comme service utilisateur.
+
+Chaque URL possède une capacité secrète propre au serveur et au harness. Les
+paramètres amont et les jetons du fournisseur ne sont pas copiés dans cette URL.
+Les fichiers natifs doivent néanmoins rester privés : les permissions Unix ou
+les ACL Windows sont vérifiées lors du plan et à nouveau avant l'écriture.
+Un fichier accessible à d'autres comptes est refusé sans changer ses droits.
+Les erreurs et aperçus de sync n'affichent pas la capacité complète.
+Les sauvegardes, le journal d'initialisation et les copies de layout contenant
+une URL protégée sont vérifiés eux aussi, même après désactivation ou retrait du
+dernier MCP HTTP. Les URL échappées dans JSON/JSONC/TOML et les anciennes données
+encodées en base64 dans le journal restent protégées. Une copie garde son mode
+réel ; un déplacement vérifie les droits à sa destination finale avant le premier
+renommage et lors des reprises.
+
+La découverte évite de réimporter la gateway comme son propre amont seulement
+quand le manifeste du même home, l'empreinte de l'entrée, la route et la clé
+confirment sa provenance, y compris après suppression du serveur canonique mais
+avant le sync de retrait. Les autres MCP localhost restent importables. Une
+route gérée dont la clé ne peut plus être vérifiée bloque l'import avec un
+diagnostic, sans modifier la configuration ni recréer de secret.
+
+Les formats natifs sont testés dans des fixtures. Leur génération ne prouve pas
+que chaque version de client accepte OAuth HTTP ou affiche un bouton donné.
+Voir le [cycle de vie de la gateway](cli.md#native-oauth-gateway) et sa
+[configuration](configuration.md#native-oauth-gateway).
 
 ## Éditions conservatrices
 

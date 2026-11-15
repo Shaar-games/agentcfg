@@ -136,6 +136,16 @@ func discoverServers(root *os.Root, plan *Plan, target target, source string) {
 			continue
 		}
 		server := imported.server
+		managedGateway, gatewayErr := plan.isManagedGatewayProxy(target.name, physical, name, entries[name], server)
+		if gatewayErr != nil {
+			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: gatewayErr.Error()})
+			continue
+		}
+		if managedGateway {
+			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name,
+				Message: "an existing agentcfg HTTP gateway proxy was skipped", Kind: WarningAdvisory})
+			continue
+		}
 		server.Source = source
 		for _, message := range append(imported.advisories, importAdvisories(server)...) {
 			plan.Warnings = append(plan.Warnings, Warning{Harness: target.name, Source: source, Server: name, Message: message, Kind: WarningAdvisory})

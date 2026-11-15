@@ -64,6 +64,7 @@ func Discover(home string) (*Plan, error) {
 		return nil, errors.New("discovery home changed while opening it")
 	}
 	plan := &Plan{Home: absolute, Harnesses: []Harness{}, Servers: []ServerCandidate{}, Skills: []SkillCandidate{}, Warnings: []Warning{}, sourceHashes: map[string][32]byte{}, homeIdentity: opened, budget: newScanBudget()}
+	plan.gatewayProxies = managedGatewayProxies(absolute)
 	for _, target := range targets {
 		harness := Harness{Name: target.name, Evidence: []string{}}
 		var configs []string

@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"agentcfg/internal/auth"
 	"agentcfg/internal/config"
 	"agentcfg/internal/fsstate"
 	"agentcfg/internal/pathutil"
@@ -26,17 +28,18 @@ type Options struct {
 }
 
 type Change struct {
-	Path         string `json:"path"`
-	Action       string `json:"action"`
-	before       []byte
-	after        []byte
-	exists       bool
-	skill        *skillChange
-	remove       bool
-	source       string
-	sourceHash   string
-	sourceExists bool
-	adopted      bool
+	Path           string `json:"path"`
+	Action         string `json:"action"`
+	before         []byte
+	after          []byte
+	exists         bool
+	skill          *skillChange
+	remove         bool
+	source         string
+	sourceHash     string
+	sourceExists   bool
+	adopted        bool
+	privateGateway bool
 }
 
 type manifest struct {
@@ -149,6 +152,12 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.Settings.Gateway.Enabled {
+		c.Settings.Gateway.RouteKey, err = auth.GatewayKey(context.Background(), c.Root, nil, false)
+		if err != nil {
+			return nil, fmt.Errorf("prepare native OAuth gateway projection: %w", err)
+		}
+	}
 	base := opts.Root
 	if opts.Scope == "user" {
 		base = opts.Home
@@ -205,10 +214,17 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	knownPaths := map[string]bool{}
 	for _, t := range all {
 		desired := map[string]map[string]any{}
+		privateGateway := false
 		if selected[t.name] {
 			for name, server := range c.Servers {
 				if config.Allows(server.Harnesses, t.name) {
 					desired[name] = proxyEntry(t, opts.Binary, c.Root, name)
+					if config.GatewayForHarness(c.Settings.Gateway, t.name) && (server.Type == "http" || server.Type == "streamable-http") {
+						if entry := gatewayEntry(t, c.Settings.Gateway, name); entry != nil {
+							desired[name] = entry
+							privateGateway = true
+						}
+					}
 				}
 			}
 		}
@@ -232,7 +248,12 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 				if err := ensureNoSymlinkParents(base, native.path); err != nil {
 					return nil, err
 				}
-				if err := p.planConfig(native, desired, old); err != nil {
+				if privateGateway {
+					if err := auth.CheckGatewayConfigPrivacy(native.path); err != nil {
+						return nil, err
+					}
+				}
+				if err := p.planConfig(native, desired, old, privateGateway); err != nil {
 					return nil, err
 				}
 			}
@@ -274,10 +295,13 @@ func BuildPlan(c *config.Config, opts Options) (*Plan, error) {
 	if err := p.checkScopeIdentity(); err != nil {
 		return nil, err
 	}
+	if err := p.checkGatewayRecoveryPrivacy(""); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
-func (p *Plan) planConfig(t target, desired map[string]map[string]any, old manifest) error {
+func (p *Plan) planConfig(t target, desired map[string]map[string]any, old manifest, privateGateway bool) error {
 	read := readOptional
 	if p.adoption != nil && len(p.adoption.mcp[t.path]) != 0 {
 		read = p.readAdoptionFile
@@ -325,7 +349,7 @@ func (p *Plan) planConfig(t target, desired map[string]map[string]any, old manif
 		} else if adopted {
 			action = "adopt existing MCP configuration"
 		}
-		p.Changes = append(p.Changes, Change{Path: t.path, Action: action, before: before, after: after, exists: exists, adopted: adopted})
+		p.Changes = append(p.Changes, Change{Path: t.path, Action: action, before: before, after: after, exists: exists, adopted: adopted, privateGateway: privateGateway})
 	}
 	return nil
 }

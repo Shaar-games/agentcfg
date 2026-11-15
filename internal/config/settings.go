@@ -12,6 +12,7 @@ func defaultSettings() Settings {
 	return Settings{
 		Harnesses:       []string{"claude-code", "codex", "cursor", "opencode", "gemini"},
 		Runtime:         Runtime{IdleTimeout: "5m", RequestTimeout: "5m"},
+		Gateway:         GatewaySettings{Listen: DefaultGatewayListen},
 		ServerOverrides: map[string]Override{},
 	}
 }
@@ -36,7 +37,7 @@ func (l *loader) parseSettings(data []byte) error {
 	if err != nil {
 		return err
 	}
-	if err = allowFields(fields, "harnesses", "runtime", "oauth", "serverOverrides"); err != nil {
+	if err = allowFields(fields, "harnesses", "runtime", "oauth", "gateway", "serverOverrides"); err != nil {
 		return err
 	}
 	settings := &l.config.Settings
@@ -53,6 +54,12 @@ func (l *loader) parseSettings(data []byte) error {
 	}
 	if raw, exists := fields["oauth"]; exists {
 		settings.OAuth, err = parseOAuthSettings(raw)
+		if err != nil {
+			return err
+		}
+	}
+	if raw, exists := fields["gateway"]; exists {
+		settings.Gateway, err = parseGatewaySettings(raw, l.config.Root)
 		if err != nil {
 			return err
 		}

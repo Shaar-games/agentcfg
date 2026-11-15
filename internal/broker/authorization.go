@@ -31,10 +31,6 @@ var ErrAuthorizationUnavailable = errors.New("OAuth client cannot present author
 // or stdout. The broker keeps token exchange and credential storage private.
 type ConnectOptions struct {
 	AuthorizationCodeFetcher func(context.Context, string, *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error)
-	// ClientAuthorizationCodeFetcher binds the local callback before presenting
-	// the authorization URL through the MCP client's declared URL capability.
-	// The presenter never receives the authorization code or resulting tokens.
-	ClientAuthorizationCodeFetcher func(context.Context, string, *sdkauth.AuthorizationArgs, func(context.Context, string) error) (*sdkauth.AuthorizationResult, error)
 }
 
 type authorizationRequest struct {

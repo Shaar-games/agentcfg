@@ -93,33 +93,58 @@ transport, avec protocoles legacy/moderne et réponses JSON/SSE. Ils vérifient
 aussi la priorité des en-têtes SDK et le repli legacy après une découverte
 refusée, interrompue ou incompatible. Aucun compte OAuth personnel n'est utilisé.
 
-Les parcours OAuth passent aussi par le vrai broker, son IPC natif et les flux
-stdio, avec découverte pour des entrées HTTP à URL seule. Le flux stdin n'est
-jamais traité comme une saisie de terminal ; stdout reste réservé aux messages
-MCP, y compris les demandes d'autorisation destinées au client. Les contrôles
-privés du broker restent sur son IPC. Les fixtures vérifient
-la réutilisation et le rejet des jetons, un login partagé entre plusieurs clients,
-le départ du client portant le navigateur et la reprise après nettoyage du
-callback. La découverte moderne garde son budget de requête pendant le login
-ou le renouvellement, y compris lorsque le consentement termine juste avant
-le délai court. Un faux ouvreur de navigateur permet de vérifier méthode,
-chemin, state, port occupé, annulation et diagnostics sans aucun compte réel.
-Les tests conservent la priorité des credentials explicites et l'absence de
-rejeu d'un outil après une erreur réseau indéterminée.
+Les parcours stdio passent aussi par le vrai broker et son IPC natif. Le flux
+stdin n'est jamais traité comme une saisie de terminal ; stdout reste réservé
+aux messages MCP amont. Les contrôles privés du navigateur restent sur IPC.
+Les fixtures vérifient le login manuel puis la reconnexion, la réutilisation des
+jetons, l'ouverture automatique désactivée par défaut et son activation
+explicite. Le catalogue reste celui du serveur, sans outil d'authentification
+synthétique. Un faux ouvreur contrôle méthode, chemin, state, port occupé,
+annulation et diagnostics sans compte réel. Les tests conservent la priorité des
+credentials explicites et l'absence de rejeu d'un outil après une erreur réseau
+indéterminée.
 
-Les demandes URL couvrent le protocole legacy et les continuations modernes,
-la capacité URL explicite, les clients sans cette capacité, le repli navigateur
-désactivé par défaut ou activé, et le refus sans ouverture de secours. Les tests
-vérifient aussi qu'un client inactif ne récupère pas la demande d'un autre client,
-qu'une continuation ne peut pas changer l'appel initial et que le login manuel
-reste disponible. Un test du vrai binaire CLI suit le lien vers un fournisseur
-local, termine le vrai callback puis reconnecte un second processus sans capacité
-URL en réutilisant les identifiants ; aucun navigateur réel n'est lancé.
+`TestNativeOAuthStandardSDKEndToEnd` utilise un client HTTP inchangé du SDK MCP,
+la vraie gateway et un fournisseur OAuth local. Il suit le challenge de la
+ressource locale, l'inscription DCR, le consentement, les deux échanges PKCE et
+le callback amont avant de découvrir les vrais outils et de faire un appel MCP.
+Le client n'annonce aucune capacité d'elicitation. Le test compare les identités
+et les jetons des deux parcours pour vérifier qu'un secret du fournisseur ne
+devient pas un token client. Les fixtures utilisent des homes temporaires, un
+magasin chiffré et un navigateur HTTP simulé ; elles ne lancent aucun navigateur
+réel et ne consultent aucun compte personnel.
 
-Les régressions de la façade conservent les métadonnées d'initialisation et de
-découverte des serveurs publics ou déjà authentifiés, les notifications de
-progression et les flux d'abonnement. Une différence de version révélée après
-consentement exige une nouvelle négociation sans perdre les identifiants acquis.
+`TestNativeOAuthBrowserNavigation` est une régression distincte avec un vrai
+Chrome/Chromium. Elle exige les chemins absolus du navigateur et de Node via
+`-agentcfg-browser-executable` et `-agentcfg-browser-node` ; sans ces options,
+elle est ignorée. Elle lance un profil temporaire, soumet le vrai formulaire,
+suit le callback du fournisseur puis celui du client et échange le code PKCE.
+Les cas de premier login et d'autorisation fournisseur déjà sauvegardée vérifient
+l'en-tête Origin, l'absence de nouveau consentement fournisseur et l'absence de
+violation CSP. La CI Windows fournit explicitement les deux exécutables.
+
+```sh
+go test ./internal/gateway -run '^TestNativeOAuthBrowserNavigation$' -count=1 -timeout=120s \
+  -args -agentcfg-browser-executable=/absolute/path/to/chrome \
+  -agentcfg-browser-node=/absolute/path/to/node
+```
+
+Les régressions de l'autorité locale couvrent les codes à usage unique, PKCE,
+les redirects et ressources, Host/Origin/CSRF, le refus de consentement, la
+rotation et le rejeu des refresh tokens, les échanges concurrents, l'arrêt avec
+annulation et la persistance chiffrée après redémarrage. Les capacités des routes
+sont liées au nom du serveur et au harness par HMAC ; les tests de configuration
+refusent une clé manquante et empêchent sa sérialisation dans les paramètres.
+Les contrôles du proxy concernent les sessions HTTP distinctes, les réponses
+JSON/SSE et callbacks, ainsi que les challenges d'autorisation amont.
+Le cas de scope supplémentaire vérifie que l'ancienne session MCP legacy finit
+par HTTP 404 ; une reconnexion explicite réutilise les nouveaux credentials sans
+troisième consentement ni rejeu incertain de l'outil.
+
+Ces tests établissent le parcours OAuth natif avec le SDK utilisé par le dépôt.
+Ils ne valident ni une interface précise de Cursor/OpenCode, ni la compatibilité
+OAuth de toutes les versions de clients. HTTP loopback et HTTPS restent des
+choix dont l'acceptation dépend du client.
 
 Les régressions du broker vérifient qu'une écriture d'annulation bloquée n'arrête
 ni l'expiration des autres opérations, ni la déconnexion, ni les réponses aux
@@ -134,6 +159,31 @@ Un serveur qui ne lit plus son stdin peut toujours bloquer une nouvelle écritur
 vers ce serveur.
 
 ## Régressions de configuration et de synchronisation
+
+Les projections gateway couvrent les six adaptateurs, l'activation puis la
+désactivation, les filtres, un mélange Cursor HTTP/OpenCode stdio, les fichiers JSON/JSONC et TOML, les conflits manuels
+et la restauration de la baseline d'init. Elles vérifient l'absence de données
+amont dans l'URL locale, la stabilité du sync suivant et le maintien des sources
+canoniques. L'import reconnaît seulement les routes gérées prouvées ; les MCP
+localhost manuels restent disponibles et une clé absente ou changée bloque le
+réimport d'une route déjà gérée. La suppression préalable du serveur canonique
+ne transforme pas une ancienne route possédée en amont importable.
+
+Les fixtures de projection Windows créent une DACL privée dans leurs homes
+temporaires avant les fichiers. Les tests de permissions contrôlent aussi les
+fichiers exposés et l'héritage du temporaire utilisé par l'écriture atomique.
+Sur Unix, un fichier en mode `0644` sous un home en mode `0700` peut rester privé ; une modification
+des parents après le plan doit être détectée avant application. Lorsque le
+TMPDIR du runner est lui-même sous un ancêtre privé, le cas d'exposition réelle
+le signale explicitement et les tests de chaînes de permissions vérifient la
+décision sans changer les droits du runner.
+Les régressions de récupération refusent une destination publique pour une
+sauvegarde, un journal ou un rollback contenant une URL protégée, y compris
+après désactivation du gateway ou retrait du dernier MCP HTTP. Les variantes
+JSON/JSONC/TOML échappées, BOM et `Before` en base64 sont couvertes. Les copies
+contrôlent les octets et le mode effectivement écrits ; le scénario de publication
+d'un lien privé vers un home `0755` vérifie qu'une copie `0644` ne perd pas la
+protection de son ancien ancêtre.
 
 Les régressions de liens utilisent huit emplacements natifs de skills et leurs
 56 paires orientées : liens absolus et relatifs sur Unix/Windows, plus jonctions

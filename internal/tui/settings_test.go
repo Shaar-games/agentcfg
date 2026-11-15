@@ -91,7 +91,7 @@ func TestServerHarnessNoneAndMissingConfiguredHarnessRejected(t *testing.T) {
 
 func TestHarnessSettingsAtomicBackupAndPreservation(t *testing.T) {
 	root := settingsFixture(t)
-	original := `{"harnesses":["codex","antigravity"],"runtime":{"idleTimeout":"7m"},"oauth":{"autoOpenBrowser":true},"serverOverrides":{"alpha":{"harnesses":["codex"]}}}`
+	original := `{"harnesses":["codex","antigravity"],"runtime":{"idleTimeout":"7m"},"oauth":{"autoOpenBrowser":true},"gateway":{"enabled":true,"listen":"127.0.0.1:43789"},"serverOverrides":{"alpha":{"harnesses":["codex"]}}}`
 	putSettings(t, root, original)
 	if err := setHarnessEnabled(root, "cursor", true, false); err != nil {
 		t.Fatal(err)
@@ -102,6 +102,9 @@ func TestHarnessSettingsAtomicBackupAndPreservation(t *testing.T) {
 	}
 	if !enabledForHarness(cfg.Settings.Harnesses, "cursor") || cfg.Settings.Runtime.IdleTimeout != "7m" || !cfg.Settings.OAuth.AutoOpenBrowser || len(cfg.Settings.ServerOverrides["alpha"].Harnesses) != 1 {
 		t.Fatalf("settings lost other fields: %+v", cfg.Settings)
+	}
+	if !cfg.Settings.Gateway.Enabled || cfg.Settings.Gateway.Listen != "127.0.0.1:43789" {
+		t.Fatalf("harness edit changed native OAuth gateway settings: %+v", cfg.Settings.Gateway)
 	}
 	backups, err := filepath.Glob(settingsFile(root) + ".bak-*")
 	if err != nil || len(backups) != 1 {

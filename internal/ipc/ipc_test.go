@@ -24,6 +24,37 @@ func TestPrivateIPCExchange(t *testing.T) {
 	checkPrivateIPCExchange(t, endpoint)
 }
 
+func TestPrivateIPCServiceSeparation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	broker, err := ForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := ForService(root, "gateway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := ForService(t.TempDir(), "gateway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if broker.Directory == gateway.Directory || broker.Address == gateway.Address || other.Directory == gateway.Directory || other.Address == gateway.Address {
+		t.Fatal("gateway shared a control endpoint with the broker or another source root")
+	}
+	for _, endpoint := range []Endpoint{broker, gateway, other} {
+		checkPrivateIPCExchange(t, endpoint)
+	}
+	for _, service := range []string{"", "../gateway", "gateway/x", "gateway\\x", "Gateway", "gateway\x00x", strings.Repeat("x", 33)} {
+		if _, err := ForService(root, service); err == nil {
+			t.Fatalf("unsafe service name accepted: %q", service)
+		}
+	}
+}
+
 func TestPrivateIPCLongTemporaryPath(t *testing.T) {
 	endpoint := longTemporaryEndpoint(t)
 	checkPrivateIPCExchange(t, endpoint)

@@ -70,6 +70,9 @@ func (p *Plan) captureInitRestore(backupRoot string) (func() error, error) {
 	if len(data) > 16<<20 || json.Unmarshal(data, &point) != nil || point.Version != 1 {
 		return nil, errors.New("invalid initialization restore point")
 	}
+	if err := p.checkInitRestoreGatewayPrivacy(backupRoot, data, point); err != nil {
+		return nil, err
+	}
 	for _, change := range p.Changes {
 		relative, err := filepath.Rel(p.base, change.Path)
 		if err != nil {
@@ -356,6 +359,9 @@ func BuildRestorePlan(home string) (*RestorePlan, error) {
 		if len(state.Instructions) > 0 {
 			return nil, errors.New("instructions were synchronized after init; restore would leave managed files behind")
 		}
+	}
+	if err := p.checkGatewayRecoveryPrivacy(""); err != nil {
+		return nil, err
 	}
 	return &RestorePlan{Changes: p.Changes, plan: p, point: data, pointExists: exists, canonicalIdentity: identity,
 		Archive: filepath.Join(base, ".agentcfg-restored-"+time.Now().UTC().Format("20060102T150405.000000000"))}, nil

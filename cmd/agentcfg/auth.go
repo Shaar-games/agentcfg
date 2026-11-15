@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"agentcfg/internal/auth"
+	"agentcfg/internal/broker"
 	"agentcfg/internal/config"
 
 	"github.com/charmbracelet/huh"
@@ -27,7 +28,7 @@ import (
 
 // Authentication changes only the encrypted account-scoped credential store
 // under the user's home. This command also supports manual callbacks; connect
-// uses a client-presented or opt-in browser fetcher without reading MCP stdin.
+// uses an opt-in browser fetcher without reading MCP stdin.
 func runAuth(ctx context.Context, home string, args []string, input io.Reader, output, diagnostics io.Writer) error {
 	if len(args) < 2 || (args[0] != "login" && args[0] != "status" && args[0] != "logout") {
 		return errors.New("usage: agentcfg auth <login|status|logout> <server> [--no-browser]")
@@ -147,10 +148,11 @@ func connectAuthorizationCodeFetcher(diagnostics io.Writer, opener func(string) 
 	}
 }
 
-func connectClientAuthorizationCodeFetcher(diagnostics io.Writer) func(context.Context, string, *sdkauth.AuthorizationArgs, func(context.Context, string) error) (*sdkauth.AuthorizationResult, error) {
-	return func(ctx context.Context, redirect string, args *sdkauth.AuthorizationArgs, present func(context.Context, string) error) (*sdkauth.AuthorizationResult, error) {
-		return fetchConnectAuthorization(ctx, args, diagnostics, authorizationCodeFetcherWithPresentation(redirect, nil, diagnostics, false, false, present, true))
+func connectAuthorizationOptions(autoOpenBrowser bool, diagnostics io.Writer, opener func(string) error) broker.ConnectOptions {
+	if !autoOpenBrowser {
+		return broker.ConnectOptions{}
 	}
+	return broker.ConnectOptions{AuthorizationCodeFetcher: connectAuthorizationCodeFetcher(diagnostics, opener)}
 }
 
 func fetchConnectAuthorization(ctx context.Context, args *sdkauth.AuthorizationArgs, diagnostics io.Writer, fetch sdkauth.AuthorizationCodeFetcher) (*sdkauth.AuthorizationResult, error) {
@@ -174,16 +176,6 @@ func fetchConnectAuthorization(ctx context.Context, args *sdkauth.AuthorizationA
 }
 
 func authorizationCodeFetcherWithOpener(redirect string, input io.Reader, output io.Writer, noBrowser, interactive bool, opener func(string) error) sdkauth.AuthorizationCodeFetcher {
-	var present func(context.Context, string) error
-	if opener != nil {
-		present = func(_ context.Context, target string) error { return opener(target) }
-	}
-	return authorizationCodeFetcherWithPresentation(redirect, input, output, noBrowser, interactive, present, false)
-}
-
-// The callback is listening before present is called. The client may open the
-// URL immediately, while the code and tokens remain outside the MCP channel.
-func authorizationCodeFetcherWithPresentation(redirect string, input io.Reader, output io.Writer, noBrowser, interactive bool, present func(context.Context, string) error, inClient bool) sdkauth.AuthorizationCodeFetcher {
 	if output == nil {
 		output = io.Discard
 	}
@@ -214,10 +206,7 @@ func authorizationCodeFetcherWithPresentation(redirect string, input io.Reader, 
 		if input == nil && !loopbackCallback {
 			return nil, &oauthBrowserError{message: "Automatic OAuth login requires a loopback HTTP redirect with a nonzero port; use agentcfg auth login <server> for a manual callback."}
 		}
-		if !noBrowser && present == nil {
-			if inClient {
-				return nil, auth.ErrLoginRequired
-			}
+		if !noBrowser && opener == nil {
 			return nil, &oauthBrowserError{message: "OAuth browser opener is unavailable; use agentcfg auth login <server> --no-browser."}
 		}
 		var server *http.Server
@@ -283,9 +272,7 @@ func authorizationCodeFetcherWithPresentation(redirect string, input io.Reader, 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if inClient {
-			_, err = fmt.Fprintln(output, "Complete OAuth sign-in in your MCP client.")
-		} else if input == nil && !noBrowser {
+		if input == nil && !noBrowser {
 			_, err = fmt.Fprintln(output, "Opening your browser for OAuth sign-in.")
 		} else {
 			_, err = fmt.Fprintf(output, "Open this authorization URL in your browser:\n%s\n", args.URL)
@@ -297,13 +284,7 @@ func authorizationCodeFetcherWithPresentation(redirect string, input io.Reader, 
 			return nil, err
 		}
 		if !noBrowser {
-			if err := present(ctx, args.URL); err != nil {
-				if inClient {
-					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, auth.ErrLoginRequired) {
-						return nil, err
-					}
-					return nil, &oauthBrowserError{message: "OAuth sign-in could not be presented by the MCP client; use agentcfg auth login <server>.", cause: err}
-				}
+			if err := opener(args.URL); err != nil {
 				if input == nil {
 					return nil, &oauthBrowserError{message: "OAuth browser could not be opened; use agentcfg auth login <server> --no-browser for manual sign-in.", cause: err}
 				}

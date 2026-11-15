@@ -7,7 +7,7 @@
 | Location relative to root | Purpose |
 | --- | --- |
 | `.agentcfg/mcp.json` | Explicit canonical MCP servers and optional agentcfg fields |
-| `.agentcfg/agentcfg.json` | Selected harnesses, runtime durations, OAuth interaction preferences and named overrides |
+| `.agentcfg/agentcfg.json` | Selected harnesses, runtime durations, OAuth interaction preferences, optional gateway and named overrides |
 | `.agentcfg/skills/<skill>/SKILL.md` | Standalone skills |
 | `.agentcfg/plugins/<folder>/plugin.json` | Required portable plugin manifest |
 | `.agentcfg/plugins/<folder>/mcp.json` | Optional portable MCP component |
@@ -141,6 +141,10 @@ The default settings are:
   "oauth": {
     "autoOpenBrowser": false
   },
+  "gateway": {
+    "enabled": false,
+    "listen": "127.0.0.1:43877"
+  },
   "serverOverrides": {}
 }
 ~~~
@@ -149,15 +153,13 @@ The default settings are:
 
 Runtime durations use Go duration syntax, such as `30s` or `5m`, and must be positive. An omitted field retains its default.
 
-`oauth.autoOpenBrowser` controls the automatic browser fallback used by
-`agentcfg connect` when an HTTP MCP requires sign-in and the client does not
-support URL elicitation. It defaults to `false`; omitting `oauth` or using an
-empty `oauth` object has the same effect. Set it to `true` to opt in. Clients
-advertising `elicitation.url` receive a sign-in request through the local
-`agentcfg_authenticate` tool. Declining or cancelling that request never starts
-the automatic browser fallback, even when the option is enabled. The settings
-object accepts only `autoOpenBrowser`, whose value must be a JSON boolean;
-`null`, strings and unknown fields are rejected.
+`oauth.autoOpenBrowser` controls automatic browser opening by `agentcfg connect`
+when an HTTP upstream needs sign-in. It defaults to `false`; omitting `oauth`
+or using an empty object has the same effect. Set it to `true` to opt in for
+stdio connections. This does not enable the native HTTP gateway or control its
+client's OAuth interface. The `oauth` settings object accepts only
+`autoOpenBrowser`, whose value must be a JSON boolean; `null`, strings and
+unknown fields are rejected.
 
 An explicit `agentcfg auth login <server>` remains available and can open the
 browser regardless of this preference. Add `--no-browser` to that command to use
@@ -187,6 +189,10 @@ Server overrides replace only fields explicitly present. For example, `"harnesse
 
 `shared` is the server default and requests a shared upstream instance. `isolated` requests a separate upstream connection for each client. Choose the latter when an MCP relies on private session state or client callbacks; see the runtime documentation for the supported shared-session operations.
 
+These sharing settings apply to the broker path used by `agentcfg connect`.
+The native HTTP gateway preserves separate client HTTP sessions and does not
+multiplex them into one shared upstream session.
+
 Skills are distributed into each selected harness's own directory; Codex uses `~/.codex/skills/` (its [supported legacy user location](https://github.com/openai/codex/blob/main/codex-rs/ext/skills/src/host_roots.rs)), rather than the shared `~/.agents/skills/`. During initialization, imported skills from every native location are backed up and removed after their canonical copies have been verified; enabled destinations are replaced with physical copies. Existing agentcfg-managed shared skills migrate on the next sync. Unimported skills and manually modified managed entries are protected. `agentcfg restore` restores the original shared imports when an initialization restore point exists.
 
 Initialization follows existing user-declared symlinks and Windows junctions,
@@ -214,6 +220,92 @@ Native layout snapshots are bounded to 100,000 entries, 512 MiB total and 64 MiB
 per file; the smaller skill discovery limits still apply to imported skills.
 
 The canonical sources remain under `~/.agentcfg/skills/`. Harness-native discovery can still read additional locations independently of agentcfg; distribution filters are not an isolation or authorization boundary.
+
+## Native OAuth gateway
+
+`gateway` belongs only in `~/.agentcfg/agentcfg.json`. Omitting it, or using an
+empty object, keeps `enabled: false` and `listen: "127.0.0.1:43877"`. Upgrading or
+loading configuration does not enable a listener or rewrite existing native
+entries. Set `enabled` to true deliberately, start the service with
+`agentcfg gateway start`, then review and apply synchronization.
+
+| Field | Validation and behavior |
+| --- | --- |
+| `enabled` | JSON boolean, default false. Enables HTTP URL projection during sync and permits gateway startup. |
+| `harnesses` | Optional array of known harness names. Omitted or empty means all; `["none"]` disables named gateway routes. A selected client uses native HTTP; other selected sync clients keep stdio. Direct gateway URLs without a harness remain available while enabled. |
+| `listen` | Literal loopback IP and numeric port 1–65535, for example `127.0.0.1:43877` or `[::1]:43877`. Hostnames, wildcard addresses and port zero are rejected. |
+| `tlsCert`, `tlsKey` | Optional pair of nonempty file paths. Both must resolve to existing regular files; supplying only one is invalid. Together they select HTTPS. |
+
+The object rejects unknown fields, `null` and incorrect field types. Relative
+certificate paths resolve from the canonical source root (`config.Root`, the
+user's home for the public CLI), not from the directory containing
+`agentcfg.json`. For files stored under `~/.agentcfg/tls/`, use values such as
+`.agentcfg/tls/gateway.crt` and `.agentcfg/tls/gateway.key`. The runtime loads the
+certificate/key pair; clients must trust the certificate and its identity.
+HTTP loopback is supported by the tested SDK, while clients that require an
+HTTPS issuer need this explicit TLS configuration.
+
+The default origin is `http://127.0.0.1:43877`. Each resource URL has the shape
+`/mcp/<capability>/<server>/<harness>`. The capability is a 256-bit HMAC bound to
+both names; names are UTF-8 encoded with unpadded base64url, and `-` denotes a
+direct connection without a harness. Use
+`agentcfg gateway url --server NAME --harness HARNESS` instead of constructing
+the route by hand. The complete URL is sensitive: its holder can initiate the
+resource's local OAuth flow. Keep it private even though it contains no provider
+token, upstream URL or configured header.
+The listen address is stable configuration, not a newly chosen port at each
+start. Changing its origin requires resynchronization and a new local OAuth
+registration in the client.
+
+`gateway start` or `gateway run` initializes the random routing key in the
+encrypted credential store. The key is never written into `agentcfg.json`,
+`mcp.json` or a portable plugin; `routeKey` is not an accepted setting. Sync reads
+the existing key and fails if it is absent or cannot be decrypted. It never
+generates credentials while building a preview. Native destination files must
+be private enough to hold their capability URLs: the sync checks Unix
+permissions/ancestor traversal or Windows DACLs, including atomic-write
+inheritance, and refuses unsafe access without changing the permissions. The
+same requirement applies to backups, initialization journals, restored native
+files and layout copies containing a capability, including old URLs retained
+after gateway deactivation. Moving a prepared layout also checks the permissions
+at its future native location.
+
+When enabled, sync projects `http` and `streamable-http` upstreams to these native
+HTTP URLs for the six supported user-level adapters allowed by `gateway.harnesses`.
+The global harness selection and per-server filters remain effective; stdio upstreams retain their
+`agentcfg connect` entries. No upstream definition, OAuth credential identity
+or portable MCP/plugin manifest is changed. Managed-entry ownership, backups,
+manual-edit conflicts and restoration apply to both representations.
+
+Discovery recognizes an existing gateway projection only when its source-root
+ownership record, unchanged entry, route and routing key agree, even if the
+canonical server was removed before the next sync. It does not
+exclude arbitrary localhost MCPs. A known owned route that cannot be verified
+because its key is missing or changed blocks import until it is repaired or
+resynchronized.
+
+The gateway requires its own OAuth access token even if the upstream is public.
+Clients register using dynamic client registration with
+`token_endpoint_auth_method: "none"`; client ID metadata documents (CIMD) are not
+advertised or supported. Local tokens are distinct from upstream credentials.
+To use native HTTP for Cursor while keeping OpenCode on stdio, merge these fields
+into the existing settings:
+
+```json
+{
+  "harnesses": ["cursor", "opencode"],
+  "gateway": {"enabled": true, "harnesses": ["cursor"]}
+}
+```
+
+After `gateway start` and a reviewed sync, Cursor receives gateway URLs and
+OpenCode keeps `agentcfg connect` entries. For the stdio client, run
+`agentcfg auth login <server>` and reconnect after login. This example selects
+transports; it does not assert OAuth support in a particular Cursor version.
+Remove a client from the gateway list and sync again to return just that client
+to stdio, or set `enabled` to false to return all managed HTTP entries. See
+[CLI lifecycle](cli.md#native-oauth-gateway) and
+[transport behavior](transports.md#native-http-oauth-gateway).
 
 ## Portable manifests
 

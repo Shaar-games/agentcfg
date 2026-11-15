@@ -16,6 +16,7 @@ import (
 	"agentcfg/internal/broker"
 	"agentcfg/internal/completion"
 	"agentcfg/internal/config"
+	"agentcfg/internal/gateway"
 	"agentcfg/internal/syncer"
 	"agentcfg/internal/tui"
 	"agentcfg/internal/updater"
@@ -59,6 +60,7 @@ Setup and inspection:
 
 Runtime:
   connect               Stdio proxy for one MCP
+  gateway               Local HTTP MCP with native client OAuth
   auth                  OAuth login, status or logout
   status                Show broker and process status
   stop                  Stop broker and managed MCP processes
@@ -114,6 +116,8 @@ Use agentcfg <command> --help for options.`)
 		return err
 	case "auth":
 		return runAuth(ctx, home, args[1:], input, output, diagnostics)
+	case "gateway":
+		return runGateway(ctx, home, args[1:], output, diagnostics)
 	case "harness", "harnesses", "skill", "skills", "mcp", "mcps":
 		return runCategory(ctx, args[0], flags, home, args[1:], input, output)
 	case "config":
@@ -136,10 +140,12 @@ Use agentcfg <command> --help for options.`)
 		if *name == "" {
 			return errors.New("connect requires --server")
 		}
-		return broker.ConnectWithOptions(ctx, *root, *name, *harness, input, output, broker.ConnectOptions{
-			AuthorizationCodeFetcher:       connectAuthorizationCodeFetcher(diagnostics, openBrowser),
-			ClientAuthorizationCodeFetcher: connectClientAuthorizationCodeFetcher(diagnostics),
-		})
+		cfg, err := config.Load(*root)
+		if err != nil {
+			return err
+		}
+		return broker.ConnectWithOptions(ctx, cfg.Root, *name, *harness, input, output,
+			connectAuthorizationOptions(cfg.Settings.OAuth.AutoOpenBrowser, diagnostics, openBrowser))
 	case "daemon", "status", "stop", "list", "validate":
 		plain := flags.Bool("plain", false, "plain output without Huh terminal forms")
 		var asJSON, yes *bool
@@ -242,6 +248,10 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 		if err != nil {
 			return err
 		}
+		gatewayStatus, err := gateway.GetStatus(ctx, root)
+		if err != nil {
+			return err
+		}
 		if interactive && !asJSON {
 			var body strings.Builder
 			if !status.Running {
@@ -256,10 +266,19 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 				}
 				fmt.Fprintf(&body, "%s: %s, PID %d, %d client(s), %d pending\n", backend.Name, mode, backend.PID, backend.Clients, backend.Pending)
 			}
+			if gatewayStatus.Running {
+				fmt.Fprintf(&body, "Native OAuth gateway running at %s (PID %d)\n", gatewayStatus.URL, gatewayStatus.PID)
+			}
 			return terminalNote(ctx, input, output, "MCP process status", body.String())
 		}
 		encoder := json.NewEncoder(output)
 		encoder.SetIndent("", "  ")
+		if gatewayStatus.Running {
+			return encoder.Encode(struct {
+				broker.Status
+				Gateway gateway.Status `json:"gateway"`
+			}{status, gatewayStatus})
+		}
 		return encoder.Encode(status)
 	case "stop":
 		if interactive && !yes {
@@ -271,12 +290,30 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 				return nil
 			}
 		}
-		if err := broker.Stop(ctx, root); err != nil {
+		gatewayStatus, err := gateway.GetStatus(ctx, root)
+		if err != nil {
 			return err
 		}
-
-		_, err := fmt.Fprintln(output, "Broker shutdown requested.")
-		return err
+		brokerStatus, err := broker.GetStatus(ctx, root)
+		if err != nil {
+			return err
+		}
+		var stopErrors []error
+		if brokerStatus.Running || !gatewayStatus.Running {
+			if err := broker.Stop(ctx, root); err != nil {
+				stopErrors = append(stopErrors, err)
+			} else if _, err := fmt.Fprintln(output, "Broker shutdown requested."); err != nil {
+				stopErrors = append(stopErrors, err)
+			}
+		}
+		if gatewayStatus.Running {
+			if err := gateway.Stop(ctx, root); err != nil {
+				stopErrors = append(stopErrors, err)
+			} else if _, err := fmt.Fprintln(output, "Native OAuth gateway stopped."); err != nil {
+				stopErrors = append(stopErrors, err)
+			}
+		}
+		return errors.Join(stopErrors...)
 	default:
 		cfg, err := config.Load(root)
 		if err != nil {
