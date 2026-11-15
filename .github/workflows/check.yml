@@ -57,7 +57,7 @@ jobs:
             "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
           ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
           if (-not $browser) { throw 'Chrome is required for the native OAuth browser regression' }
-          $nodeExecutable = (Get-Command node -CommandType Application -ErrorAction Stop).Source
+          $nodeExecutable = (Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
           go test ./internal/gateway -run '^TestNativeOAuthBrowserNavigation$' -count=1 -timeout=120s -args "-agentcfg-browser-executable=$browser" "-agentcfg-browser-node=$nodeExecutable"
           if ($LASTEXITCODE -ne 0) { throw 'Native OAuth browser regression failed' }
       - name: Real npx MCP through stdio and broker
