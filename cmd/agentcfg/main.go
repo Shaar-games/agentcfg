@@ -111,7 +111,9 @@ Use agentcfg <command> --help for options.`)
 			fmt.Fprintf(diagnostics, "Previous executable remains in use; remove %s after exiting agentcfg.\n", result.BackupPath)
 		}
 		if err == nil && !result.AlreadyCurrent {
-			_, err = fmt.Fprintln(output, "Existing broker processes keep running until stopped; restart them when convenient with 'agentcfg stop'.")
+			_, err = fmt.Fprintln(output, `Existing broker and gateway processes keep running the previous version.
+Restart a running native OAuth gateway with 'agentcfg gateway stop' followed by 'agentcfg gateway start', or restart its user service.
+'agentcfg stop' stops both services; reconnect stdio clients and start the gateway again for HTTP clients.`)
 		}
 		return err
 	case "auth":

@@ -245,9 +245,17 @@ credential identity as client connections. Compatible URL-only HTTP servers
 use OAuth discovery without requiring a configuration rewrite. See
 [transports.md](transports.md) for callback and secure-storage requirements.
 
-`agentcfg status` inspects the broker without starting it;
-`agentcfg stop` stops a running broker. `agentcfg update` updates the
-executable, while `agentcfg version` prints the current version.
+`agentcfg status` inspects the broker and gateway without starting either;
+`agentcfg stop` stops both services and the broker's managed MCP processes.
+`agentcfg update` updates the executable, while `agentcfg version` prints that
+executable's version. Existing broker and gateway processes keep running the
+previous version until explicitly restarted.
+
+After updating, restart a running gateway with `agentcfg gateway stop` followed
+by `agentcfg gateway start`, or restart the user service that runs `gateway run`.
+If you use the global `agentcfg stop`, reconnect stdio clients to start a new
+broker and explicitly start the gateway again for HTTP clients. Their configured
+URLs do not start the service.
 
 See the [canonical configuration](configuration.md) and
 [synchronization safety](synchronization.md) references for data formats,
