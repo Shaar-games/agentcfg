@@ -142,12 +142,120 @@ PowerShell 5.1, or PowerShell 7. The accepted shell IDs are `bash`, `zsh`,
 See [completion.md](completion.md) for commands to load it now or install it
 persistently.
 
+## Native OAuth gateway
+
+The optional gateway gives compatible HTTP MCP clients a local OAuth resource
+URL for each configured HTTP server. It is disabled by default. Merge this
+setting into the existing `~/.agentcfg/agentcfg.json`, preserving its other keys:
+
+```json
+{
+  "gateway": {
+    "enabled": true,
+    "listen": "127.0.0.1:43877",
+    "harnesses": ["cursor"]
+  }
+}
+```
+
+Then start the service and review the native configuration change:
+
+```sh
+agentcfg gateway start
+agentcfg gateway status
+agentcfg sync --plain
+agentcfg sync --apply
+agentcfg gateway url --server documentation --harness cursor
+```
+
+Replace `documentation` with a canonical HTTP MCP name and `cursor` with an
+enabled harness that allows that server and appears in the gateway selection.
+Omitting `--harness` prints the direct
+resource URL. `gateway url` does not start the service or contact the upstream.
+
+| Command | Effect |
+| --- | --- |
+| `agentcfg gateway start` | Start the gateway in the background, or report the running service. |
+| `agentcfg gateway run` | Run in the foreground, suitable for a user-managed service or login startup. |
+| `agentcfg gateway status` | Print gateway state as JSON without starting it. |
+| `agentcfg gateway stop` | Stop only the gateway; the stdio broker remains available. |
+| `agentcfg gateway url --server NAME [--harness NAME]` | Print the configured HTTP resource URL. |
+
+These commands do not edit MCP configuration. `sync --apply` projects URLs for
+HTTP servers only when `gateway.enabled` is true and `gateway.harnesses` allows
+that client. An omitted or empty list means all; `["none"]` selects no named
+client. Other clients and stdio commands continue to use `agentcfg connect`.
+Applying a sync or adding a URL does not start a process or
+perform a login. Start the gateway explicitly before connecting, or arrange for
+`gateway run` to start in your user session. No service is installed automatically.
+
+The first `gateway start` or `gateway run` creates an encrypted routing key.
+Until then, sync reports that the gateway must be initialized; preview does not
+create the key. On Linux/macOS, configure the same `AGENTCFG_OAUTH_KEY` for the
+gateway and the CLI so both can read that encrypted state. Windows can use its
+per-user DPAPI store.
+
+The full URL printed by `gateway url` is sensitive. Its per-resource capability
+is needed to begin local OAuth authorization; do not publish it or copy it into
+shared project files. Sync checks the destination's permissions before planning
+and again before writing. An existing private directory can protect a file on
+Unix; Windows checks its DACL and the inheritance used by atomic writes. If
+permissions are unsafe, restrict access deliberately and rerun the preview.
+These checks also cover recovery files containing a protected URL, including
+backups made while disabling the gateway. Agentcfg does not silently change file
+permissions or ACLs.
+
+The client follows the gateway's OAuth challenge, obtains its own local access
+token, and uses that token for MCP requests. Upstream credentials remain separate
+in agentcfg's encrypted store. Local authorization is required even for public
+upstreams; provider consent is needed when usable upstream authorization is
+missing. No synthetic MCP authentication tool is advertised.
+
+HTTP loopback works with the standard MCP SDK tested in this repository. A
+particular client may require an HTTPS issuer; configure the paired `tlsCert`
+and `tlsKey` settings and trust the certificate in that client if needed. The
+tests do not establish a particular sign-in button or complete OAuth support in
+Cursor, OpenCode or another desktop application. See
+[gateway configuration](configuration.md#native-oauth-gateway) for address and
+certificate rules.
+
+For example, keep both Cursor and OpenCode in the global `harnesses` list and set
+`gateway.harnesses` to `["cursor"]`: Cursor receives native HTTP URLs and OpenCode
+keeps stdio. Use `agentcfg auth login <server>` for the stdio client and reconnect
+it after login. Explicit login is available regardless of `oauth.autoOpenBrowser`.
+
+To return one client's HTTP entries to stdio, exclude it from `gateway.harnesses`
+and review/apply a sync. To return every client, set `gateway.enabled` to false,
+review and apply a sync, then stop the gateway. Ownership checks still protect manual
+native edits during either migration.
+
 ## Other useful commands
 
-`agentcfg auth login <server>` explicitly starts an OAuth authorization
-flow. `agentcfg status` inspects the broker without starting it;
-`agentcfg stop` stops a running broker. `agentcfg update` updates the
-executable, while `agentcfg version` prints the current version.
+For clients using `agentcfg connect`, run `agentcfg auth login <server>`, then
+refresh or reconnect the MCP client to load the saved upstream credentials.
+This explicit command can open the browser independently of
+`oauth.autoOpenBrowser`; `--no-browser` selects the manual URL/callback flow.
+Automatic browser opening during a stdio connection requires
+`oauth.autoOpenBrowser: true` in `~/.agentcfg/agentcfg.json`; the default is
+`false`. A stdio client receives ordinary upstream tools and protocol messages,
+without a local authentication tool or URL elicitation facade.
+
+`agentcfg auth status <server>` and `agentcfg auth logout <server>` use the same
+credential identity as client connections. Compatible URL-only HTTP servers
+use OAuth discovery without requiring a configuration rewrite. See
+[transports.md](transports.md) for callback and secure-storage requirements.
+
+`agentcfg status` inspects the broker and gateway without starting either;
+`agentcfg stop` stops both services and the broker's managed MCP processes.
+`agentcfg update` updates the executable, while `agentcfg version` prints that
+executable's version. Existing broker and gateway processes keep running the
+previous version until explicitly restarted.
+
+After updating, restart a running gateway with `agentcfg gateway stop` followed
+by `agentcfg gateway start`, or restart the user service that runs `gateway run`.
+If you use the global `agentcfg stop`, reconnect stdio clients to start a new
+broker and explicitly start the gateway again for HTTP clients. Their configured
+URLs do not start the service.
 
 See the [canonical configuration](configuration.md) and
 [synchronization safety](synchronization.md) references for data formats,

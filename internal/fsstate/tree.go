@@ -3,6 +3,7 @@
 package fsstate
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -29,6 +30,10 @@ type Options struct {
 	MaxBytes, MaxFile int64
 	Skip              func(string) bool
 	OmitDirectory     func(string) bool
+	// BeforeCopyFile may reject a destination before any source bytes are written.
+	// It is called for regular files during Copy, never during Capture.
+	// The bounded, read-only data and mode are exactly those used by the copy.
+	BeforeCopyFile func(source, destination string, data []byte, mode os.FileMode) error
 }
 
 type Snapshot struct {
@@ -206,7 +211,30 @@ func walk(path, destination string, options Options) (*Snapshot, error) {
 			var output *os.File
 			var outputIdentity os.FileInfo
 			var writer io.Writer = h
+			var reader io.Reader = file
+			if options.Context != nil {
+				reader = contextReader{options.Context, reader}
+			}
 			if destination != "" {
+				if options.BeforeCopyFile != nil {
+					// Check the same bounded snapshot that will be written. Reading
+					// the source again after its guard could expose bytes introduced
+					// by a concurrent edit before the final identity check runs.
+					data, readErr := io.ReadAll(io.LimitReader(reader, options.MaxFile+1))
+					verified, statErr := file.Stat()
+					if readErr != nil || statErr != nil || int64(len(data)) != entry.Size() || !os.SameFile(entry, verified) || verified.Size() != entry.Size() || verified.Mode() != entry.Mode() || !verified.ModTime().Equal(entry.ModTime()) {
+						closeErr := file.Close()
+						return errors.Join(fmt.Errorf("file changed while reading: %s", source), readErr, statErr, closeErr)
+					}
+					if err := options.BeforeCopyFile(resolved, target, data, entry.Mode().Perm()); err != nil {
+						file.Close()
+						return err
+					}
+					reader = bytes.NewReader(data)
+					if options.Context != nil {
+						reader = contextReader{options.Context, reader}
+					}
+				}
 				output, err = os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, entry.Mode().Perm())
 				if err != nil {
 					file.Close()
@@ -214,10 +242,6 @@ func walk(path, destination string, options Options) (*Snapshot, error) {
 				}
 				writer = io.MultiWriter(h, output)
 				outputIdentity, _ = output.Stat()
-			}
-			var reader io.Reader = file
-			if options.Context != nil {
-				reader = contextReader{options.Context, file}
 			}
 			count, copyErr := io.Copy(writer, io.LimitReader(reader, options.MaxFile+1))
 			after, statErr := file.Stat()

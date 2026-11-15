@@ -22,6 +22,7 @@ type Plan struct {
 	homeIdentity          os.FileInfo
 	budget                *scanBudget
 	inactiveOrigins       map[string][]Origin
+	gatewayProxies        map[string]gatewayProxy
 }
 
 type Harness struct {

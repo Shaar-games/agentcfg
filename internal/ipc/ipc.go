@@ -19,6 +19,24 @@ type Endpoint struct {
 }
 
 func ForRoot(root string) (Endpoint, error) {
+	return forService(root, "")
+}
+
+// ForService gives another agentcfg runtime a separate private control channel.
+// An empty service is reserved for the existing broker identity.
+func ForService(root, service string) (Endpoint, error) {
+	if service == "" || len(service) > 32 {
+		return Endpoint{}, fmt.Errorf("invalid IPC service name")
+	}
+	for _, c := range service {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return Endpoint{}, fmt.Errorf("invalid IPC service name")
+		}
+	}
+	return forService(root, service)
+}
+
+func forService(root, service string) (Endpoint, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return Endpoint{}, err
@@ -34,7 +52,11 @@ func ForRoot(root string) (Endpoint, error) {
 	if err != nil {
 		return Endpoint{}, err
 	}
-	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(current.Uid+"\x00"+abs)))[:24]
+	identity := current.Uid + "\x00" + abs
+	if service != "" {
+		identity += "\x00" + service
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))[:24]
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return Endpoint{}, err
@@ -45,8 +67,19 @@ func ForRoot(root string) (Endpoint, error) {
 		address = `\\.\pipe\agentcfg-` + hash
 	} else if len(address) > 100 {
 		// sockaddr_un is limited to roughly 104 bytes on macOS.
-		dir = filepath.Join(os.TempDir(), "agentcfg-"+hash)
-		address = filepath.Join(dir, "broker.sock")
+		// A user-specific TMPDIR may also be too long. Retain the same UID/root
+		// identity in the short system temporary directory; Prepare enforces
+		// ownership, permissions, and the refusal of a symlink at this path.
+		for _, temporary := range []string{os.TempDir(), "/tmp"} {
+			dir = filepath.Join(temporary, "agentcfg-"+hash)
+			address = filepath.Join(dir, "broker.sock")
+			if len(address) <= 100 {
+				break
+			}
+		}
+		if len(address) > 100 {
+			return Endpoint{}, fmt.Errorf("Unix IPC address exceeds the 100-byte limit")
+		}
 	}
 	return Endpoint{Directory: dir, Address: address}, nil
 }

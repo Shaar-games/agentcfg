@@ -13,7 +13,7 @@ var Shells = []string{"bash", "zsh", "fish", "powershell", "pwsh"}
 var Commands = []string{
 	"help", "version", "config", "init", "restore", "harness", "harnesses",
 	"skill", "skills", "mcp", "mcps", "completion", "list", "validate",
-	"sync", "connect", "auth", "update", "status", "stop", "daemon",
+	"sync", "connect", "auth", "gateway", "update", "status", "stop", "daemon",
 }
 
 var options = map[string][]string{
@@ -32,13 +32,14 @@ var options = map[string][]string{
 	"stop":       {"--yes", "--plain", "--help"},
 	"connect":    {"--server", "--harness", "--help"},
 	"auth":       {"login", "status", "logout"},
+	"gateway":    {"start", "run", "stop", "status", "url", "--server", "--harness", "--help"},
 	"completion": {"bash", "zsh", "fish", "powershell", "pwsh"},
 	"update":     {"--help"},
 	"config":     {"--help"},
 }
 
 // Shared argument groups keep every shell in step when commands are added.
-var parameterGroups = []string{"init", "restore", "harness|harnesses", "skill|skills", "mcp|mcps", "status", "list", "validate", "sync", "stop", "connect", "auth", "completion", "update", "config"}
+var parameterGroups = []string{"init", "restore", "harness|harnesses", "skill|skills", "mcp|mcps", "status", "list", "validate", "sync", "stop", "connect", "auth", "gateway", "completion", "update", "config"}
 
 func Generate(shell string, out io.Writer) error {
 	var body string

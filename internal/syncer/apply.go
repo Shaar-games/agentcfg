@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"agentcfg/internal/auth"
 	"agentcfg/internal/config"
 	"agentcfg/internal/fsops"
 	"agentcfg/internal/pathutil"
@@ -22,7 +23,20 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 }
 
 func atomicWriteChecked(path string, data []byte, mode os.FileMode, check func() error) error {
+	privateGateway := containsGatewayCapability(data)
+	checkPrivacy := func() error {
+		if privateGateway {
+			return auth.CheckGatewayConfigCopyPrivacy(path, mode)
+		}
+		return nil
+	}
+	if err := checkPrivacy(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := checkPrivacy(); err != nil {
 		return err
 	}
 	file, err := os.CreateTemp(filepath.Dir(path), ".agentcfg-write-*")
@@ -34,6 +48,25 @@ func atomicWriteChecked(path string, data []byte, mode os.FileMode, check func()
 	if err := file.Chmod(mode); err != nil {
 		file.Close()
 		return err
+	}
+	if privateGateway {
+		if err := auth.CheckGatewayConfigPrivacy(temp); err != nil {
+			file.Close()
+			return err
+		}
+		originalCheck := check
+		check = func() error {
+			if err := checkPrivacy(); err != nil {
+				return err
+			}
+			if err := auth.CheckGatewayConfigPrivacy(temp); err != nil {
+				return err
+			}
+			if originalCheck != nil {
+				return originalCheck()
+			}
+			return nil
+		}
 	}
 	if _, err := file.Write(data); err != nil {
 		file.Close()
@@ -160,7 +193,7 @@ func (p *Plan) preflight() error {
 			return err
 		}
 	}
-	return nil
+	return p.checkGatewayRecoveryPrivacy("")
 }
 
 func (p *Plan) checkChange(change Change) error {
@@ -196,6 +229,11 @@ func (p *Plan) checkChange(change Change) error {
 	}
 	if err := ensureNoSymlinkParents(p.base, path); err != nil {
 		return err
+	}
+	if change.privateGateway || change.skill == nil && containsGatewayCapability(change.after) {
+		if err := auth.CheckGatewayConfigPrivacy(change.Path); err != nil {
+			return err
+		}
 	}
 	if change.skill == nil {
 		if change.adopted {
@@ -305,6 +343,9 @@ func (p *Plan) Apply() error {
 	}
 	backupRoot := filepath.Join(lockDir, "backups", time.Now().UTC().Format("20060102T150405.000000000"))
 	if err := ensureNoSymlinkParents(p.base, backupRoot); err != nil {
+		return err
+	}
+	if err := p.checkGatewayRecoveryPrivacy(backupRoot); err != nil {
 		return err
 	}
 	undoJournal, err := p.captureInitRestore(backupRoot)

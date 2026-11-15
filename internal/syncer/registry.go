@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"agentcfg/internal/config"
 )
 
 type target struct {
@@ -89,6 +91,24 @@ func proxyEntry(t target, binary, root, name string) map[string]any {
 		entry["type"] = "stdio"
 	}
 	return entry
+}
+
+func gatewayEntry(t target, gateway config.GatewaySettings, name string) map[string]any {
+	url := config.GatewayResourceURL(gateway, name, t.name)
+	switch t.name {
+	case "claude-code":
+		return map[string]any{"type": "http", "url": url}
+	case "cursor", "codex":
+		return map[string]any{"url": url}
+	case "opencode":
+		return map[string]any{"type": "remote", "url": url, "enabled": true}
+	case "gemini":
+		return map[string]any{"httpUrl": url}
+	case "antigravity":
+		return map[string]any{"serverUrl": url}
+	default:
+		return nil
+	}
 }
 
 func selectTargets(all []target, names []string, scope string) (map[string]bool, error) {

@@ -107,8 +107,9 @@ must be one absolute HTTP(S) MCP endpoint without a fragment. Literal URL
 credentials and query parameters are preserved. All POST, GET and DELETE requests
 use that endpoint. Redirects are rejected, including
 same-origin redirects; authentication headers are never forwarded to a redirect
-target. No TCP/HTTP listener is opened by this implementation. Local test servers
-exist only inside `httptest` fixtures.
+target. This outbound transport does not listen for MCP HTTP connections. The
+optional [native gateway](#native-http-oauth-gateway) provides that separate
+loopback endpoint; temporary OAuth callbacks also use loopback listeners.
 
 Configured headers are copied for each request. MCP content, session and protocol
 headers are managed by the transport; configuration cannot override the host or
@@ -124,8 +125,11 @@ omit URLs, configured headers, response bodies and underlying network error text
 HTTP rejections retain their numeric status and distinguish authentication,
 access denial, redirects, rate limits and server errors. Typed DNS, certificate,
 connection, timeout and OAuth token/authorization failures use fixed messages.
-An HTTP 401 alone cannot distinguish missing credentials from rejected ones;
-it does not automatically configure OAuth or start an interactive login.
+An HTTP 401 alone cannot distinguish missing credentials from rejected ones.
+Client connections can perform OAuth discovery when an upstream authentication
+challenge requires it. Manual login, the stdio browser opt-in and native HTTP
+authorization are described below; HTTP status alone does not authorize
+replaying an operation after an unrelated network failure.
 Invalid or interrupted JSON/SSE responses are reported without copying their
 contents. Raw valid MCP messages, including server-supplied error responses,
 retain their content for the broker.
@@ -138,6 +142,12 @@ notification's HTTP acceptance. Subsequent requests include `Mcp-Session-Id`, wh
 assigned, and `MCP-Protocol-Version`. A session-bearing HTTP 404 ends the transport;
 reconnection must start a fresh initialization. Network failures and session
 expiration do not trigger replay of tool requests.
+
+A shared initialization stays owned by the backend if its first client
+disconnects. Other clients can use its actual result; a new handshake only starts
+after a failed result has reset the transport. MCP does not permit cancellation
+of `initialize`. If its deadline expires, the backend closes so a subsequent
+connection cannot reuse an unfinished session.
 
 After initialization, one optional GET SSE stream receives unsolicited requests
 and notifications. HTTP 405/501 or an unsupported GET response disables that
@@ -174,8 +184,10 @@ delivering the correlated response to the broker.
   deadline, including response headers and body. Response headers still have a
   two-minute timeout for subscriptions. The dial and TLS handshake deadlines are
   ten seconds. Backend context cancellation interrupts all active operations.
-- In a legacy session, `notifications/cancelled` is forwarded to the server and
-  cancels the matching local POST, except initialization. Modern cancellation
+- In a legacy session, `notifications/cancelled` for an active cancellable request
+  is forwarded to the server and cancels the matching local POST. Initialization,
+  unknown IDs and completed requests ignore cancellation, including a notification
+  arriving after failed discovery has reset the transport. Modern cancellation
   closes the matching POST stream without another notification POST. Local
   cancellation is not proof that the remote operation stopped; it may already
   have executed.
@@ -192,6 +204,10 @@ use `initialize`, `notifications/initialized`, `Mcp-Session-Id`, the HTTP GET
 stream, or a session DELETE. `MCP-Protocol-Version` and `Mcp-Method` are set
 for each request. `Mcp-Name` is set for `tools/call`, `prompts/get`, and
 `resources/read`, using `params.name` or `params.uri` as appropriate.
+
+The broker waits for an abandoned discovery to finish cancelling before allowing
+legacy initialization on the same HTTP transport, including when its client
+disconnects or its request deadline expires.
 
 Header values requiring escaping are represented as `=?base64?...?=` following
 the protocol's sentinel encoding. The transport caches validated
@@ -225,24 +241,125 @@ result and expects GET resumption. Such an incomplete POST stream returns a
 correlated error; the operation is not replayed. Unsolicited GET reconnection is
 not lossless and does not replay missed events.
 
-OAuth 2.1 authorization is available through the official Go MCP SDK with an
-explicitly configured `oauth` block and `agentcfg auth login <server>`.
-Discovery, PKCE, encrypted cached tokens and refresh are supported; the broker
-never initiates an interactive login or opens a browser without a user command.
+### OAuth for stdio client connections
+
+Upstream OAuth uses the official Go MCP SDK, including discovery for compatible
+remote HTTPS entries containing only their URL. `agentcfg connect` forwards the
+upstream MCP protocol subject to the broker's shared/isolated rules. It does not
+add an authentication tool, URL elicitation request or temporary tool-list facade.
+
+With the default settings, sign in using `agentcfg auth login <server>`, then
+refresh or reconnect the client to load the saved upstream credentials. Setting
+`oauth.autoOpenBrowser` to `true` in `~/.agentcfg/agentcfg.json` permits browser
+opening during a stdio connection when authorization is needed. Its default is
+`false`; it does not restrict an explicit `auth login` command. That command
+also supports `--no-browser` for manual URL/callback entry.
+
+The MCP connection remains on stdio. Optional browser authorization controls and
+callback responses travel over private broker IPC. `connect` never reads stdin
+as terminal input, and diagnostics go only to stderr. Credentials remain in
+agentcfg's encrypted store; native client token caches are not imported.
+
+Concurrent clients with the same credential identity share one sign-in. If its
+client disconnects, another connected client can finish the same authorization.
+Cancellation waits for callback cleanup before a new flow can reuse its port.
+After upgrading, restart an existing broker with `agentcfg stop` before
+reconnecting clients: this private IPC capability requires the updated broker.
+
+Discovery, PKCE, encrypted cached tokens and refresh are supported. An explicit
+`oauth` block can select a preregistered client, scopes, account or callback.
+It also uses saved credentials before the first resource challenge, so a server
+that permits anonymous access can still return the authenticated user's results.
+Storage errors remain visible instead of silently downgrading to anonymous access.
 Explicit scopes limit discovery defaults. Scopes required by a Bearer challenge
-are included in the next explicit authorization, together with existing grants.
+are included in the next authorization, together with existing grants.
 A callback issuer is still validated when the provider omits its metadata hint.
 Dynamic registration uses the SDK's redirect classification, including HTTPS
 loopback callbacks as native applications.
-The configured redirect URL must be registered with the authorization provider.
+
+Automatic browser sign-in from stdio requires an HTTP loopback callback with a
+nonzero port. The listener is bound before the browser opens and is closed on
+success, failure, cancellation or timeout.
+A configured redirect URL must be registered
+with the authorization provider; configurations requiring a manual callback can
+still use `agentcfg auth login <server>`. That command also supports `--no-browser`.
+No terminal input is requested by `connect`. A client-imposed startup or request
+deadline can also cancel an in-progress browser sign-in.
+
 Windows uses per-user DPAPI, while Linux/macOS need an explicitly supplied
 `AGENTCFG_OAUTH_KEY` (base64-encoded 32 random bytes) or an injected secure
-store. Static configured headers are supported without OAuth; a configured
+store. Public URL-only entries remain independent of credential storage until an
+OAuth challenge requires it. Static configured headers are supported without OAuth; a configured
 literal Authorization header cannot be combined with OAuth. HTTP 401/403
 failures without valid credentials return sanitized errors. Legacy 2024
 HTTP+SSE (`type: "sse"`, with
 a separate server-selected POST endpoint) is explicitly unsupported. There is no
 implicit fallback to that protocol and no endpoint supplied by SSE is followed.
+
+## Native HTTP OAuth gateway
+
+With `gateway.enabled: true`, HTTP upstream entries in clients selected by
+`gateway.harnesses` use a stable loopback resource URL. Omitted or empty selects
+all enabled harnesses; other clients keep their stdio commands. The default origin is
+`http://127.0.0.1:43877`; paired `gateway.tlsCert` and `gateway.tlsKey` settings
+enable HTTPS. Start it explicitly with `agentcfg gateway start`, or run
+`agentcfg gateway run` under a user-managed service. Sync only generates native
+configuration; a URL does not launch the gateway or authorize a client.
+
+Startup initializes a random routing key in the encrypted store. Each MCP URL
+contains an HMAC capability bound to its server and harness. A guessed resource
+name or an unkeyed route cannot initiate that resource's authorization. Possession
+of the complete URL is sensitive: sync verifies native file privacy before
+planning and writing, and neither previews nor portable manifests contain the
+routing key. Backups, restore journals and native layout copies retaining these
+URLs receive the same checks, including permissions after a planned move. Keep
+full gateway URLs out of public logs and shared files.
+
+The gateway is an OAuth resource server and local authorization server. A
+request without a valid local token receives a Bearer challenge pointing to its
+protected-resource metadata. The client discovers the local authorization and
+token endpoints, registers a public client using DCR (`none` authentication),
+and uses an authorization-code flow with S256 PKCE. CIMD is not supported.
+The client manages this as ordinary HTTP MCP authorization; the gateway adds
+no synthetic authentication tool and does not require `elicitation.url`.
+
+The client first authorizes access to the selected local MCP resource. If the
+upstream also requires a new grant, agentcfg sends the browser to that provider
+and receives its separate callback before completing the local code flow.
+Local access and refresh tokens are distinct from provider tokens. Upstream
+tokens or literal configured Authorization headers are applied only to upstream
+requests; the client's local bearer token is not forwarded there. Even a public
+upstream requires local gateway authorization.
+
+Local codes are bound to the registered client, exact resource, redirect and
+PKCE challenge. Refresh tokens rotate; authenticated reuse revokes their grant
+family. The encrypted authorization store uses a separate namespace from
+upstream credentials. Changes to the upstream URL, headers or OAuth settings
+invalidate the resource identity used by existing local grants. Host and browser
+Origin checks apply to the loopback HTTP endpoints, and browser consent uses a
+cookie and CSRF token.
+
+When the provider requires additional scope, a new local grant replaces the old
+one. An existing legacy MCP session receives HTTP 404 and terminates; reconnect
+the client explicitly. The reconnect uses the new saved credentials without
+another provider consent, and an uncertain tool operation is not replayed.
+
+The proxy keeps each client's HTTP sessions separate. It forwards MCP bodies,
+including JSON/SSE responses and callback traffic, without broker JSON-RPC ID
+multiplexing or the shared broker's capability filtering. `sharing: shared`
+continues to control stdio broker connections; it does not combine gateway HTTP
+sessions. The native upstream configuration and its credential identity stay
+canonical under `~/.agentcfg/`.
+
+The gateway needs encrypted storage from startup, including for public
+upstreams: Windows uses per-user DPAPI; Linux/macOS require
+`AGENTCFG_OAUTH_KEY` or an injected secure store. The gateway always binds a
+literal loopback address. HTTPS can satisfy a client's HTTPS-issuer requirement
+when the client trusts the configured certificate. A successful SDK integration
+does not establish the OAuth interface or compatibility of a particular Cursor,
+OpenCode or other client release. Clients without compatible native HTTP OAuth
+can be excluded from `gateway.harnesses` and keep stdio with explicit
+`agentcfg auth login`, while selected clients continue using the gateway.
 
 ## Verification
 
@@ -255,11 +372,27 @@ malformed/oversized frames, initialize/session/header ordering, callback replies
 optional GET, JSON/SSE results, session expiration, redirect rejection and
 sanitized correlated errors.
 
-The OAuth integration opens a transport before login, verifies the unauthenticated
+Browser callback tests use an injected opener instead of launching a real browser.
+They verify listener availability before navigation, callback state/path/method,
+provider refusal, output failures, cancellation and port cleanup without terminal
+input. The OAuth integration opens a transport before login, verifies the unauthenticated
 error, then performs PKCE login and encrypted credential persistence against an
 SDK test server. It checks an authenticated tool call, rejection after logout and
 recovery after another login on that same transport, for legacy and stateless
 protocols with JSON and SSE responses.
+
+`TestNativeOAuthStandardSDKEndToEnd` connects a standard MCP SDK HTTP client to
+the real gateway and a local authorization provider. It exercises the local
+challenge, DCR, PKCE, separate provider callback and authenticated MCP traffic.
+The client-authority tests cover resource/client binding, consent forgery,
+code replay, refresh rotation, persistence and cancellation. These fixtures use
+temporary encrypted stores and no personal OAuth account or real browser.
+
+The separate opt-in `TestNativeOAuthBrowserNavigation` launches an explicitly
+supplied Chromium executable with a temporary profile. It submits the actual
+consent form, follows provider and client callbacks, and checks Origin, PKCE and
+zero CSP violations for initial login and cached provider authorization. This
+tests browser navigation, not the OAuth UI of a desktop MCP client.
 
 `AGENTCFG_TEST_NPX=1` explicitly enables the real npm integration. It downloads
 `@modelcontextprotocol/server-filesystem@2.2.0` into a temporary cache and requires

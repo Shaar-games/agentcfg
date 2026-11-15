@@ -51,8 +51,17 @@ Unix uses a same-filesystem atomic rename and a backup for rollback. Windows
 renames the old executable before installing the replacement, so an active
 agentcfg process can keep using its already-mapped image. If Windows cannot
 delete that backup while it remains in use, its path is printed for cleanup
-after the updater exits. Failure before replacement leaves the existing binary
-untouched; a failed installed-binary smoke test triggers restoration.
+after all processes using the previous executable have exited. Failure before
+replacement leaves the existing binary untouched; a failed installed-binary
+smoke test triggers restoration.
+
+Updating or reinstalling does not interrupt running services. Existing broker
+and gateway processes continue using the previous version. Restart a running
+gateway with `agentcfg gateway stop` followed by `agentcfg gateway start`, or
+restart the user service that runs `gateway run`. Calling `gateway start` alone
+reuses an already-running gateway. The global `agentcfg stop` stops both services:
+stdio clients can start a new broker when they reconnect, while HTTP clients need
+the gateway started explicitly again.
 
 **Checksum verification is not publisher authentication.** Since the checksum
 comes from the same GitHub Release as the binary, a compromised release could

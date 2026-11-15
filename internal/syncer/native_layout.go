@@ -24,7 +24,8 @@ type nativeLayoutEntry struct {
 }
 
 func layoutOptions(follow bool) fsstate.Options {
-	return fsstate.Options{FollowLinks: follow, Durable: true, MaxEntries: 100000, MaxBytes: 512 << 20, MaxFile: 64 << 20}
+	return fsstate.Options{FollowLinks: follow, Durable: true, MaxEntries: 100000, MaxBytes: 512 << 20, MaxFile: 64 << 20,
+		BeforeCopyFile: checkGatewayLayoutCopy}
 }
 
 func pathUnder(parent, path string) bool {
@@ -177,6 +178,9 @@ func MaterializeInitLinks(ctx context.Context, home string, harnesses []string, 
 			return err
 		}
 		entry.BaselineHash = snapshot.State
+		if err := checkGatewayLayoutMove(baseline, path, snapshot); err != nil {
+			return err
+		}
 		// Keep incomplete skill trees outside every native discovery root. The
 		// restore folder already shares the original entry's filesystem: the
 		// original must be movable here before this transaction can proceed.
@@ -238,19 +242,32 @@ func MaterializeInitLinks(ctx context.Context, home string, harnesses []string, 
 }
 
 func layoutEntryUnchanged(ctx context.Context, home, path, expected string) error {
-	if err := ensureNoSymlinkParents(home, filepath.Dir(path)); err != nil {
+	_, err := layoutEntrySnapshot(ctx, home, path, expected)
+	return err
+}
+
+func layoutMoveUnchanged(ctx context.Context, home, source, destination, expected string) error {
+	snapshot, err := layoutEntrySnapshot(ctx, home, source, expected)
+	if err != nil {
 		return err
+	}
+	return checkGatewayLayoutMove(source, destination, snapshot)
+}
+
+func layoutEntrySnapshot(ctx context.Context, home, path, expected string) (*fsstate.Snapshot, error) {
+	if err := ensureNoSymlinkParents(home, filepath.Dir(path)); err != nil {
+		return nil, err
 	}
 	options := layoutOptions(false)
 	options.Context = ctx
 	snapshot, err := fsstate.Capture(path, options)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if snapshot.State != expected {
-		return fmt.Errorf("native layout changed while waiting to rename: %s", path)
+		return nil, fmt.Errorf("native layout changed while waiting to rename: %s", path)
 	}
-	return nil
+	return snapshot, nil
 }
 
 // Keep both moves and their rollback on the same checked retry path. A busy
@@ -262,7 +279,7 @@ func swapPreparedLayout(ctx context.Context, home string, entry nativeLayoutEntr
 	}
 	staged := filepath.Join(home, filepath.FromSlash(entry.Staged))
 	checkOriginal := func() error {
-		if err := layoutEntryUnchanged(ctx, home, path, entry.OriginalHash); err != nil {
+		if err := layoutMoveUnchanged(ctx, home, path, original, entry.OriginalHash); err != nil {
 			return err
 		}
 		if err := layoutEntryUnchanged(ctx, home, baseline, entry.BaselineHash); err != nil {
@@ -281,7 +298,7 @@ func swapPreparedLayout(ctx context.Context, home string, entry nativeLayoutEntr
 		if expanded.Fingerprint != saved.Fingerprint {
 			return fmt.Errorf("native contents changed before detaching: %s", path)
 		}
-		return nil
+		return checkGatewayLayoutMove(baseline, path, saved)
 	}
 	if err := fsops.Rename(ctx, path, original, checkOriginal); err != nil {
 		return err
@@ -290,10 +307,12 @@ func swapPreparedLayout(ctx context.Context, home string, entry nativeLayoutEntr
 		if err := layoutEntryUnchanged(ctx, home, original, entry.OriginalHash); err != nil {
 			return err
 		}
-		return layoutEntryUnchanged(ctx, home, staged, entry.BaselineHash)
+		return layoutMoveUnchanged(ctx, home, staged, path, entry.BaselineHash)
 	}
 	if err := fsops.Rename(ctx, staged, path, checkStage); err != nil {
-		undoErr := fsops.Rename(context.Background(), original, path, func() error { return layoutEntryUnchanged(context.Background(), home, original, entry.OriginalHash) })
+		undoErr := fsops.Rename(context.Background(), original, path, func() error {
+			return layoutMoveUnchanged(context.Background(), home, original, path, entry.OriginalHash)
+		})
 		return errors.Join(err, undoErr)
 	}
 	return nil
@@ -446,7 +465,7 @@ func restoreNativeLayoutWithRename(home string, point initRestorePoint, rename f
 	// editing a descendant does not necessarily change its root directory mtime.
 	renameLayout := func(source, destination, expected string) error {
 		return rename(context.Background(), source, destination, func() error {
-			return layoutEntryUnchanged(context.Background(), home, source, expected)
+			return layoutMoveUnchanged(context.Background(), home, source, destination, expected)
 		})
 	}
 	var undos []func() error

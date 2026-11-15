@@ -10,6 +10,8 @@ Go CLI for local MCP process sharing and declarative harness/skill configuration
 - Never modify live user harness configs in tests; use temporary directories.
 - Keep stdout clean for MCP stdio; diagnostics go to stderr.
 - Preserve unrelated config keys and user-modified managed entries.
-- No listening TCP/HTTP server. Use Unix sockets and Windows named pipes.
+- Broker control and stdio sharing use Unix sockets and Windows named pipes.
+- The opt-in native OAuth gateway and temporary OAuth callbacks may listen only
+  on loopback. Never expose the gateway or broker on a public/network interface.
 - Run `go test ./...` and `go vet ./...` before considering a change verified.
 - Bidirectional import/sync is deferred; do not silently overwrite manual edits.

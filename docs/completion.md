@@ -113,6 +113,12 @@ such as `config`, `init`, `harness`/`harnesses`,
 `skill`/`skills` and `mcp`/`mcps`, as well as supported flags
 after a subcommand.
 
+The `gateway` command offers `start`, `run`, `stop`, `status` and `url`, with
+the `--server` and `--harness` options used by `gateway url`. Server names remain
+literal input: completion does not read credentials, contact upstreams or start
+the gateway. Regenerate or reload an installed completion script after upgrading
+to receive newly added commands.
+
 If Tab does not suggest completions, check that `agentcfg` resolves to the
 installed executable, the generated script has been loaded in the active
 shell and (for Zsh) `compinit` ran first.
