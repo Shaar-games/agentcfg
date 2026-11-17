@@ -29,6 +29,12 @@ type Options struct {
 	Store                    Store
 	HTTPClient               *http.Client
 	AuthorizationCodeFetcher sdkauth.AuthorizationCodeFetcher
+	// AuthorizationAvailable lets a broker relay report whether any attached
+	// client explicitly permits browser consent. Nil means the supplied fetcher
+	// is available. Checking this before discovery avoids implicit DCR in manual
+	// mode while allowing an opted-in client to join an existing backend later.
+	AuthorizationAvailable func() bool
+	requiredScopes         []string
 }
 
 // CredentialKey separates server instances, resource URLs, accounts and OAuth
@@ -79,7 +85,7 @@ func newHandler(ctx context.Context, server config.Server, opts Options, useCach
 	if record != nil {
 		scopes.set(record.Scopes)
 	}
-	h := &handler{interactive: opts.AuthorizationCodeFetcher != nil, flow: make(chan struct{}, 1)}
+	h := &handler{interactive: opts.AuthorizationCodeFetcher != nil, flow: make(chan struct{}, 1), store: store, locker: locker, key: key}
 	fetcher := func(ctx context.Context, args *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
 		if opts.AuthorizationCodeFetcher == nil {
 			return nil, ErrLoginRequired
@@ -112,9 +118,9 @@ func newHandler(ctx context.Context, server config.Server, opts Options, useCach
 				// Explicit scopes narrow metadata defaults, but a server challenge
 				// describes the permissions required for this operation. Dropping
 				// those scopes makes initial consent and later step-up fail forever.
-				return unionScopes(server.OAuth.Scopes, scopes.get(), h.challengeScopes)
+				return unionScopes(server.OAuth.Scopes, scopes.get(), h.challengeScopes, opts.requiredScopes)
 			}
-			return unionScopes(server.OAuth.Scopes, scopes.get(), discovered)
+			return unionScopes(server.OAuth.Scopes, scopes.get(), discovered, opts.requiredScopes)
 		},
 		NewTokenSource: func(tokenContext context.Context, cfg *oauth2.Config, token *oauth2.Token) (oauth2.TokenSource, error) {
 			if cfg == nil || token == nil || token.AccessToken == "" {
@@ -138,7 +144,9 @@ func newHandler(ctx context.Context, server config.Server, opts Options, useCach
 			return managedTokenSource(tokenContext, store, locker, key, scopes, server.OAuth), nil
 		},
 	}
-	if err = registration(sdkConfig, server.OAuth); err != nil {
+	registrationPolicy := *server.OAuth
+	registrationPolicy.Scopes = unionScopes(server.OAuth.Scopes, opts.requiredScopes)
+	if err = registration(sdkConfig, &registrationPolicy); err != nil {
 		return nil, err
 	}
 	// A broker may start before the separate login command has saved its
@@ -236,6 +244,9 @@ func resolveStore(opts Options) (Store, Locker, error) {
 
 type handler struct {
 	sdk                   *sdkauth.AuthorizationCodeHandler
+	store                 Store
+	locker                Locker
+	key                   string
 	interactive           bool
 	flow                  chan struct{}
 	persisted             atomic.Bool
@@ -258,6 +269,15 @@ func (h *handler) Authorize(ctx context.Context, request *http.Request, response
 		}
 		return fmt.Errorf("OAuth authorization requires an HTTP challenge")
 	}
+	required, err := requestedAuthorizationScopes(response)
+	if err != nil {
+		_ = response.Body.Close()
+		return err
+	}
+	if err := noteAuthorizationChallenge(ctx, h.store, h.locker, h.key, request.Header.Get("Authorization"), required); err != nil {
+		_ = response.Body.Close()
+		return err
+	}
 	if !h.interactive {
 		_ = response.Body.Close()
 		return ErrLoginRequired
@@ -269,19 +289,8 @@ func (h *handler) Authorize(ctx context.Context, request *http.Request, response
 		_ = response.Body.Close()
 		return ctx.Err()
 	}
-	challenges, err := oauthex.ParseWWWAuthenticate(response.Header.Values("WWW-Authenticate"))
-	if err != nil {
-		_ = response.Body.Close()
-		return safeError("parse OAuth challenge", err)
-	}
-	h.challengeScopes = nil
+	h.challengeScopes = required
 	defer func() { h.challengeScopes = nil }()
-	for _, challenge := range challenges {
-		if challenge.Scheme == "bearer" && challenge.Params["scope"] != "" {
-			h.challengeScopes = strings.Fields(challenge.Params["scope"])
-			break
-		}
-	}
 	if err := h.sdk.Authorize(ctx, request, response); err != nil {
 		if errors.Is(err, ErrLoginRequired) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
@@ -289,6 +298,36 @@ func (h *handler) Authorize(ctx context.Context, request *http.Request, response
 		return safeError("OAuth authorization", err)
 	}
 	return nil
+}
+
+// Returning nil authorizes the SDK to repeat the failed HTTP request. Ordinary
+// 403 responses must stop here: only Bearer insufficient_scope requests consent.
+func requestedAuthorizationScopes(response *http.Response) ([]string, error) {
+	challenges, err := oauthex.ParseWWWAuthenticate(response.Header.Values("WWW-Authenticate"))
+	if err != nil {
+		return nil, safeError("parse OAuth challenge", err)
+	}
+	var rawScopes, challengeError string
+	for _, challenge := range challenges {
+		if strings.EqualFold(challenge.Scheme, "bearer") {
+			// Match the SDK's selection of the first Bearer scope and error.
+			// Other challenges may describe alternative protection spaces.
+			if rawScopes == "" {
+				rawScopes = challenge.Params["scope"]
+			}
+			if challengeError == "" {
+				challengeError = challenge.Params["error"]
+			}
+		}
+	}
+	if response.StatusCode == http.StatusForbidden && challengeError != "insufficient_scope" {
+		return nil, ErrAccessDenied
+	}
+	scopes := strings.Fields(rawScopes)
+	if !validAuthorizationScopes(scopes) {
+		return nil, fmt.Errorf("OAuth challenge contains invalid scope tokens")
+	}
+	return scopes, nil
 }
 
 type operationError struct {

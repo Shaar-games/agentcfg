@@ -22,10 +22,12 @@ same Huh interface:
 
 Configuration and `agentcfg list` share the same six overview entries:
 **Harnesses**, **MCP servers**, **Skills**, **Agent Plugins**, **Refresh** and
-**Exit**. The four categories show aligned numeric counts only; Harnesses counts
+**Exit**. The four categories show aligned numeric counts; Harnesses counts
 the currently enabled harnesses. Refresh reloads the inventory without writing
 configuration. Skill rows show enabled-harness counts; plugin rows show
-MCP / skill counts, with warnings retained for invalid plugins.
+MCP / skill counts, with warnings retained for invalid plugins. The overview
+also reports how many MCP servers need a login. MCP rows and details show local
+authentication status and the relevant login command.
 
 Diagnostics and synchronization are not overview menu entries. Use
 `agentcfg status`, `agentcfg validate` and `agentcfg sync` for those operations.
@@ -115,9 +117,9 @@ option name, without printing their values.
 Init preserves an explicitly configured `cwd` and does not add the home directory
 when it is absent. Without an explicit `cwd`, a stdio MCP uses the connecting
 harness's working directory. Sharing applies to clients with the same effective
-working directory. After upgrading from an older broker protocol, run
-`agentcfg stop` before reconnecting; status and stop remain compatible with the
-older broker.
+working directory. This version uses broker IPC v4. After upgrading from an
+older broker protocol, run `agentcfg stop`, then reconnect the MCP clients so
+the new broker starts. Status and stop remain compatible with the older broker.
 
 Unsupported active MCP definitions, unreadable/nonportable skills and ambiguous
 names block initialization before canonical publication; `init --plain` shows
@@ -134,6 +136,70 @@ manual edits remain conflicts, rather than being silently overwritten.
 For an earlier canonical-only initialization, run `agentcfg restore` before
 initializing again. Restoration preserves the old canonical data in an archive.
 
+## OAuth login and connection policy
+
+The default is an explicit login before using an HTTP MCP that requires OAuth:
+
+```sh
+agentcfg auth login <name>
+agentcfg auth login <name> --no-browser   # Open the displayed URL yourself
+agentcfg auth status <name> --json
+agentcfg auth logout <name>
+```
+
+Use the canonical name shown by `agentcfg list`. A URL-only HTTP definition can
+discover OAuth and register a client when the provider supports it; no `oauth`
+block needs to be added to `mcp.json`. Providers requiring a preregistered client
+use the [per-server OAuth settings](configuration.md#oauth-for-http-mcp-servers).
+Login stores the grant encrypted and verifies MCP initialization. Reconnect a
+client that stopped after the earlier login-required error. Logout deletes the
+local grant; it does not revoke the provider's tokens.
+
+Automatic browser login is an opt-in for `connect`:
+
+```sh
+agentcfg connect --server <name> --auto-auth
+agentcfg connect --server <name> --auto-auth=false
+```
+
+An explicit flag wins over `oauth.autoOpenBrowser` in
+`~/.agentcfg/agentcfg.json`, whose default is `false`. Setting it to `true`
+enables browser login for connections without an explicit flag, including the
+stdio proxies generated for harnesses. `--auto-auth=false` keeps one connection
+manual even when that global setting is enabled.
+
+With automatic login enabled, a required authorization opens the browser and
+keeps initialization pending until consent, token storage and the real upstream
+initialization complete. Existing credentials and refresh tokens are reused.
+The wait remains bounded by agentcfg's request deadlines and the MCP client's
+own startup/request timeout. If the client stops waiting, use `auth login`
+first and reconnect. Automatic login requires an available loopback HTTP callback;
+custom callbacks that need pasted input use the manual command.
+
+The MCP connection stays on stdio through the private broker connection. Browser
+messages go to stderr, and the temporary OAuth callback closes when sign-in ends.
+An interrupted tool operation is not automatically replayed after a new login.
+
+### Local authentication status
+
+`list`, `mcps`, `status`, `auth status` and the TUI show local authentication
+state. `validate` and `sync` also surface login and credential-storage notices;
+authentication does not replace their configuration and synchronization checks.
+`status --json` and `auth status --json` include an `authentication` field.
+
+| State | Meaning |
+| --- | --- |
+| `login required` | Local evidence shows that a new login is needed; the command is displayed. |
+| `credentials saved` | An unexpired access token is stored; the server has not been contacted to verify it. |
+| `refresh available` | A stored refresh token can be tried on the next connection. |
+| `auth unknown` | No OAuth requirement has been recorded for this URL-only server. |
+| `credential store unavailable` / `credential status unavailable` | The local cache cannot be inspected; this does not establish that a public MCP requires login. |
+
+These inspections do not start an MCP, open a browser, refresh credentials or
+contact a provider. An ordinary access-denied response remains distinct from a
+request for login or additional scopes. Tokens and provider callback URLs are
+not included in these status fields.
+
 ## Shell completion
 
 `agentcfg completion <shell>` prints a completion script for Bash, Zsh, Fish,
@@ -144,8 +210,7 @@ persistently.
 
 ## Other useful commands
 
-`agentcfg auth login <server>` explicitly starts an OAuth authorization
-flow. `agentcfg status` inspects the broker without starting it;
+`agentcfg status` inspects the broker without starting it;
 `agentcfg stop` stops a running broker. `agentcfg update` updates the
 executable, while `agentcfg version` prints the current version.
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,6 +21,11 @@ func TestPrivateIPCExchange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	testPrivateIPCExchange(t, endpoint)
+}
+
+func testPrivateIPCExchange(t *testing.T, endpoint Endpoint) {
+	t.Helper()
 	if err := endpoint.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -74,5 +81,33 @@ func TestPrivateIPCExchange(t *testing.T) {
 		if info.Mode().Perm() != 0o600 {
 			t.Fatal("socket is not private")
 		}
+	}
+}
+
+func TestSocketAddressPreservesValidLegacyPaths(t *testing.T) {
+	for _, limit := range []int{103, 107} {
+		for _, extra := range []int{-1, 0, 1, 10, 11} {
+			directory := string(filepath.Separator) + strings.Repeat("d", limit+extra-len("/broker.sock")-1)
+			address, err := socketAddress(directory, limit)
+			if extra > 10 {
+				if err == nil || address != "" || !strings.Contains(err.Error(), "TMPDIR") {
+					t.Fatalf("limit=%d extra=%d: unusable path accepted: %q %v", limit, extra, address, err)
+				}
+				continue
+			}
+			want := "broker.sock"
+			if extra > 0 {
+				want = "s"
+			}
+			if err != nil || filepath.Dir(address) != directory || filepath.Base(address) != want || len(address) > limit {
+				t.Fatalf("limit=%d extra=%d: wrong private endpoint: %q %v", limit, extra, address, err)
+			}
+		}
+	}
+	// Limits count UTF-8 bytes, not visible characters.
+	directory := string(filepath.Separator) + strings.Repeat("é", 47)
+	address, err := socketAddress(directory, 103)
+	if err != nil || filepath.Base(address) != "s" {
+		t.Fatalf("Unicode path exceeded its byte budget: %q %v", address, err)
 	}
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"io"
 	"os"
 	"runtime"
 	"strconv"
@@ -127,7 +128,7 @@ func navigationPlainMode() bool {
 	return runtime.GOOS != "windows" && strings.EqualFold(os.Getenv("TERM"), "dumb")
 }
 
-func (s interfaceSession) navigationSelect(field *huh.Select[string], options []huh.Option[string]) huh.Field {
+func (s interfaceSession) navigationSelect(field *huh.Select[string], options []huh.Option[string]) *navigationField {
 	view := &navigationField{Select: field, options: options}
 	if s.navigationSupportsColor() {
 		view.renderer = lipgloss.NewRenderer(s.out)
@@ -140,10 +141,28 @@ func (s interfaceSession) navigationSelect(field *huh.Select[string], options []
 // or part of a search label, and accessible prompts retain native numbering.
 type navigationField struct {
 	*huh.Select[string]
-	options    []huh.Option[string]
-	renderer   *lipgloss.Renderer
-	optionRows int
-	bodyOffset int
+	options     []huh.Option[string]
+	renderer    *lipgloss.Renderer
+	optionRows  int
+	bodyOffset  int
+	title       string
+	description string
+}
+
+func (s *navigationField) RunAccessible(w io.Writer, r io.Reader) error {
+	// Huh's numbered Select omits Description. Keep the same context and login
+	// instructions visible when output is redirected or accessibility is enabled.
+	if s.description != "" {
+		s.Select.Title(s.title + "\n" + s.description)
+		defer s.Select.Title(s.title)
+	}
+	return s.Select.RunAccessible(w, r)
+}
+
+func (s *navigationField) WithAccessible(accessible bool) huh.Field {
+	// Huh invokes RunAccessible on this setter's return value.
+	s.Select.WithAccessible(accessible)
+	return s
 }
 
 func (s *navigationField) hasBottomAction() bool {
@@ -295,7 +314,7 @@ func (s *navigationField) renderOptionLabel(option huh.Option[string]) string {
 			switch strings.TrimSpace(strings.ToLower(cell)) {
 			case "shared", "enabled":
 				color = navActionColor
-			case "isolated", "warning", "disabled", "adapter unavailable":
+			case "isolated", "warning", "disabled", "adapter unavailable", "login required", "credential store unavailable", "credential status unavailable":
 				color = navWarnColor
 			default:
 				color = navInfoColor

@@ -12,6 +12,18 @@ import (
 	"agentcfg/internal/auth"
 )
 
+// Only local typed OAuth failures receive a concrete login command. A remote
+// JSON-RPC message that happens to mention login remains untouched.
+type serverLoginRequired struct {
+	server string
+	cause  error
+}
+
+func (e *serverLoginRequired) Error() string {
+	return "OAuth login required; run " + auth.LoginCommandFor(e.server) + " and retry the MCP operation"
+}
+func (e *serverLoginRequired) Unwrap() error { return e.cause }
+
 // SDK and network error text can contain URLs, credentials, certificates or
 // response bytes. Classify only typed causes and numeric status codes, and
 // expose fixed messages. Each sdkExchangeError belongs to a single POST.
@@ -29,6 +41,9 @@ func requestError(ctx context.Context, cause error) error {
 	}
 	if errors.Is(cause, auth.ErrLoginRequired) {
 		return auth.ErrLoginRequired
+	}
+	if errors.Is(cause, auth.ErrAccessDenied) {
+		return auth.ErrAccessDenied
 	}
 
 	var oauth *oauthRequestError

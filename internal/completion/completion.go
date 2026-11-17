@@ -30,7 +30,7 @@ var options = map[string][]string{
 	"validate":   {"--plain", "--help"},
 	"sync":       {"--apply", "--dry-run", "--yes", "--skill-mode", "--binary", "--plain", "--help"},
 	"stop":       {"--yes", "--plain", "--help"},
-	"connect":    {"--server", "--harness", "--help"},
+	"connect":    {"--server", "--harness", "--auto-auth", "--auto-auth=false", "--help"},
 	"auth":       {"login", "status", "logout"},
 	"completion": {"bash", "zsh", "fish", "powershell", "pwsh"},
 	"update":     {"--help"},

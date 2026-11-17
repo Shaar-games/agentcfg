@@ -15,6 +15,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const maxUnixSocketPath = 0 // Windows uses named pipes; this limit is unused.
+
 func userSecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
 	current, err := user.Current()
 	if err != nil {

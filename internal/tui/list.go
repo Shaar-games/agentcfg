@@ -27,7 +27,11 @@ func RunList(ctx context.Context, root string, input io.Reader, output io.Writer
 			return err
 		}
 		choices := overviewNavigationOptions(cfg, len(discoverPlugins(root, cfg)))
-		category, err := s.selectAction("agentcfg  ·  Inventory", "", choices...)
+		authentication, err := s.authenticationSummaries(cfg)
+		if err != nil {
+			return err
+		}
+		category, err := s.selectAction("agentcfg  ·  Inventory", authenticationNotice(authentication), choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -106,15 +110,19 @@ func (s interfaceSession) listMCP(cfg *config.Config) error {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	rows := make([]navigationStatus, 0, len(names))
-	for _, name := range names {
-		server := cfg.Servers[name]
-		rows = append(rows, navigationStatus{title: safeHuhText(name), columns: []string{server.Type, sharing(server)}, id: navigationItemValue(name)})
-	}
-	choices := statusNavigationOptions(rows)
-	choices = append(choices, huh.NewOption("Back", "back"))
 	for {
-		choice, err := s.selectAction("MCP servers", "Transport and sharing mode for each MCP server.", choices...)
+		authentication, err := s.authenticationSummaries(cfg)
+		if err != nil {
+			return err
+		}
+		rows := make([]navigationStatus, 0, len(names))
+		for _, name := range names {
+			server := cfg.Servers[name]
+			rows = append(rows, navigationStatus{title: safeHuhText(name), columns: []string{server.Type, sharing(server), authentication[name].Label}, id: navigationItemValue(name)})
+		}
+		choices := statusNavigationOptions(rows)
+		choices = append(choices, huh.NewOption("Back", "back"))
+		choice, err := s.selectAction("MCP servers", "Authentication status and login commands are shown in each server's details.", choices...)
 		if isCancelled(err) || choice == "back" || choice == "" {
 			return nil
 		}
@@ -133,6 +141,9 @@ func (s interfaceSession) listMCP(cfg *config.Config) error {
 			}
 		}
 		info := fmt.Sprintf("Transport: %s\nSharing: %s\nEnabled harnesses: %s\nSource: %s", server.Type, sharing(server), strings.Join(enabled, ", "), server.Source)
+		if status := authenticationDetails(authentication[name]); status != "" {
+			info += "\n" + status
+		}
 		if server.Type == "stdio" {
 			info += "\nCommand: " + server.Command
 		} else {

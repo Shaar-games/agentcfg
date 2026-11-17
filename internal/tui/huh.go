@@ -417,7 +417,9 @@ func (s interfaceSession) selectAction(title, description string, choices ...huh
 		Description(description).
 		Options(choices...).
 		Value(&selected)
-	err := s.form(s.navigationSelect(field, choices))
+	navigation := s.navigationSelect(field, choices)
+	navigation.title, navigation.description = title, description
+	err := s.form(navigation)
 	return selected, err
 }
 
@@ -511,7 +513,11 @@ func RunMenu(ctx context.Context, root string, input io.Reader, output io.Writer
 			}
 			return err
 		}
-		choice, err := s.selectAction("agentcfg  ·  Configuration", "",
+		authentication, err := s.authenticationSummaries(cfg)
+		if err != nil {
+			return err
+		}
+		choice, err := s.selectAction("agentcfg  ·  Configuration", authenticationNotice(authentication),
 			overviewNavigationOptions(cfg, len(discoverPlugins(root, cfg)))...)
 		if isCancelled(err) {
 			return nil
@@ -597,13 +603,17 @@ func (s interfaceSession) configureMCP() error {
 			names = append(names, name)
 		}
 		sort.Strings(names)
+		authentication, err := s.authenticationSummaries(cfg)
+		if err != nil {
+			return err
+		}
 		rows := make([]navigationStatus, 0, len(names))
 		for _, name := range names {
-			rows = append(rows, navigationStatus{title: safeHuhText(name), columns: []string{cfg.Servers[name].Type, sharing(cfg.Servers[name])}, id: navigationItemValue(name)})
+			rows = append(rows, navigationStatus{title: safeHuhText(name), columns: []string{cfg.Servers[name].Type, sharing(cfg.Servers[name]), authentication[name].Label}, id: navigationItemValue(name)})
 		}
 		choices := statusNavigationOptions(rows)
 		choices = append(choices, huh.NewOption("Back", "back"))
-		name, err := s.selectAction("MCP servers", "", choices...)
+		name, err := s.selectAction("MCP servers", "Authentication status and login commands are shown in each server's details.", choices...)
 		if isCancelled(err) {
 			return nil
 		}
@@ -618,7 +628,11 @@ func (s interfaceSession) configureMCP() error {
 			return fmt.Errorf("unexpected MCP selection")
 		}
 		server := cfg.Servers[name]
-		choice, err := s.selectAction(name, fmt.Sprintf("Transport: %s  ·  Sharing: %s", server.Type, sharing(server)),
+		description := fmt.Sprintf("Transport: %s  ·  Sharing: %s", server.Type, sharing(server))
+		if details := authenticationDetails(authentication[name]); details != "" {
+			description += "\n" + details
+		}
+		choice, err := s.selectAction(name, description,
 			huh.NewOption("Harness availability", "availability"),
 			huh.NewOption("Change sharing mode", "sharing"),
 			huh.NewOption("Show transport and routing details", "details"),
@@ -652,7 +666,12 @@ func (s interfaceSession) configureMCP() error {
 			if len(endpoint) > 200 {
 				endpoint = endpoint[:200] + "…"
 			}
-			if err := s.note("MCP details", fmt.Sprintf("Name: %s\nTransport: %s\nSharing: %s\nEndpoint/command: %s\nEnabled harnesses: %s\n\nThe broker starts only when a client connects.", name, server.Type, sharing(server), endpoint, strings.Join(allowed, ", "))); err != nil {
+			details := fmt.Sprintf("Name: %s\nTransport: %s\nSharing: %s\nEndpoint/command: %s\nEnabled harnesses: %s", name, server.Type, sharing(server), endpoint, strings.Join(allowed, ", "))
+			if status := authenticationDetails(authentication[name]); status != "" {
+				details += "\n" + status
+			}
+			details += "\n\nThe broker starts only when a client connects."
+			if err := s.note("MCP details", details); err != nil {
 				return err
 			}
 		}

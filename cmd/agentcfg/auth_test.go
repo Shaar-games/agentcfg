@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func TestOAuthStatusJSONWinsOverInteractivePresentation(t *testing.T) {
 	var output bytes.Buffer
 	state := auth.Status{Enabled: true, Account: "fixture", Scopes: []string{"read"}}
 	// No input is supplied: --json must never start a form or await a key.
-	if err := presentAuthStatus(context.Background(), nil, &output, "fixture", state, true, true); err != nil {
+	if err := presentAuthStatus(context.Background(), nil, &output, "fixture", state, auth.Summary{}, true, true); err != nil {
 		t.Fatal(err)
 	}
 	if !json.Valid(output.Bytes()) || strings.Contains(output.String(), "\x1b[") {
@@ -58,7 +59,7 @@ func TestOAuthStatusJSONWinsOverInteractivePresentation(t *testing.T) {
 
 func TestOAuthStatusPropagatesOutputFailure(t *testing.T) {
 	for _, asJSON := range []bool{false, true} {
-		err := presentAuthStatus(context.Background(), nil, failingOutput{}, "fixture", auth.Status{}, false, asJSON)
+		err := presentAuthStatus(context.Background(), nil, failingOutput{}, "fixture", auth.Status{}, auth.Summary{}, false, asJSON)
 		if !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatalf("asJSON=%t swallowed output error: %v", asJSON, err)
 		}
@@ -83,6 +84,51 @@ func TestOAuthManualInputIsBoundedAndOutputFailureStopsBeforeReading(t *testing.
 	}
 	if input.Len() != before {
 		t.Fatal("authorization read input after failing to display its instructions")
+	}
+}
+
+type signaledOAuthInput struct {
+	io.ReadCloser
+	started chan struct{}
+	once    sync.Once
+}
+
+func (r *signaledOAuthInput) Read(data []byte) (int, error) {
+	r.once.Do(func() { close(r.started) })
+	return r.ReadCloser.Read(data)
+}
+
+func TestOAuthManualInputCancellationReleasesBlockedPipe(t *testing.T) {
+	input, writer := io.Pipe()
+	defer input.Close()
+	defer writer.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	reader := &signaledOAuthInput{ReadCloser: input, started: make(chan struct{})}
+	fetcher := authorizationCodeFetcher("https://example.org/callback", reader, io.Discard, true)
+	done := make(chan error, 1)
+	go func() {
+		_, err := fetcher(ctx, &sdkauth.AuthorizationArgs{URL: "https://issuer.example/authorize?state=fixture"})
+		done <- err
+	}()
+	select {
+	case <-reader.started:
+	case err := <-done:
+		t.Fatalf("manual callback ended before reading: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual callback did not start reading")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("manual cancellation was lost: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual callback remained blocked after cancellation")
+	}
+	if _, err := writer.Write([]byte("late callback\n")); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("manual callback input was not released: %v", err)
 	}
 }
 
