@@ -44,11 +44,29 @@ func ForRoot(root string) (Endpoint, error) {
 	if runtime.GOOS == "windows" {
 		address = `\\.\pipe\agentcfg-` + hash
 	} else if len(address) > 100 {
-		// sockaddr_un is limited to roughly 104 bytes on macOS.
+		// Keep the established cache/fallback choice so existing brokers remain
+		// reachable. TMPDIR itself can be long on macOS; bound that path too.
 		dir = filepath.Join(os.TempDir(), "agentcfg-"+hash)
-		address = filepath.Join(dir, "broker.sock")
+		address, err = socketAddress(dir, maxUnixSocketPath)
+		if err != nil {
+			return Endpoint{}, err
+		}
 	}
 	return Endpoint{Directory: dir, Address: address}, nil
+}
+
+func socketAddress(directory string, limit int) (string, error) {
+	address := filepath.Join(directory, "broker.sock")
+	if len(address) <= limit {
+		return address, nil
+	}
+	// Only an unusable legacy address changes. Retain the private directory,
+	// full user/root identity and broker lifetime lock, even with a short name.
+	address = filepath.Join(directory, "s")
+	if len(address) > limit {
+		return "", fmt.Errorf("temporary IPC path exceeds the Unix socket limit of %d bytes; set TMPDIR to a shorter directory", limit)
+	}
+	return address, nil
 }
 
 func (e Endpoint) Prepare() error {

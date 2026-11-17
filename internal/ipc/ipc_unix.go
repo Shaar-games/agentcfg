@@ -11,6 +11,9 @@ import (
 	"syscall"
 )
 
+// Reserve the terminating NUL: Darwin/BSD allow 103 path bytes, Linux 107.
+const maxUnixSocketPath = len(syscall.RawSockaddrUnix{}.Path) - 1
+
 func secureDirectory(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {

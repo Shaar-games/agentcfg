@@ -299,9 +299,8 @@ func oauthStdioHome(t *testing.T, endpoint, sharing string, headers map[string]s
 	if _, err := os.Lstat(ipcEndpoint.Directory); !os.IsNotExist(err) {
 		t.Fatalf("test IPC directory already exists or cannot be inspected: %v", err)
 	}
-	// A long TMPDIR can require a further fallback outside socketTemp. The
-	// endpoint belongs to this test's unique root; Serve's later cleanup runs
-	// first, so its socket and lock are closed before this directory is removed.
+	// The endpoint stays in this test's cache or temporary directory. Serve's
+	// later cleanup runs first, closing its socket and lock before removal.
 	t.Cleanup(func() {
 		if err := os.RemoveAll(ipcEndpoint.Directory); err != nil {
 			t.Error(err)
