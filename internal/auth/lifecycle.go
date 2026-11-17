@@ -24,6 +24,11 @@ type Status struct {
 	Account       string
 	Expiry        time.Time
 	Scopes        []string
+	// AuthorizationObserved records an actual OAuth challenge or saved grant,
+	// never a prediction based only on an HTTP URL.
+	AuthorizationObserved bool
+	LoginRequired         bool
+	RequiredScopes        []string
 }
 
 // Inspect does no networking, refresh, directory creation or login.
@@ -40,18 +45,28 @@ func Inspect(ctx context.Context, server config.Server, opts Options) (Status, e
 	if err != nil {
 		return result, err
 	}
-	record, err := loadRecord(ctx, store, CredentialKey(server))
-	if errors.Is(err, ErrNotFound) {
-		return result, nil
+	key := CredentialKey(server)
+	record, err := loadRecord(ctx, store, key)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return result, err
 	}
+	requirement, err := loadAuthorizationRequirement(ctx, store, key)
 	if err != nil {
 		return result, err
 	}
-	result.Stored = true
-	result.Authenticated = !record.RefreshInProgress && record.Token.Valid()
-	result.CanRefresh = !record.RefreshInProgress && record.Token.RefreshToken != ""
-	result.Expiry = record.Token.Expiry
-	result.Scopes = append([]string(nil), record.Scopes...)
+	result.AuthorizationObserved = record != nil || requirement != nil
+	if record != nil {
+		result.Stored = true
+		result.Authenticated = !record.RefreshInProgress && record.Token.Valid()
+		result.CanRefresh = !record.RefreshInProgress && record.Token.RefreshToken != ""
+		result.Expiry = record.Token.Expiry
+		result.Scopes = append([]string(nil), record.Scopes...)
+		result.LoginRequired = !result.Authenticated && !result.CanRefresh
+	}
+	if requirementApplies(requirement, record) || record == nil && requirement != nil {
+		result.LoginRequired = true
+		result.RequiredScopes = append([]string(nil), requirement.Scopes...)
+	}
 	return result, nil
 }
 
@@ -84,7 +99,14 @@ func Logout(ctx context.Context, server config.Server, opts Options) error {
 		return err
 	}
 	defer unlock()
-	return store.Delete(ctx, key)
+	if err := store.Delete(ctx, key); err != nil {
+		return err
+	}
+	// Remember only that this resource has required OAuth. Tokens, client
+	// secrets and granted scopes are removed; the next inspection stays local.
+	return saveAuthorizationRequirement(ctx, store, &authorizationRequirement{
+		Version: 1, Identity: key, Required: true,
+	})
 }
 
 // Login initializes a real MCP connection through the official SDK. It succeeds
@@ -94,6 +116,28 @@ func Logout(ctx context.Context, server config.Server, opts Options) error {
 func Login(ctx context.Context, server config.Server, opts Options) error {
 	if opts.AuthorizationCodeFetcher == nil {
 		return ErrLoginRequired
+	}
+	if err := validateServer(server); err != nil {
+		return err
+	}
+	store, _, err := resolveStore(opts)
+	if err != nil {
+		return err
+	}
+	opts.Store = store
+	key := CredentialKey(server)
+	record, err := loadRecord(ctx, store, key)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	requirement, err := loadAuthorizationRequirement(ctx, store, key)
+	if err != nil {
+		return err
+	}
+	if requirementApplies(requirement, record) {
+		// A tools/call scope challenge must survive a separate manual login,
+		// whose initialize request may require fewer scopes than the failed tool.
+		opts.requiredScopes = unionScopes(opts.requiredScopes, requirement.Scopes)
 	}
 	// Explicit login starts a fresh authorization, retaining the existing
 	// encrypted record until a replacement grant has been safely persisted.
@@ -122,6 +166,9 @@ func Login(ctx context.Context, server config.Server, opts Options) error {
 	}
 	if !h.(*handler).persisted.Load() || !status.Stored {
 		return fmt.Errorf("server completed MCP initialization without a new OAuth grant; no new login was recorded")
+	}
+	if status.LoginRequired {
+		return fmt.Errorf("OAuth authorization did not grant the required permissions: %w", ErrLoginRequired)
 	}
 	if closeErr != nil {
 		return safeError("close OAuth MCP login session", closeErr)

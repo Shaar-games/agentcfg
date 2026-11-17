@@ -36,7 +36,14 @@ type Skill struct {
 type Settings struct {
 	Harnesses       []string            `json:"harnesses"`
 	Runtime         Runtime             `json:"runtime,omitempty"`
+	OAuth           OAuthSettings       `json:"oauth,omitempty"`
 	ServerOverrides map[string]Override `json:"serverOverrides,omitempty"`
+}
+
+// OAuthSettings controls interaction by the stdio proxy, independently of each
+// server's OAuth client settings. Browser authorization is opt-in.
+type OAuthSettings struct {
+	AutoOpenBrowser bool `json:"autoOpenBrowser,omitempty"`
 }
 
 type Runtime struct {

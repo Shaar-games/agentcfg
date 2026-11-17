@@ -128,15 +128,7 @@ Use agentcfg <command> --help for options.`)
 	case "sync":
 		return synchronize(ctx, flags, root, args[1:], input, output, diagnostics)
 	case "connect":
-		name := flags.String("server", "", "canonical MCP server identifier")
-		harness := flags.String("harness", "", "calling harness (for filtering)")
-		if err := parse(flags, args[1:]); err != nil {
-			return helpResult(err)
-		}
-		if *name == "" {
-			return errors.New("connect requires --server")
-		}
-		return broker.Connect(ctx, *root, *name, *harness, input, output)
+		return runConnect(ctx, *root, args[1:], input, output, diagnostics, openBrowser)
 	case "daemon", "status", "stop", "list", "validate":
 		plain := flags.Bool("plain", false, "plain output without Huh terminal forms")
 		var asJSON, yes *bool
@@ -186,6 +178,11 @@ func runCategory(ctx context.Context, category string, flags *flag.FlagSet, home
 			fmt.Fprintf(&body, "%s  %s\n", skill.Name, availableHarnesses(cfg.Settings.Harnesses, skill.Harnesses))
 		}
 	default:
+		states, err := inspectAuthentication(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		authentication := authenticationByName(states)
 		names := make([]string, 0, len(cfg.Servers))
 		for name := range cfg.Servers {
 			names = append(names, name)
@@ -194,6 +191,9 @@ func runCategory(ctx context.Context, category string, flags *flag.FlagSet, home
 		for _, name := range names {
 			server := cfg.Servers[name]
 			fmt.Fprintf(&body, "%s  %s  %s\n", name, server.Type, availableHarnesses(cfg.Settings.Harnesses, server.Harnesses))
+			if err := writeAuthenticationDetail(&body, authentication[name], "  "); err != nil {
+				return err
+			}
 		}
 	}
 	_, err = io.WriteString(output, body.String())
@@ -239,6 +239,17 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 		if err != nil {
 			return err
 		}
+		var states []serverAuthentication
+		var authenticationWarning string
+		cfg, err := config.Load(root)
+		if err != nil {
+			authenticationWarning = "Authentication status could not be inspected; run agentcfg validate to check the configuration."
+		} else {
+			states, err = inspectAuthentication(ctx, cfg)
+			if err != nil {
+				return err
+			}
+		}
 		if interactive && !asJSON {
 			var body strings.Builder
 			if !status.Running {
@@ -253,11 +264,24 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 				}
 				fmt.Fprintf(&body, "%s: %s, PID %d, %d client(s), %d pending\n", backend.Name, mode, backend.PID, backend.Clients, backend.Pending)
 			}
+			for _, state := range states {
+				fmt.Fprintf(&body, "\nMCP: %s\n", state.Name)
+				if err := writeAuthenticationDetail(&body, state.Summary, ""); err != nil {
+					return err
+				}
+			}
+			if authenticationWarning != "" {
+				fmt.Fprintln(&body, authenticationWarning)
+			}
 			return terminalNote(ctx, input, output, "MCP process status", body.String())
 		}
 		encoder := json.NewEncoder(output)
 		encoder.SetIndent("", "  ")
-		return encoder.Encode(status)
+		return encoder.Encode(struct {
+			broker.Status
+			Authentication        []serverAuthentication `json:"authentication,omitempty"`
+			AuthenticationWarning string                 `json:"authenticationWarning,omitempty"`
+		}{status, states, authenticationWarning})
 	case "stop":
 		if interactive && !yes {
 			confirmed, err := terminalConfirm(ctx, input, output, "Managed MCP processes will be closed. This does not alter user configuration.", "")
@@ -288,9 +312,16 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 			if interactive {
 				return tui.RunList(ctx, root, input, output)
 			}
-			return printInventory(cfg, output)
+			return printInventory(ctx, cfg, output)
 		}
 		message := fmt.Sprintf("Validated %d MCP servers, %d skills, %d harnesses.", len(cfg.Servers), len(cfg.Skills), len(cfg.Settings.Harnesses))
+		states, err := inspectAuthentication(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		if notices := authenticationNotices(states); notices != "" {
+			message += "\n" + notices
+		}
 		if interactive {
 			if err := terminalNote(ctx, input, output, "Configuration validation", message); err != nil {
 				return err
@@ -307,7 +338,12 @@ func inspectOrServe(ctx context.Context, command, root string, input io.Reader, 
 	}
 }
 
-func printInventory(cfg *config.Config, output io.Writer) error {
+func printInventory(ctx context.Context, cfg *config.Config, output io.Writer) error {
+	states, err := inspectAuthentication(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	authentication := authenticationByName(states)
 	var body strings.Builder
 	names := make([]string, 0, len(cfg.Servers))
 	for name := range cfg.Servers {
@@ -322,13 +358,16 @@ func printInventory(cfg *config.Config, output io.Writer) error {
 			sharing = "shared"
 		}
 		fmt.Fprintf(&body, "  %s  [%s, %s]\n", name, server.Type, sharing)
+		if err := writeAuthenticationDetail(&body, authentication[name], "    "); err != nil {
+			return err
+		}
 	}
 	fmt.Fprintln(&body, "Skills:")
 	for _, skill := range cfg.Skills {
 		fmt.Fprintf(&body, "  %s  %s\n", skill.Name, skill.Path)
 	}
 	fmt.Fprintln(&body, "Harnesses:", strings.Join(cfg.Settings.Harnesses, ", "))
-	_, err := io.WriteString(output, body.String())
+	_, err = io.WriteString(output, body.String())
 	return err
 }
 
@@ -363,6 +402,11 @@ func synchronize(ctx context.Context, flags *flag.FlagSet, root *string, args []
 	for _, change := range plan.Changes {
 		fmt.Fprintf(&changes, "%s: %s\n", change.Action, change.Path)
 	}
+	states, err := inspectAuthentication(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	changes.WriteString(authenticationNotices(states))
 	interactive := terminalPresentation(input, output, *plain)
 	if interactive {
 		title := "Sync preview"

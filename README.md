@@ -56,6 +56,27 @@ Opening `agentcfg config` before setup offers to run `init`. Use `agentcfg resto
 
 Use `agentcfg mcp`, `agentcfg skill` or `agentcfg harness` to jump directly to a section; plural aliases work too. `--plain` gives noninteractive output where supported.
 
+## Sign in to an MCP server
+
+OAuth login is manual by default. Known login requirements appear in `list`,
+`mcps`, `validate`, `sync`, `status` and the configuration menus as **login
+required**, with the command to run:
+
+```sh
+agentcfg auth login <name>
+agentcfg auth status <name>
+```
+
+For an HTTP MCP configured with just a URL, agentcfg can discover OAuth without
+editing `mcp.json`. Credentials are stored encrypted. To let a particular stdio
+connection open the browser and wait for consent, use
+`agentcfg connect --server <name> --auto-auth`; `--auto-auth=false` overrides a
+global opt-in. The client's own timeout still applies while sign-in is pending.
+See [login and connection options](docs/cli.md#oauth-login-and-connection-policy)
+and [OAuth settings](docs/configuration.md#oauth-for-http-mcp-servers).
+
+After upgrading the broker, run `agentcfg stop` and reconnect your MCP clients.
+
 ## Browse the configuration
 
 <img src="docs/demo/agentcfg-list.gif" width="850" alt="Animated agentcfg list browsing synthetic Vercel skills and Context7 and Playwright MCP entries" />

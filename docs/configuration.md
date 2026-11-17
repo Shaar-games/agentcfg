@@ -7,7 +7,7 @@
 | Location relative to root | Purpose |
 | --- | --- |
 | `.agentcfg/mcp.json` | Explicit canonical MCP servers and optional agentcfg fields |
-| `.agentcfg/agentcfg.json` | Selected harnesses, runtime durations and named overrides |
+| `.agentcfg/agentcfg.json` | Selected harnesses, runtime durations, OAuth interaction policy and named overrides |
 | `.agentcfg/skills/<skill>/SKILL.md` | Standalone skills |
 | `.agentcfg/plugins/<folder>/plugin.json` | Required portable plugin manifest |
 | `.agentcfg/plugins/<folder>/mcp.json` | Optional portable MCP component |
@@ -119,7 +119,7 @@ The root object accepts `mcpServers` and an optional `$schema`. If present, the 
 | Transport | Required fields | Optional fields |
 | --- | --- | --- |
 | `stdio` | `command` | `args`, `env`, `cwd` |
-| `streamable-http` | `url` | `headers` |
+| `streamable-http` | `url` | `headers`, canonical `oauth` settings |
 
 An omitted canonical `type` is inferred from `command` or, if no command is supplied, `url`. A plugin must declare its type explicitly. Fields belonging to another transport and other unknown fields invalidate that entry. Legacy `sse` entries produce a warning and are skipped; this does not prohibit SSE responses belonging to Streamable HTTP.
 
@@ -138,6 +138,9 @@ The default settings are:
     "idleTimeout": "5m",
     "requestTimeout": "5m"
   },
+  "oauth": {
+    "autoOpenBrowser": false
+  },
   "serverOverrides": {}
 }
 ~~~
@@ -145,6 +148,12 @@ The default settings are:
 `antigravity` is also accepted and targets `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/`, the Google Antigravity personal layout. VS Code has no supported user-scope adapter: `agentcfg init --harnesses vscode` refuses this selection. Duplicate harness names are removed while retaining their order. Unknown names are errors.
 
 Runtime durations use Go duration syntax, such as `30s` or `5m`, and must be positive. An omitted field retains its default.
+
+`oauth.autoOpenBrowser` controls whether `agentcfg connect` may open a browser
+when an upstream HTTP MCP needs OAuth. It defaults to `false`;
+`agentcfg auth login <name>` is the normal manual workflow. An explicit `connect --auto-auth` or
+`connect --auto-auth=false` overrides the setting for that connection. This
+global interaction setting is separate from a server's OAuth client definition.
 
 The global `harnesses` list selects sync destinations. An explicit empty global list selects none. A server or skill filter narrows those destinations. An omitted filter allows all selected harnesses. For skills, `metadata.harness: none` represents an explicitly empty selection. Direct CLI connections with no harness name are allowed by `config.Allows`; these filters are routing preferences, not authorization controls.
 
@@ -267,6 +276,55 @@ Lexical path checks reject package traversal during this load. They do not sandb
 URLs must be absolute HTTP(S), have a valid host/port, and contain no fragment. Literal URL credentials and HTTP endpoints are accepted; native import warns without blocking. IPv6 literals use brackets. Empty/invalid ports, malformed authorities and unsupported URL schemes invalidate only their entry. OAuth issuer, metadata and callback URLs retain their separate validation requirements.
 
 Headers are literal string maps with valid HTTP names and values. Duplicate names ignoring case and control-character injection are rejected. Portable headers are visible package data and should not contain credentials. Agent Plugins 1.0.0 defines no portable OAuth or credential-reference fields; the loader does not perform authentication. See the [MCP component specification](https://agent-plugins.org/plugin-authors/mcp-servers).
+
+## OAuth for HTTP MCP servers
+
+An HTTPS MCP entry with just `url` can use OAuth discovery when authentication
+is required. Loopback HTTP is also supported for local endpoints. Agentcfg
+derives a stable temporary callback address and uses dynamic client registration
+when supported by the provider. These defaults are applied at runtime; login,
+connection and status commands do not add an `oauth` block to `mcp.json`.
+Public URL-only MCPs continue to work without a credential store. Static authorization
+headers and URL credentials keep their existing authentication configuration.
+
+Use `agentcfg auth login <name>` before connecting, or opt into browser login
+with `connect --auto-auth` or the global setting above. The client-facing
+transport remains stdio. See [CLI login behavior and local states](cli.md#oauth-login-and-connection-policy)
+for timeout, callback and status details.
+
+If the provider requires explicit client settings, put `oauth` on a canonical
+server or in its `serverOverrides` entry. Portable plugin MCP files keep their
+standard schema. For example, an explicit callback with dynamic registration is:
+
+~~~json
+{
+  "serverOverrides": {
+    "documentation": {
+      "oauth": {
+        "redirectUrl": "http://127.0.0.1:55432/oauth/callback",
+        "dynamicRegistration": true
+      }
+    }
+  }
+}
+~~~
+
+An explicit OAuth definition requires `redirectUrl` and a `clientId`,
+`clientMetadataUrl` or `dynamicRegistration: true`. Optional `scopes` request
+specific permissions, and `account` separates saved grants. A confidential
+client uses `clientSecretEnv` with its `clientId` and pinned `issuer`; secrets
+are read from the named environment variable. OAuth cannot be combined with
+literal authorization headers or URL credentials. Existing explicit settings
+and saved grants are used from the first request, even if the server also accepts
+anonymous access.
+
+Credentials and recorded login requirements are encrypted under
+`~/.agentcfg/credentials/oauth/`, separately from canonical definitions. Windows
+uses per-user DPAPI by default. Linux and macOS require `AGENTCFG_OAUTH_KEY`,
+the base64 encoding of 32 random bytes. Use the same key environment for login
+and the process that starts the broker. Native harness OAuth caches are not
+imported. Local status inspection never refreshes or validates a token remotely;
+a storage error is reported separately from a login requirement.
 
 ## Skills
 

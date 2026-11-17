@@ -10,13 +10,16 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"agentcfg/internal/auth"
+	"agentcfg/internal/broker"
 	"agentcfg/internal/config"
 
 	"github.com/charmbracelet/huh"
@@ -24,8 +27,8 @@ import (
 )
 
 // Authentication changes only the encrypted account-scoped credential store
-// under the user's home. Login is explicitly interactive and never performed
-// automatically by the broker or the TUI.
+// under the user's home. This command also supports manual callbacks; connect
+// uses an opt-in browser fetcher without reading MCP stdin.
 func runAuth(ctx context.Context, home string, args []string, input io.Reader, output, diagnostics io.Writer) error {
 	if len(args) < 2 || (args[0] != "login" && args[0] != "status" && args[0] != "logout") {
 		return errors.New("usage: agentcfg auth <login|status|logout> <server> [--no-browser]")
@@ -56,17 +59,19 @@ func runAuth(ctx context.Context, home string, args []string, input io.Reader, o
 		return fmt.Errorf("unknown MCP server %q", name)
 	}
 	server.Name = name
+	original := server
+	server = auth.InteractiveServer(server)
 	if server.OAuth == nil {
 		return fmt.Errorf("MCP server %q does not have OAuth configuration", name)
 	}
 	opts := auth.Options{Home: home}
 	switch operation {
 	case "status":
-		state, err := auth.Inspect(ctx, server, opts)
+		state, summary, err := auth.InspectWithSummary(ctx, original, opts)
 		if err != nil {
 			return err
 		}
-		return presentAuthStatus(ctx, input, output, name, state, interactive, *asJSON)
+		return presentAuthStatus(ctx, input, output, name, state, summary, interactive, *asJSON)
 	case "logout":
 		if interactive && !*yes {
 			confirmed, err := terminalConfirm(ctx, input, output, "Forget local OAuth credentials?", "Only local encrypted records are removed. Remote tokens are not revoked.")
@@ -95,15 +100,21 @@ func runAuth(ctx context.Context, home string, args []string, input io.Reader, o
 	}
 }
 
-func presentAuthStatus(ctx context.Context, input io.Reader, output io.Writer, name string, state auth.Status, interactive, asJSON bool) error {
+func presentAuthStatus(ctx context.Context, input io.Reader, output io.Writer, name string, state auth.Status, authentication auth.Summary, interactive, asJSON bool) error {
 	// An explicit machine-readable format wins even when stdout is a terminal.
 	if asJSON {
 		encoder := json.NewEncoder(output)
 		encoder.SetIndent("", "  ")
-		return encoder.Encode(state)
+		return encoder.Encode(struct {
+			auth.Status
+			Authentication auth.Summary `json:"authentication"`
+		}{state, authentication})
 	}
 	var summary strings.Builder
-	fmt.Fprintf(&summary, "MCP: %s\nAccount: %s\nAuthenticated: %t\nRefresh available: %t\n", name, state.Account, state.Authenticated, state.CanRefresh)
+	fmt.Fprintf(&summary, "MCP: %s\nAccount: %s\nLocal access token unexpired: %t\nRefresh token available: %t\n", name, state.Account, state.Authenticated, state.CanRefresh)
+	if err := writeAuthenticationDetail(&summary, authentication, ""); err != nil {
+		return err
+	}
 	if !state.Expiry.IsZero() {
 		fmt.Fprintf(&summary, "Expires: %s\n", state.Expiry.Format(time.RFC3339))
 	}
@@ -122,28 +133,104 @@ func authorizationCodeFetcher(redirect string, input io.Reader, output io.Writer
 }
 
 func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output io.Writer, noBrowser, interactive bool) sdkauth.AuthorizationCodeFetcher {
+	return authorizationCodeFetcherWithOpener(redirect, input, output, noBrowser, interactive, openBrowser)
+}
+
+// A browser failure has a local, fixed diagnostic. Its cause remains available
+// for classification, but is not printed: OS/openers can include callback URLs.
+type oauthBrowserError struct {
+	message string
+	cause   error
+}
+
+func (e *oauthBrowserError) Error() string { return e.message }
+func (e *oauthBrowserError) Unwrap() error { return e.cause }
+
+// connectAuthorizationCodeFetcher handles browser interaction in the client
+// process. Diagnostics must be stderr: stdin/stdout belong exclusively to MCP.
+// The opener is passed explicitly so tests never launch a real browser.
+func connectAuthorizationCodeFetcher(diagnostics io.Writer, opener func(string) error) func(context.Context, string, *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
+	return func(ctx context.Context, redirect string, args *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
+		return fetchConnectAuthorization(ctx, args, diagnostics, authorizationCodeFetcherWithOpener(redirect, nil, diagnostics, false, false, opener))
+	}
+}
+
+func connectAuthorizationOptions(autoOpenBrowser bool, diagnostics io.Writer, opener func(string) error) broker.ConnectOptions {
+	if !autoOpenBrowser {
+		return broker.ConnectOptions{}
+	}
+	return broker.ConnectOptions{AuthorizationCodeFetcher: connectAuthorizationCodeFetcher(diagnostics, opener)}
+}
+
+func fetchConnectAuthorization(ctx context.Context, args *sdkauth.AuthorizationArgs, diagnostics io.Writer, fetch sdkauth.AuthorizationCodeFetcher) (*sdkauth.AuthorizationResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	result, err := fetch(ctx, args)
+	if err != nil && diagnostics != nil {
+		message := "OAuth sign-in did not complete; retry the MCP connection or use agentcfg auth login <server>."
+		var browserError *oauthBrowserError
+		switch {
+		case errors.Is(err, context.Canceled):
+			message = "OAuth sign-in was cancelled."
+		case errors.Is(err, context.DeadlineExceeded):
+			message = "OAuth sign-in timed out; retry the MCP connection."
+		case errors.As(err, &browserError):
+			message = browserError.message
+		}
+		_, _ = fmt.Fprintln(diagnostics, message)
+	}
+	return result, err
+}
+
+func authorizationCodeFetcherWithOpener(redirect string, input io.Reader, output io.Writer, noBrowser, interactive bool, opener func(string) error) sdkauth.AuthorizationCodeFetcher {
+	if output == nil {
+		output = io.Discard
+	}
 	return func(ctx context.Context, args *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if args == nil || args.URL == "" {
-			return nil, errors.New("OAuth authorization endpoint was not provided")
+			return nil, &oauthBrowserError{message: "OAuth provider did not return an authorization URL."}
 		}
 		authURL, err := url.Parse(args.URL)
-		if err != nil || authURL.User != nil || authURL.Fragment != "" || (authURL.Scheme != "https" && !isLoopbackURL(authURL)) {
-			return nil, errors.New("OAuth authorization URL must be HTTPS or loopback HTTP")
+		if err != nil || authURL.Hostname() == "" || authURL.User != nil || authURL.Fragment != "" || authURL.Opaque != "" ||
+			(authURL.Scheme != "https" && !(authURL.Scheme == "http" && isLoopbackURL(authURL))) {
+			return nil, &oauthBrowserError{message: "OAuth authorization URL must be HTTPS or loopback HTTP."}
+		}
+		query, err := url.ParseQuery(authURL.RawQuery)
+		if err != nil || len(query["state"]) != 1 || query.Get("state") == "" {
+			return nil, &oauthBrowserError{message: "OAuth authorization URL requires one nonempty state."}
 		}
 		redirectURL, err := url.Parse(redirect)
-		if err != nil {
-			return nil, fmt.Errorf("invalid configured OAuth redirect URI: %w", err)
+		if err != nil || redirectURL.Hostname() == "" || redirectURL.User != nil || redirectURL.Fragment != "" || redirectURL.Opaque != "" ||
+			redirectURL.RawQuery != "" || redirectURL.ForceQuery ||
+			(redirectURL.Scheme != "https" && !(redirectURL.Scheme == "http" && isLoopbackURL(redirectURL))) {
+			return nil, &oauthBrowserError{message: "The configured OAuth redirect URI is invalid."}
 		}
-		var listener net.Listener
+		port, portErr := strconv.Atoi(redirectURL.Port())
+		loopbackCallback := isLoopbackURL(redirectURL) && redirectURL.Scheme == "http" && portErr == nil && port > 0 && port <= 65535
+		if input == nil && !loopbackCallback {
+			return nil, &oauthBrowserError{message: "Automatic OAuth login requires a loopback HTTP redirect with a nonzero port; use agentcfg auth login <server> for a manual callback."}
+		}
+		if !noBrowser && opener == nil {
+			return nil, &oauthBrowserError{message: "OAuth browser opener is unavailable; use agentcfg auth login <server> --no-browser."}
+		}
 		var server *http.Server
 		var received chan string
-		if isLoopbackURL(redirectURL) && redirectURL.Scheme == "http" && redirectURL.Port() != "" {
-			if listener, err = net.Listen("tcp", redirectURL.Host); err == nil {
+		var serveResult chan error
+		if loopbackCallback {
+			var listenConfig net.ListenConfig
+			listener, listenErr := listenConfig.Listen(ctx, "tcp", redirectURL.Host)
+			if listenErr != nil && input == nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				return nil, &oauthBrowserError{message: "OAuth callback port is unavailable; close any other sign-in window or retry the MCP connection.", cause: listenErr}
+			}
+			if listenErr == nil {
 				received = make(chan string, 1)
-				expectedState := authURL.Query().Get("state")
+				expectedState := query.Get("state")
 				path := redirectURL.EscapedPath()
 				if path == "" {
 					path = "/"
@@ -157,7 +244,8 @@ func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output i
 						http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 						return
 					}
-					if expectedState != "" && r.URL.Query().Get("state") != expectedState {
+					query, err := url.ParseQuery(r.URL.RawQuery)
+					if err != nil || len(query["state"]) != 1 || query.Get("state") != expectedState {
 						http.Error(w, "OAuth state mismatch", http.StatusBadRequest)
 						return
 					}
@@ -171,21 +259,43 @@ func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output i
 						http.Error(w, "Authorization already received", http.StatusConflict)
 					}
 				})
-				server = &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-				go func() { _ = server.Serve(listener) }()
+				server = &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
+				serveResult = make(chan error, 1)
+				go func() { serveResult <- server.Serve(listener) }()
+				stopCancellation := context.AfterFunc(ctx, func() { _ = server.Close() })
 				defer func() {
+					stopCancellation()
+					// Serve may not have registered the listener when display,
+					// browser startup or cancellation fails immediately.
+					defer listener.Close()
 					shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 					defer cancel()
-					_ = server.Shutdown(shutdown)
+					if err := server.Shutdown(shutdown); err != nil {
+						_ = server.Close()
+					}
 				}()
 			}
 		}
-		if _, err := fmt.Fprintf(output, "Open this authorization URL in your browser:\n%s\n", args.URL); err != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if input == nil && !noBrowser {
+			_, err = fmt.Fprintln(output, "Opening your browser for OAuth sign-in.")
+		} else {
+			_, err = fmt.Fprintf(output, "Open this authorization URL in your browser:\n%s\n", args.URL)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if !noBrowser {
-			if err := openBrowser(args.URL); err != nil {
-				if _, writeErr := fmt.Fprintf(output, "Browser could not be opened automatically (%v). Open the URL manually.\n", err); writeErr != nil {
+			if err := opener(args.URL); err != nil {
+				if input == nil {
+					return nil, &oauthBrowserError{message: "OAuth browser could not be opened; use agentcfg auth login <server> --no-browser for manual sign-in.", cause: err}
+				}
+				if _, writeErr := fmt.Fprintln(output, "Browser could not be opened automatically. Open the URL manually."); writeErr != nil {
 					return nil, writeErr
 				}
 			}
@@ -193,7 +303,15 @@ func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output i
 		if received != nil {
 			select {
 			case callback := <-received:
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				return auth.ParseAuthorizationResponse(redirect, callback)
+			case err := <-serveResult:
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				return nil, &oauthBrowserError{message: "OAuth callback listener stopped before sign-in completed; retry the MCP connection.", cause: err}
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
@@ -216,8 +334,7 @@ func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output i
 		if _, err := fmt.Fprintln(output, "Paste the complete final redirected URL here and press Enter:"); err != nil {
 			return nil, err
 		}
-		// Match the parser's URL size limit before allocating an unbounded line.
-		response, err := bufio.NewReader(io.LimitReader(input, (16<<10)+2)).ReadString('\n')
+		response, err := readManualAuthorizationResponse(ctx, input)
 		if err != nil && len(response) == 0 {
 			return nil, fmt.Errorf("read OAuth callback URL: %w", err)
 		}
@@ -231,15 +348,46 @@ func authorizationCodeFetcherWithForm(redirect string, input io.Reader, output i
 	}
 }
 
+// The terminal login owns its input for this operation. On cancellation it can
+// release a blocked pipe or stdin; a successful read leaves the input open.
+// Automatic stdio authorization never enters this manual-input path.
+func readManualAuthorizationResponse(ctx context.Context, input io.Reader) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	type readResult struct {
+		line string
+		err  error
+	}
+	completed := make(chan readResult, 1)
+	go func() {
+		// Match the parser's URL size limit before allocating an unbounded line.
+		line, err := bufio.NewReader(io.LimitReader(input, (16<<10)+2)).ReadString('\n')
+		completed <- readResult{line, err}
+	}()
+	select {
+	case result := <-completed:
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return result.line, result.err
+	case <-ctx.Done():
+		if closer, ok := input.(io.Closer); ok {
+			_ = closer.Close()
+		}
+		return "", ctx.Err()
+	}
+}
+
 func isLoopbackURL(u *url.URL) bool {
 	if u == nil || u.User != nil {
 		return false
 	}
-	switch strings.ToLower(u.Hostname()) {
-	case "localhost", "127.0.0.1", "::1":
+	if strings.EqualFold(u.Hostname(), "localhost") {
 		return true
 	}
-	return false
+	address, err := netip.ParseAddr(u.Hostname())
+	return err == nil && address.IsLoopback()
 }
 
 func openBrowser(rawURL string) error {

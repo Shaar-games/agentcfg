@@ -70,6 +70,7 @@ func TestHTTPOAuthDiagnostics(t *testing.T) {
 						w.WriteHeader(tc.status)
 						_, _ = w.Write([]byte(`{"error":"provider-body-secret"}`))
 					}))
+					transport.serverName = "fixture with 'quotes'"
 					if !tc.staticAuth {
 						transport.headers.Del("Authorization")
 					}
@@ -130,6 +131,10 @@ func TestHTTPOAuthDiagnostics(t *testing.T) {
 					for _, want := range tc.wantMessage {
 						if !strings.Contains(rpcError.Message, want) {
 							t.Errorf("message %q does not contain %q", rpcError.Message, want)
+						}
+						wantNamedLogin := tc.mode == "token-login" || tc.mode == "authorize-login" || tc.mode == "invalid-grant"
+						if strings.Contains(rpcError.Message, auth.LoginCommandFor(transport.serverName)) != wantNamedLogin {
+							t.Errorf("concrete login command must appear only for a typed login requirement: %q", rpcError.Message)
 						}
 					}
 					encoded, err := json.Marshal(response)
